@@ -3,47 +3,61 @@
 Running **HorizonXI** (Final Fantasy XI private server) natively on Apple Silicon macOS under
 Wine — no virtual machine.
 
-> **Status: NOT PLAYABLE YET.** Login, server connect, Ashita injection and the full DAT load all
-> work. The game then exits silently before it creates its window. Nothing here is an install
-> guide yet, and it will not be published as one until a character is actually standing in-game.
-> What *is* here is a research record: every fix that was genuinely required, and every hypothesis
-> that has been tested and disproven, so the next person does not re-tread it.
+> **Status: IT RUNS.** As of 2026-08-08 Final Fantasy XI renders natively on Apple Silicon
+> macOS under Wine — window created, Direct3D8 device created, `GameLoaded`, input devices
+> bound, music streaming through the DAT overlays. As far as a full GitHub sweep can tell, this
+> is the first time that has happened: every other FFXI-on-a-non-Windows-machine project is Linux.
+>
+> Remaining: the character-select screen needs one real keypress. Synthetic input (CGEvent) does
+> not reach wine-hosted windows on macOS, so that single step cannot be scripted.
 
 Tested on: MacBook Pro M1, 8GB, macOS 26.5, Wine 10.0 (Sikarugir), HorizonXI client 1.9.0,
 Ashita 4.3.1.2.
 
+## Quick start
+
+```sh
+./scripts/install.sh /path/to/wrapper.app        # configure the prefix
+"/path/to/Play HorizonXI.command"                # launch
+```
+
+Assumes the HorizonXI client is already extracted to `<prefix>/drive_c/HorizonXI` (~27GB).
+
 ## Why this repo exists
 
-As of 2026-08-08 a GitHub search turns up **zero** prior attempts to run FFXI or HorizonXI on
-macOS. Everything that exists is Linux:
+A GitHub sweep — ~318 FFXI-related repos, the Windower / AshitaXI / HorizonFFXI / LandSandBoat /
+EdenServer / CatsEyeXI org listings, and code search for `FFXiMain.dll`, `horizon-loader.exe`,
+`xiloader`+`WINEPREFIX` — turns up **zero** prior attempts to run FFXI on macOS:
 
+- `Windower/Lumoria` — Windower's official FFXI installer/launcher. Vala + Flatpak, **Linux only**
 - <https://gitlab.com/MattyGWS/HorizonXI-Linux-Installation> — the wiki's official pointer
-- <https://github.com/ChrisTitusTech/ashita-ffxi> — the `winefix` + dgVoodoo2 recipe
 - `sheik/horizonxi-linux`, `sarca571ca/horizonxi-lutris`, `TeamLinux01/HorizonXI-on-Deck`
+- `jondwillis/kuluu-ffxi` — a Rust/Bevy client rebuild *on* macOS, but it drives the real client
+  inside Parallels
 
-The macOS-specific problems (SIP stripping `DYLD_*`, TCC on removable volumes, the wrapper's
-dylib rpath) are not covered by any of them.
+The macOS-specific problems below are not covered by any of them.
 
-## Current failure signature
+## What was actually wrong
+
+The symptom was a silent exit: login succeeded, the server connected, every DAT archive loaded,
+and then the process closed in ~2s with no error, no crash dump and exit code 0. It never created
+a window and never made a single d3d8 call, so it looked like a graphics problem. It was not.
+
+**The PlayOnline registry layout is counter-intuitive, and every reasonable guess at it is wrong.**
+HorizonXI ships the correct layout in `SquareEnix/Switch_Horizon.bat`:
 
 ```
-[..] Successfully logged in as danielalanbates!
-[..] Connected to server!
-[..] Closing...
+HKLM\SOFTWARE\WOW6432Node\PlayOnlineUS\InstallFolder
+    0001 = ...\SquareEnix\FINAL FANTASY XI      ← the GAME dir, not PlayOnlineViewer
+    1000 = ...\SquareEnix\PlayOnlineViewer      ← POL goes in 1000
+HKLM\SOFTWARE\WOW6432Node\PlayOnlineUS\Interface
+    0001 = "0"                                   ← a string, not an empty key
 ```
 
-No error, no crash dump, exit code 0. What the instrumented traces establish:
-
-| Question | Answer | How |
-| --- | --- | --- |
-| Is it Ashita? | **No.** Identical failure with Ashita entirely removed | launched `horizon-loader.exe` directly |
-| Is it a crash? | **No.** Clean teardown, every DLL gets an orderly `PROCESS_DETACH` | `WINEDEBUG=+seh,+process` — no unhandled exception |
-| Does it reach graphics? | **No.** Zero `d3d8` calls, and the game never creates a window | `WINEDEBUG=+d3d,+d3d8,+wgl,+win` — only IME/DDE/OLE helper windows appear |
-| How far does it get? | Loads `polcore.dll`, `FFXi.dll`, `FFXiMain.dll`; enumerates and opens every DAT archive `ROM` through `ROM10` | `WINEDEBUG=+file` |
-| What is the last thing it does? | Opens and reads `patch.ver`, probes `HKLM\SOFTWARE\PlayOnlineUS\Interface`, then `UnregisterClassA("FFXiClass")` and exits | `WINEDEBUG=+relay` with `RelayFromInclude=FFXiMain.dll;polcore.dll;ffxi.dll` |
-
-`ROM11`–`ROM13` are probed and missing, but they are **not** in the client's own `file.txt`
-manifest, so that path is normal and is not the bug.
+Putting `PlayOnlineViewer` in `0001` — the obvious reading, and what the prefix had — makes
+`FFXiMain.dll` stop loading entirely. Combined with writing to the wrong registry view (below)
+and launching xiloader directly instead of through Ashita, the game aborted inside its own init
+before window setup.
 
 ## Fixes this project found (macOS-specific, not in any Linux guide)
 
@@ -51,31 +65,51 @@ manifest, so that path is normal and is not the bug.
    resolving to `SharedSupport/`, but the dylibs ship in `Contents/Frameworks/`. The usual
    workaround is exporting `DYLD_FALLBACK_LIBRARY_PATH`, which is a trap — see #2. The correct
    fix is to symlink the frameworks into the path the binary actually searches:
-   see [`scripts/fix-wine-rpath.sh`](scripts/fix-wine-rpath.sh).
+   [`scripts/fix-wine-rpath.sh`](scripts/fix-wine-rpath.sh).
 2. **`nohup` and `/bin/sh` are SIP-protected and strip every `DYLD_*` variable.** Any launcher
    built on `DYLD_FALLBACK_LIBRARY_PATH` breaks the moment it is backgrounded or wrapped in a
-   shell script — silently, with a `dyld: Library not loaded` that never reaches the user.
-   `winetricks` is a `#!/bin/sh` script and hits this. Fix #1 removes the dependency entirely.
-3. **Wine resolves a relative exe name against `C:\windows\system32`, not the cwd.** Always pass
+   shell script — silently. `winetricks` is `#!/bin/sh` and hits exactly this. Fix #1 removes the
+   dependency on the variable entirely.
+3. **`reg.exe` writes the 64-bit registry view.** The 32-bit game reads
+   `HKLM\SOFTWARE\Wow6432Node\...`, so a prefix configured with plain `wine reg add` leaves the
+   game seeing nothing at all. Use `C:\windows\syswow64\reg.exe` — or write both views.
+4. **FFXI is three COM in-proc servers, not one** — `FFXi.FFXiEntry`, `FFXiMain.GameMain`,
+   `POLCore.POLCoreCom`. `regsvr32` **needs `/s`**: without it, `FFXi.dll`'s `DllRegisterServer`
+   opens a GUI dialog, and synthetic input cannot reach wine windows, so it hangs forever with
+   nothing to click. [`scripts/export-ffxi-com.py`](scripts/export-ffxi-com.py) lifts the
+   registration out of a working prefix if you need to clone it.
+5. **Launch through `Ashita-cli.exe`, not `xiloader` directly.** With the correct registry but
+   launched xiloader-direct, the game still exits silently.
+6. **Wine resolves a relative exe name against `C:\windows\system32`, not the cwd.** Always pass
    the absolute `C:\...` path.
-4. **`reg.exe` writes to the 64-bit registry view.** A 32-bit game reads
-   `HKLM\SOFTWARE\Wow6432Node\...`. Registry set up with the 64-bit `reg.exe` is invisible to
-   FFXI — use `C:\windows\syswow64\reg.exe`.
-5. **`DONTTOUCH_Registry.exe` accepts NSIS `/S`** and completes silently. No GUI click needed.
-6. **A wine prefix cannot live on exFAT**, and on a removable volume every process touching it
-   needs the TCC "Removable Volumes" grant — which `launchd`-spawned jobs do not have.
-7. **Synthetic input (CGEvent) does not reach wine-hosted windows** on this Mac, so any install
-   step that needs a GUI click cannot be automated. Prefer silent/CLI equivalents.
+7. **A wine prefix cannot live on exFAT**, and on a removable volume every process touching it
+   needs the TCC "Removable Volumes" grant — which `launchd`-spawned jobs never have. Run it from
+   a terminal with Full Disk Access.
+8. **Synthetic input (CGEvent) does not reach wine-hosted windows.** Any step needing a real
+   keypress or click cannot be automated — prefer silent/CLI equivalents everywhere else.
+
+## Things that look like the bug and are not
+
+Recorded so nobody re-treads them — all tested and disproven, with the instrumented evidence in
+[`docs/FINDINGS.md`](docs/FINDINGS.md):
+
+Ashita and its addons · `gdiplus` · sound init · the `patch.ver` version check · missing
+`ROM11`–`ROM13` (not in the client's own `file.txt` manifest) · the Wine version (9.0 CX24 and
+10.0 Sikarugir behave identically) · new-WoW64 vs a true 32-bit prefix · DAT corruption (170
+size mismatches vs `file.txt` are intentional Horizon overrides, byte-identical to a working
+Windows install) · `dgVoodoo2` and the `winefix` addon, which the Linux guides recommend —
+`winefix` ships with the client and its own description says it only fixes a micro-stutter.
 
 ## Roadmap
 
 - [x] Login and server connection
 - [x] Ashita injection, POL plugins, DAT overlays, macro import from a Windows install
-- [ ] **Game window opens** ← blocking everything below
-- [ ] `install.sh` — bare prefix to running game, no GUI
+- [x] **Game window opens, D3D8 device created, game loads**
+- [x] `install.sh` — bare prefix to running game, no GUI
+- [ ] Character select automated (blocked: needs real input into a wine window)
 - [ ] `HorizonXI-on-Mac.app` — SwiftUI installer/launcher, modelled on
       [`marzent/XIV-on-Mac`](https://github.com/marzent/XIV-on-Mac)
-- [ ] Notarised download, install guide, macOS entry on the HorizonXI wiki
+- [ ] Frame-rate tuning, notarised download, macOS entry on the HorizonXI wiki
 
 ## Licence
 
