@@ -159,6 +159,40 @@ obvious bug. It is not: writing `InstallFolder` into the 32-bit view made things
 `FFXiMain.dll` then stopped loading at all. `FFXi.dll` evidently prefers that value and cannot
 resolve from it. Reverted; baseline restored and re-verified. Do not "fix" this.
 
+### A4 executed — the engine is not the variable
+
+A **second, independent prefix** was built from scratch on the other engine already on disk:
+`wine.cx24bak` = **Wine 9.0 (CrossOver 24 sources, free/open — not the paid CrossOver app)**,
+at `SharedSupport/prefixcx24n`. The 27GB client was *symlinked*, not copied, so this cost 320MB.
+
+Building it surfaced something the hand-patched `prefix10` had hidden: **FFXI is three COM
+in-proc servers, not one.** A clean prefix fails loudly and in sequence —
+
+```
+Failed to initialize instance of FFxi!   → CLSID {989D790D-…} = FFXi.FFXiEntry     (FFXi.dll)
+                                         → CLSID {1027DC46-…} = FFXiMain.GameMain  (FFXiMain.dll)
+                                         → CLSID {3501F5DD-…} = POLCore.POLCoreCom (polcore.dll)
+```
+
+`regsvr32` on `FFXi.dll` **hangs** (its `DllRegisterServer` puts up a GUI dialog, and synthetic
+input cannot reach wine windows — FINDINGS §7.2). The working method is to lift the 59 relevant
+registry sections out of `prefix10/system.reg` and import them; a script that does this is the
+first real piece of the O2 installer.
+
+With all three registered, `prefixcx24n` reaches **exactly the same silent close** as `prefix10`.
+
+> **Wine 9.0 (CX24) and Wine 10.0 (Sikarugir) fail identically.** The engine, the engine version,
+> and the accumulated hand-patching of `prefix10` are all eliminated in one shot. The failure also
+> reproduces in a prefix built clean, which means it is *reproducible* — the A4/M0 requirement.
+
+Also checked and clean: `PlayOnlineViewer/usr/` (the POL account/session blobs) is byte-identical
+to the VM backup — no missing session state. `polcore`'s 45 `GetCurrentHwProfileA` calls (a wine
+**semi-stub**) all return TRUE and all occur *before* the abort point, so the stub is not the
+cause; nor is polcore's `Iphlpapi` interface-stats probe, which resolves every symbol it asks for.
+
+**Daniel has ruled out CrossOver (the paid product).** A5 is struck from the plan. The free
+CX-sourced engine above is the substitute and it has now been tried.
+
 ### Where that leaves it
 
 The failure is now bounded much more tightly than before: FFXI finishes loading all its game data,
