@@ -3,13 +3,14 @@
 Running **HorizonXI** (Final Fantasy XI private server) natively on Apple Silicon macOS under
 Wine — no virtual machine.
 
-> **Status: IT RUNS.** As of 2026-08-08 Final Fantasy XI renders natively on Apple Silicon
-> macOS under Wine — window created, Direct3D8 device created, `GameLoaded`, input devices
-> bound, music streaming through the DAT overlays. As far as a full GitHub sweep can tell, this
-> is the first time that has happened: every other FFXI-on-a-non-Windows-machine project is Linux.
+> **Status: PLAYABLE.** As of 2026-08-08, Final Fantasy XI runs natively on Apple Silicon macOS
+> under Wine — logged in, in-world, chat live, Ashita macros bound. As far as a full GitHub sweep
+> can tell this is the first time that has happened: every other FFXI-on-a-non-Windows-machine
+> project is Linux.
 >
-> Remaining: the character-select screen needs one real keypress. Synthetic input (CGEvent) does
-> not reach wine-hosted windows on macOS, so that single step cannot be scripted.
+> ![Murn in Selbina](docs/img/murn-in-selbina.png)
+>
+> Level 75 Ninja standing on the dock in Selbina, no virtual machine involved.
 
 Tested on: MacBook Pro M1, 8GB, macOS 26.5, Wine 10.0 (Sikarugir), HorizonXI client 1.9.0,
 Ashita 4.3.1.2.
@@ -106,7 +107,7 @@ Windows install) · `dgVoodoo2` and the `winefix` addon, which the Linux guides 
 - [x] Ashita injection, POL plugins, DAT overlays, macro import from a Windows install
 - [x] **Game window opens, D3D8 device created, game loads**
 - [x] `install.sh` — bare prefix to running game, no GUI
-- [ ] Character select automated (blocked: needs real input into a wine window)
+- [x] Character select and login — driven end to end from the host
 - [ ] `HorizonXI-on-Mac.app` — SwiftUI installer/launcher, modelled on
       [`marzent/XIV-on-Mac`](https://github.com/marzent/XIV-on-Mac)
 - [ ] Frame-rate tuning, notarised download, macOS entry on the HorizonXI wiki
