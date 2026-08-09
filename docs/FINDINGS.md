@@ -84,6 +84,89 @@ explicitly described upstream as being there "to prevent crashes."
 | 16 | Electron `Error: open EBADF` at `process.getStderr` | **our bug** — Electron's stderr was piped through `grep` | redirect to a real file |
 | 17 | launcher 2.0.0 `TypeError: Use delete() to clear values` | upstream bug: `launcherStorage` migration `0.0.0 → 1.1.4` calls `set()` with `undefined` on a fresh profile | writes version `2.0.0` before dying, so it only breaks on **first** run; also avoided by using 2.0.1 |
 
+## 4b. Session 2026-08-08 (evening) — instrumented run, executed
+
+Everything below was actually run, not planned.
+
+**A0 done.** `VM-CONFIG-BACKUP/` (1016 files) is now mirrored to
+`iCloud/Backups/HorizonXI-VM-CONFIG-BACKUP` and `brctl download`ed. File count verified equal on
+both sides. It is no longer single-copy.
+
+**Fix 18 — the rpath bug is now fixed at the source, not worked around.** 94 dylibs from
+`siku.app/Contents/Frameworks/` are symlinked into `SharedSupport/wine/lib/`, which is where the
+binaries' rpath actually points. Verified: `wine cmd /c echo %AppData%` now works with **no
+`DYLD_*` set at all**. This kills the `nohup`/SIP footgun permanently (FINDINGS §7.3) and is a
+prerequisite for O2 — a launcher cannot rely on an env var that SIP deletes. It is also what
+unblocked `winetricks`, which is `#!/bin/sh` and was hitting exactly this.
+
+**A1.1 done — `gdiplus` installed** (winetricks, native override). **No change.** The §3
+hypothesis that gdiplus is the silent-exit cause is now **disproven**.
+
+**A3.1 done — Ashita is exonerated.** `horizon-loader.exe` launched directly with `--server/--user
+/--pass`, no Ashita anywhere: login succeeds, connects, and the process closes ~2s later with the
+*identical* signature. **The bug is not in Ashita, not in the addons, and not in the imported VM
+config.** A3.2/A3.3/A3.4 are therefore moot and should not be run.
+
+### What the instrumentation actually established
+
+| Instrument | Result |
+| --- | --- |
+| `+seh,+process,+exception` | **No unhandled exception, no `TerminateProcess`.** Every non-`STATUS_LONGJUMP` exception is one caught `RPC_S_SERVER_UNAVAILABLE`. Exit is a clean, orderly `PROCESS_DETACH` of every DLL. The game *chooses* to exit. |
+| `+d3d,+d3d8,+wgl,+win` | Zero d3d8 calls confirmed, and — new — **the game never creates a window at all.** The only `CreateWindowEx` calls are wine's own IME/DDE/`OleMainThreadWndClass` helpers. |
+| `+file` | Last file ever touched: **`patch.ver`**, opened *relative* (cwd is temporarily the FFXI dir), read 288 bytes, then `RtlSetCurrentDirectory` back to `C:\HorizonXI\`, then exit. |
+| `+reg` | Last registry activity is the FFXI `0000`–`0045` video settings block, then `PlayOnlineUS\DebugPatch` (fails, benign), then `PlayOnlineUS\Interface` (fails). |
+| `+relay`, `RelayFromInclude=FFXiMain.dll;polcore.dll;ffxi.dll` | **The decisive trace.** See below. |
+
+### The exact last sequence before death
+
+```
+CreateFileA "…/ROM10/FTABLE10.DAT"   → opened          ← ROM..ROM10 all load fine
+FindFirstFileA "…/ROM11/FTABLE11.DAT" → GetFullPathNameA  ← failure path, no open
+FindFirstFileA "…/ROM12/FTABLE12.DAT" → GetFullPathNameA
+FindFirstFileA "…/ROM13/FTABLE13.DAT" → GetFullPathNameA
+CreateFileA "patch.ver"               → opened, 288 bytes read
+RegOpenKeyExA HKLM "SOFTWARE\PlayOnlineUS\Interface" → 2 (not found)
+UnregisterClassA "FFXiClass"
+PeekMessageA → CoFreeUnusedLibraries → CoUninitialize → exit
+```
+
+Two things this pins down that were previously guesses:
+
+1. **`polcore.dll` is loaded at `0x10000000`**, so the `Interface` probe (`ret=1004a04b`) is
+   polcore's, not the game's.
+2. **`UnregisterClassA("FFXiClass")` is called but `RegisterClass` never is.** FFXI tears down a
+   window class it never created — i.e. its init function bailed *before* window setup and the
+   cleanup path runs unconditionally. This is why there is no window and no d3d: it is not a
+   graphics failure at all. **dgVoodoo2 (A1.2–A1.4) cannot fix this** and should be deprioritised.
+
+### Ruled out this session
+
+| Hypothesis | Test | Verdict |
+| --- | --- | --- |
+| `gdiplus` missing is the cause | installed it | **WRONG** |
+| Ashita/addons/imported VM config | ran with no Ashita at all | **WRONG** |
+| It is a crash or an unhandled exception | `+seh` | **WRONG** — clean voluntary exit |
+| It is a graphics/display-init failure | never registers a window class | **WRONG** — dies earlier than that |
+| Sound init (last subsystem in the `+reg` trace) | set FFXI registry `0007` (Sound Enabled) = 0 | **WRONG** |
+| `patch.ver` version check | moved `patch.ver` away entirely | **WRONG** — identical failure |
+| `ROM11`–`ROM13` missing | they are **not in the client's own `file.txt` manifest** | **normal**, not the bug |
+| `HKLM\…\PlayOnlineUS\Interface` missing | created it (both registry views) | **WRONG** |
+| The 32-bit registry view (`Wow6432Node`) is missing `InstallFolder` | added it with `syswow64\reg.exe` | **WRONG, and actively harmful** — see below |
+
+**Trap worth recording.** `reg.exe` under the 64-bit wine writes the 64-bit view; a 32-bit process
+reads `HKLM\SOFTWARE\Wow6432Node\…`. That view genuinely lacks `InstallFolder`, which looks like an
+obvious bug. It is not: writing `InstallFolder` into the 32-bit view made things **worse** —
+`FFXiMain.dll` then stopped loading at all. `FFXi.dll` evidently prefers that value and cannot
+resolve from it. Reverted; baseline restored and re-verified. Do not "fix" this.
+
+### Where that leaves it
+
+The failure is now bounded much more tightly than before: FFXI finishes loading all its game data,
+then aborts inside its own initialisation, before any window or graphics work, with no error path
+taken. The remaining untried levers are, in order: **Lane B** (Procmon diff against the working VM
+install — now the highest-value action, because the trace above gives an exact place to diff), and
+**A5** (CrossOver trial). Lane A's remaining sub-items are largely exhausted.
+
 ## 5. Hypotheses tested and DISPROVEN — do not re-tread
 
 | Hypothesis | How tested | Verdict |
