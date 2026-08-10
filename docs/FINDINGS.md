@@ -450,7 +450,7 @@ whole configuration for anyone who wants to attack that (`HXI_METAL=1`, off by d
 Backups live in `prefix10/drive_c/dll-backup/`. Note that `reg delete` does not flush to
 `user.reg` until `wineserver` exits — kill it before editing, or the change silently persists.
 
-### The reason, found last: the whole wine build is x86_64 under Rosetta
+### The shape of the wall: 32-bit Windows games have no Metal path here
 
 ```
 $ file siku.app/Contents/SharedSupport/wine/bin/wine
@@ -461,20 +461,32 @@ Every piece of this stack — `wine`, `wineserver`, the game — is Intel code b
 Rosetta 2 on an M1. macOS itself flagged it during this session: *"This version of 'siku' includes
 a component that will not work with a future release of macOS."*
 
-That single fact explains the whole session:
+**This is not the smoking gun it first looks like, and it is worth being careful here.** Every
+macOS wine on Apple Silicon is x86_64 under Rosetta — the Sikarugir engine catalogue was checked
+and `WS12WhiskyWine2.4.5`, Whisky's own engine, is `Mach-O 64-bit executable x86_64` too. Games
+using Apple's D3DMetal render perfectly well from exactly this arrangement. So Rosetta cannot be
+blamed for the black window; an earlier draft of this section did, and that was wrong.
 
-- **The OpenGL path is slow** partly because it is Rosetta-translated x86 wine doing the D3D8 →
-  OpenGL translation, on one thread. Two translation layers stacked.
-- **DXVK creates a device but never presents.** Vulkan→Metal surface and drawable handling from a
-  Rosetta process is exactly where MoltenVK is least reliable, and no amount of DXVK configuration
-  (`deferSurfaceCreation`, virtual desktop, a different MoltenVK) reaches it.
-- **D3DMetal only ships x86_64 DLLs in this wrapper** — consistent with a wrapper built for Intel.
+What *is* established:
 
-So the fix is not to patch DXVK. **It is a native arm64 wine wrapper.** On arm64 wine, D3DMetal
-and DXVK are both known to work, and the Rosetta tax on the CPU side disappears at the same time.
-Whisky is not the answer either — it was discontinued upstream (disabled 2026-04-09) and no longer
-downloads its wine libraries at all; a bottle created with `whisky create` comes up empty.
+| | |
+| --- | --- |
+| Everything in the stack is x86_64 under Rosetta | fact (`file` on wine, wineserver, every engine checked) |
+| D3DMetal in this wrapper ships **x86_64-windows DLLs only** | fact — no 32-bit D3DMetal exists |
+| FFXI is a **32-bit** Windows game | fact |
+| 32-bit DXVK 1.10.3 creates a device and never presents | fact, three mechanisms tried |
+| Rosetta is *why* it never presents | **unproven hypothesis** |
 
-Next step, and it needs a decision rather than more experiments: get a native arm64 wine
-(Kegworks, or a current CrossOver), build a fresh prefix, and re-run `scripts/install.sh` there.
-The client can be symlinked rather than copied — there is not 27GB free on the internal disk.
+The real shape of the wall: a 32-bit Windows game's only route to Metal is 32-bit DXVK/d9vk →
+MoltenVK, because D3DMetal has no 32-bit build. That route gets as far as a live device and stops
+at presentation. Everything the 64-bit ecosystem relies on for Metal is unavailable to a 2002
+32-bit game.
+
+Also recorded so nobody repeats it: **Whisky is dead** — discontinued upstream and disabled on
+2026-04-09. It installs, `whisky create` reports success, and the bottle is empty; it no longer
+downloads its wine at all. Its engine survives only in the Sikarugir Engines release list.
+
+Next step, whenever someone picks this up: instrument the 32-bit DXVK presenter itself — build
+1.10.3 with logging around `vkQueuePresentKHR` and the swapchain, and find out whether present is
+being called, what it returns, and whether the surface is bound to the window wine actually
+shows.
