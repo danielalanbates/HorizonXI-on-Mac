@@ -18,6 +18,8 @@ struct PerfSettings: Codable {
     var largeAddressAware = true
     /// Extra environment, one KEY=VALUE per line, for experiments.
     var extraEnv = ""
+    /// Which renderer pathway to run. Classic OpenGL is the only one that draws the world.
+    var renderer: Renderer = .openGL
 
     static let key = "perf.settings"
 
@@ -42,6 +44,7 @@ struct PerfSettings: Codable {
         if metalHUD { env["MTL_HUD_ENABLED"] = "1" }
         if disableAppNap { env["LSAppNapIsDisabled"] = "1" }
         if largeAddressAware { env["WINE_LARGE_ADDRESS_AWARE"] = "1" }
+        for (k, v) in renderer.environment { env[k] = v }
         for line in extraEnv.split(separator: "\n") {
             let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
             if parts.count == 2 {

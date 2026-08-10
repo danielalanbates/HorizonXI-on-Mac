@@ -81,4 +81,27 @@ enum Credentials {
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         return true
     }
+
+    /// Set `key = value` lines in the boot profile, leaving commented examples alone.
+    /// Used for the per-renderer overrides — `behaviorflags.fpu_preserve` in particular.
+    static func applyIniOverrides(_ overrides: [String: String], to install: Install,
+                                  profile: String) {
+        guard !overrides.isEmpty else { return }
+        let url = install.gameDir.appendingPathComponent("config/boot/\(profile)")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+
+        let out = text.split(separator: "\n", omittingEmptySubsequences: false).map { l -> String in
+            let line = String(l)
+            guard !line.hasPrefix(";"), line.contains("=") else { return line }
+            let key = line.split(separator: "=", maxSplits: 1)[0]
+                .trimmingCharacters(in: .whitespaces)
+            guard let v = overrides[key] else { return line }
+            // keep the column alignment the file already uses
+            let pad = max(1, 48 - key.count)
+            return key + String(repeating: " ", count: pad) + "= " + v
+        }.joined(separator: "\n")
+
+        try? out.write(to: url, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
 }

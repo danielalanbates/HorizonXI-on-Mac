@@ -8,6 +8,28 @@ Wine — no virtual machine.
 > renderer is close but not there yet (see below). Testers wanted, especially on Apple
 > Silicon with more than 8GB and on Intel Macs.
 
+> ### 2026-08-10 — the launcher, and three renderers measured
+>
+> ![The launcher](docs/img/launcher.png)
+>
+> The launcher now has account name and password, a world dropdown (HorizonXI pinned, the rest
+> ordered by community size), and a renderer picker. See [`docs/GOALS.md`](docs/GOALS.md).
+>
+> On the graphics side, every pathway was measured on the same M1 in the same zone:
+>
+> | Pathway | fps | CPU | GPU | picture |
+> | --- | --- | --- | --- | --- |
+> | OpenGL *(default)* | 3.2 in-zone | 185% | 9% | **complete and correct** |
+> | wined3d Vulkan | 20.6 | 46% | 95% | models and terrain untextured |
+> | d3d8to9 + DXVK | 29.1 | 89% | 17% | menus and UI perfect, 3D world black in-zone |
+>
+> Two long-standing blockers were root-caused and fixed today — DXVK's black window was
+> MoltenVK assigning two uniform buffers to the same Metal binding, cured by
+> `MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1`; and `behaviorflags.fpu_preserve = 1` brought back
+> most of the 3D pipeline. **Neither fast pathway is playable yet**, so Classic OpenGL is still
+> the default and nothing has been announced to the HorizonXI community.
+> Full write-up: [`docs/PATHWAYS.md`](docs/PATHWAYS.md).
+
 > **Status: PLAYABLE.** As of 2026-08-08, Final Fantasy XI runs natively on Apple Silicon macOS
 > under Wine — logged in, in-world, chat live, Ashita macros bound. As far as a full GitHub sweep
 > can tell this is the first time that has happened: every other FFXI-on-a-non-Windows-machine

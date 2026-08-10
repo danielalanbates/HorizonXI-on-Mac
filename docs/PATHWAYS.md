@@ -1,61 +1,134 @@
 # Pathways — what has been tried, what is live, what to try next
 
-Written for whoever (or whatever) picks this up next. The one-line summary:
+Written for whoever (or whatever) picks this up next. Read [`GOALS.md`](GOALS.md) for what Daniel
+asked for, and [`FINDINGS.md`](FINDINGS.md) for the older instrumented evidence.
 
-> The game runs. It runs on wine's builtin D3D8 over OpenGL, which is slow. The Metal route
-> (D3D8 → d3d8to9 → DXVK 1.10.3 → MoltenVK) now **presents correctly** — the DXVK HUD renders at
-> ~31 FPS — but the game's own output is still black. That is the current frontier.
+The one-line summary as of **2026-08-10**:
 
-Read [`FINDINGS.md`](FINDINGS.md) for the instrumented evidence behind every claim here.
+> The game is playable only on OpenGL, and OpenGL is slow: **3.2 fps in a zone**, 185% CPU, 9% GPU.
+> Two GPU pathways now render — Vulkan at ~20 fps and DXVK/Metal at ~29 fps — and each is missing
+> a different piece of the picture. Neither is playable yet. **The GPU gate is not passed.**
 
 ---
 
-## The two renderer pathways
+## Measurements
 
-### Pathway A — builtin D3D8 → WineD3D → OpenGL  *(shipped, works, slow)*
+All on the same MacBook Pro M1 / 8 GB, macOS 26.5, wine-10.0 (Sikarugir), same zone (Selbina) or
+the same menu. Frame rates from `WINEDEBUG=fps` (wine paths) and the DXVK HUD; GPU from
+`ioreg -rc IOAccelerator`; CPU from `ps`.
 
-This is what `scripts/install.sh` configures by default and what the launcher uses.
+| Pathway | Menu fps | In-zone fps | CPU | GPU | Picture |
+| --- | --- | --- | --- | --- | --- |
+| **OpenGL** (shipped) | 5.1 → **8.3** after fixes | **3.2** | 185% | 9% | complete and correct |
+| **wined3d Vulkan** | **20.6** | — | 46% | 95% | geometry yes, **all models/terrain untextured** |
+| **d3d8to9 + DXVK 1.10.3** | **29.3** | 29.1 | 89% | 17% | menus, character select, sky, all UI — **3D world black in-zone** |
 
-- **Status:** playable end to end. Login, character select, in-world, chat, Ashita macros.
-- **Cost:** 148% CPU with the GPU at 6%. The GPU is *starved*, not unused — every D3D8 call is
-  translated on one CPU thread. Zone loads take minutes on an M1/8GB.
-- **Why it is still the default:** it is the only path that puts a picture on the screen.
+Two things follow. The GPU is not the constraint on any pathway — OpenGL starves it at 9% while
+pegging one CPU thread. And the fast pathways are *close*: each is one identified bug away.
 
-### Pathway B — D3D8 → d3d8to9 → DXVK 1.10.3 → MoltenVK → Metal  *(experimental, `HXI_METAL=1`)*
+---
 
-Enabled with `HXI_METAL=1 ./scripts/install.sh <wrapper.app> <prefix>`.
+## Pathway A — builtin D3D8 → wined3d → OpenGL  *(shipped, correct, slow)*
 
-Four separate things had to be true before this pathway got anywhere. Each failed **silently** and
-each cost a debugging session, so they are worth knowing in order:
+The default, and the only one that has ever put a complete textured frame of the game world on
+screen. `docs/img/murn-in-selbina.png` and `docs/img/gl-world.png` are from this pathway.
 
-| # | Blocker | Symptom it produced | Fix |
-| --- | --- | --- | --- |
-| 1 | `Ashita.dll` imports `d3d8.dll` itself | `[E] Injection failed!` — looks exactly like the renderer breaking Ashita | put `d3d8.dll` in `C:\HorizonXI\` and `bootloader\` too, not only the game dirs |
-| 2 | wine ships **zero** `api-ms-win-crt-*` DLLs | renderer DLL "not found" even though the file is right there | copy the 15 forwarders from `wine.cx32bak/lib32on64/wine/`. `vc_redist.x86.exe` does **not** provide these |
-| 3 | default MoltenVK is Vulkan 1.1 | `DxvkAdapter: Failed to create device`, `timelineSemaphore : 0` | point `wine/lib/libMoltenVK.dylib` at `Frameworks/moltenvkcx/libMoltenVK.dylib` (Vulkan 1.2) |
-| 4 | D3D8 present parameters | device live, GPU busy, **window black, nothing presented** | `presentparams.swapeffect = 1` (DISCARD) + `backbuffercount = 1` in `config/boot/<profile>.ini` |
+**Improvement found today (kept, no downside):**
 
-After #4 the DXVK HUD renders: `DXVK v1.10.3 / D3D9 / Apple M1 / Vulkan 1.2.290`, ~31 FPS, 418
-draw calls, 4 render passes, 11 graphics pipelines. **Presentation is solved.** The game itself
-still draws black, which is now a content problem (format, render target, or depth-stencil), not
-a presentation one.
+```
+HKCU\Software\Wine\Direct3D  MaxVersionGL  REG_DWORD  0x40001
+```
 
-**Confirmed since:** waiting is not the answer. A verified-DXVK run (banner `info: DXVK: v1.10.3`
-present in the log *before* judging) was left for four and a half minutes — the same span in which
-Pathway A reaches the Rules of Conduct screen — and the HUD held a steady 29 FPS with the draw
-call count pinned at exactly **418 every frame** while the scene stayed black. A constant draw
-count means the game is happily re-submitting the same frame; its output is going somewhere that
-is not the swap chain.
+wined3d asks for an OpenGL 4.4 context. macOS caps at 4.1, the request fails
+(`Couldn't create an OpenGL 4.4 context, trying fallback to a lower version`) and wined3d drops
+onto a legacy path. Pinning the version it asks for measured **5.1 → 7.9 fps** at the same screen
+with no visual change. `WINEMSYNC`/`WINEESYNC` and halving FFXI's background texture resolution
+(`0003`/`0004` 2048 → 1024) added ~5% more; the resolution change costs visual quality, so it is
+available but not the default.
 
-**A trap worth naming:** `reg` edits do not reach a running `wineserver`. A run that looks like a
-Pathway B success may quietly be Pathway A, because the old registry was still cached. Always
-`pkill wineserver` before launching, and always confirm the `DXVK: v1.10.3` banner in the log
-before believing anything you see. This caught me once and nearly produced a third false victory.
+The ceiling is architectural: `GL_VENDOR` is `Apple`, so it *is* the GPU driver, but every D3D8
+call is translated on one CPU thread inside an x86_64 process under Rosetta, into a legacy GL
+stack that Apple itself layers over Metal. 3 fps in a zone is what that costs.
 
-**This distinction matters and is easy to get wrong.** Low CPU and busy GPU are *not* evidence of
-success — a renderer that never presents is also cheap. The acceptance test is a visible frame.
-An earlier pass of this work declared victory on counters alone and had to be retracted; don't
-repeat it.
+## Pathway B — D3D8 → wined3d → **Vulkan** → MoltenVK → Metal  *(new; 4x faster, untextured)*
+
+Enable with `renderer=vulkan` under `HKCU\Software\Wine\Direct3D`. This had never been tried
+before today and it is a large change: **20.6 fps vs 5.1, CPU 46% vs 193%, GPU 95% vs 4%.**
+
+It is not playable, for one precise reason:
+
+```
+warn:d3d:init_vulkan_format_info Unsupported format WINED3DFMT_DXT1 … DXT5
+warn:d3d:init_vulkan_format_info Unsupported format WINED3DFMT_BC1_TYPELESS … BC7_TYPELESS
+```
+
+wined3d's Vulkan backend finds **no** BC/S3TC texture format usable, so every DXT-compressed
+texture — which is all of FFXI's models and terrain — is dropped. Characters render as flat grey
+silhouettes while fonts and UI, which are uncompressed, look perfect
+(`docs/img/vk-untextured.png` next to the OpenGL shot of the same screen tells the whole story).
+
+This is **not** a Metal limitation, and that is the interesting part:
+
+- `MTLDevice.supportsBCTextureCompression` is **true** on this M1, natively *and* under Rosetta
+  (`scripts/bc-probe.swift`).
+- It is not a MoltenVK version problem either: identical output on the bundled MoltenVK 1.2.10 and
+  on a freshly downloaded 1.4.2.
+
+So either MoltenVK is not advertising BC through `vkGetPhysicalDeviceFormatProperties`, or
+wined3d is demanding format features a compressed format cannot offer. **That question is the
+single highest-value thing left in this project** — answering it turns a 4x-faster pathway into a
+playable one. `warn+d3d` also shows the Vulkan backend has no representative for a dozen
+fixed-function render states (`COLORKEYENABLE`, `LIGHTING`, `SPECULARENABLE`, …), so expect more
+gaps behind this one.
+
+## Pathway C — D3D8 → d3d8to9 → DXVK 1.10.3 → MoltenVK → Metal  *(new; renders, 29 fps, world black)*
+
+Previously this pathway produced a black window with only DXVK's own HUD visible. **Two fixes
+today changed that**, and both are now applied automatically by the launcher (`Renderer.swift`):
+
+### Fix 1 — `MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1`
+
+The cause of the black window, finally named. MoltenVK's SPIRV-Cross was assigning two different
+uniform buffers to the same Metal buffer index in DXVK's D3D9 fixed-function fragment shader:
+
+```
+[mvk-error] VK_ERROR_INITIALIZATION_FAILED: Shader library compile failed (Error code 3):
+program_source:112:135: error: cannot reserve 'buffer' resource location at index 0
+fragment main0(… constant render_state_t& render_state [[buffer(0)]],
+                 constant D3D9FixedFunctionPS& consts [[buffer(0)]], …)
+err:   DxvkGraphicsPipeline: Failed to compile pipeline
+```
+
+Every fixed-function fragment shader failed to compile, so every game draw was skipped — while
+DXVK's HUD, which uses its own shaders, drew fine. That is exactly the "GPU busy, screen black"
+signature that misled three earlier sessions. Switching MoltenVK to Metal argument buffers routes
+descriptors differently and the collision disappears: **zero compile failures**, and the HorizonXI
+logo and the Rules of Conduct screen render at 28.9 fps (`docs/img/dxvk-menu.png`).
+
+### Fix 2 — `behaviorflags.fpu_preserve = 1` in the boot profile
+
+With the shaders compiling, the menus rendered but character select was still black. Setting
+`fpu_preserve` brought back the sky, the clouds and the terrain silhouettes, and took render
+passes from 4 to 57. FFXI changes the x87 control word; without `D3DCREATE_FPU_PRESERVE` that
+corrupts D3D9's own maths. This is a one-line ini change with a large effect
+(`docs/img/dxvk-charselect.png`).
+
+### What is still wrong
+
+In-zone the 3D world is black while nameplates, chat, the compass and the whole 2D layer render
+correctly at 29 fps (`docs/img/dxvk-world-black.png`). Sky renders at character select but terrain
+and models do not. The shape of the failure — vertex-coloured geometry appears, textured geometry
+does not — points at texture sampling returning black rather than at presentation.
+
+**Next thing to try:** run with `DXVK_LOG_LEVEL=debug` and look at the `CheckDeviceFormat` traffic
+for `D3DFMT_P8` / `A8P8`. FFXI leans on palettised textures, DXVK's D3D9 has historically not
+implemented them, and "palettised textures sample as black while uncompressed UI is fine" fits
+every observation. If that is it, the options are a DXVK patch or forcing FFXI to non-palettised
+assets.
+
+Things already ruled out for this pathway: it is not the present parameters (the old
+`swapeffect = 1` / `backbuffercount = 1` workaround is no longer needed — defaults work now), and
+it is not the depth buffer (`enableautodepthstencil = 1` + `D24S8` changes nothing).
 
 ---
 
@@ -63,53 +136,43 @@ repeat it.
 
 | Tried | Result |
 | --- | --- |
-| **DXVK 2.x / 3.x** | **Impossible on Apple Silicon.** Requires Vulkan 1.3 + `geometryShader`; Metal has no geometry shaders, so MoltenVK can never expose one. 3.0.2 loads, finds the M1, rejects it |
-| Gcenx `DXVK-macOS` repack | omits `d3d9.dll` entirely — only d3d10core/d3d11. Use doitsujin's 1.10.3 release |
-| the wrapper's own `renderer/d9vk` 32-bit d3d9 | will not even map — `status=c0000135` before its imports are touched, in `syswow64`, beside the exe, and as a wine builtin |
-| `d3d9.deferSurfaceCreation = True` | applied and confirmed in the log; no change (this was pre-#4, may be worth retesting) |
-| wine virtual desktop (`explorer /desktop=`) | still black (pre-#4) |
-| **Whisky** | **discontinued upstream, disabled 2026-04-09.** Installs, `whisky create` claims success, bottle is empty — it no longer downloads its wine at all |
-| "it's Rosetta's fault" | **wrong.** Every macOS wine on Apple Silicon is x86_64 under Rosetta, including Whisky's own engine, and D3DMetal games render fine from that arrangement |
-| `WINEMSYNC=1` | never validated; it was set during a run that looked broken for unrelated reasons. Left off |
+| **DXVK 2.x / 3.x** | Requires Vulkan 1.3 + `geometryShader`; Metal has no geometry shaders |
+| Gcenx `DXVK-macOS` repack | ships no `d3d9.dll`. Use doitsujin's 1.10.3 release |
+| the wrapper's own 32-bit `d9vk` | will not map at all — `status=c0000135` before its imports load |
+| **MoltenVK 1.4.2 with DXVK 1.10.3** | `DxvkAdapter: Failed to create device`. 1.2.10 (`moltenvkcx`) is the one that works |
+| newer MoltenVK to fix BC | 1.2.10 and 1.4.2 behave identically; not a version problem |
+| `MVK_CONFIG_ADVERTISE_EXTENSIONS=0` | kills `VK_KHR_swapchain` too; the game crashes on launch |
+| FFXI texture compression off (`0011 = 0`) | no change to the Vulkan untextured look |
+| launching `horizon-loader.exe` directly, no Ashita | exits with `Closing…` before creating a window; Ashita cannot be ruled out this way |
+| wine virtual desktop, `deferSurfaceCreation` | no effect (both pre-date the argument-buffers fix; worth one retest each) |
+| **Whisky** | discontinued upstream; `whisky create` claims success and leaves an empty bottle |
+| "it's Rosetta's fault" | wrong. Every macOS wine on Apple Silicon is x86_64 under Rosetta |
 
-Also relevant: **D3DMetal in this wrapper ships `x86_64-windows` DLLs only.** FFXI is a 32-bit
-Windows game, so D3DMetal is simply unavailable to it. 32-bit DXVK/d9vk → MoltenVK is the *only*
-Metal route a 32-bit game has here.
+**D3DMetal is unavailable to this game, permanently.** The wrapper ships `x86_64-windows` D3DMetal
+DLLs only, and FFXI is a 32-bit Windows game. 32-bit DXVK or wined3d-Vulkan into MoltenVK is the
+only Metal route it has.
 
 ---
 
-## What to try next, in the order I would try it
-
-0. **Find where the game's render target goes.** The draw call count is constant at 418/frame and
-   the HUD composites fine, so `Present` is reaching the swap chain but the scene is not in it.
-   Suspect Ashita's D3D8 device wrapper, or a render-to-texture path whose result never gets
-   blitted. This is the highest-value question left.
-1. **Sweep the present parameters.** `[ffxi.direct3d8]` in the boot profile exposes
-   `backbufferformat`, `multisampletype`, `enableautodepthstencil`, `autodepthstencilformat` and
-   `swapeffect`. A black-but-drawing frame is classic format mismatch. `scripts/sweep-present.py`
-   automates this: it rewrites the ini, launches, screenshots, and moves on.
-2. **Screenshot the swapchain, not the screen.** `DXVK_HUD=full` proves *what* is being presented.
-   If the HUD is sharp and the scene is black, the game's render target is not reaching the back
-   buffer — look at `d3d9.forceSwapchainMSAA`, and at whether Ashita's own D3D8 hooks are
-   intercepting `Present`.
-3. **Rule Ashita in or out.** Launch `horizon-loader.exe` directly with `--server/--user/--pass`,
-   no Ashita, on Pathway B. Ashita hooks `Direct3DCreate8` and wraps the device; if the picture
-   appears without it, the bug is in that interaction.
-4. **Instrument DXVK.** Build 1.10.3 x32 with MinGW and log around `vkQueuePresentKHR`, the
-   swapchain image acquisition, and `IDirect3DDevice9::Present`. This is the definitive answer and
-   the most work.
-5. **Re-test the pre-#4 dead ends.** `deferSurfaceCreation` and the virtual desktop were both
-   tested *before* the swapeffect fix, when nothing could present. They deserve one more run each.
-
 ## Ground rules that save time
 
-- **Verify with a picture.** Counters lie. `screencapture -x -o out.png` of the whole screen —
-  `screencapture -l <windowid>` returns black for this window even when it is drawing.
-- **Launch detached** (`start_new_session=True`) or the game dies when the shell that spawned it
-  goes away. `scripts/../sweep-present.py` shows the pattern.
-- **`reg delete` does not flush to `user.reg` until `wineserver` exits.** Kill it before editing
-  the file, or your change silently persists.
+- **Verify with a picture.** Counters lie. A renderer that never presents is also cheap and fast.
+  `screencapture -x -o -D 2` writes the HP 24uh in the background without stealing focus.
+- **Kill `wineserver` before every registry change.** `reg` edits do not reach a running one, so a
+  run can look like a success on the pathway you *think* you switched to while quietly using the
+  old one. This produced a false victory in an earlier session.
+- **Confirm the banner before believing a screenshot** — `DXVK: v1.10.3` in the log for DXVK,
+  `renderer=vulkan` plus MoltenVK's `Created VkInstance` for Pathway B.
+- **Launch detached** (`start_new_session=True`) or the game dies with the shell that spawned it.
 - **Back up before every experiment.** `drive_c/dll-backup/*.builtin.dll`,
-  `wine/lib/libMoltenVK.dylib.stock`, `config/boot/*.ini.premetal` all exist for this reason.
-- Every experiment in this document was reverted afterwards and the game re-verified. Leave the
-  machine playable.
+  `wine/lib/libMoltenVK.dylib.stock`, `config/boot/*.ini.vkbak` all exist for this reason.
+- Leave the machine playable. Every experiment here was reverted and the OpenGL path re-verified
+  afterwards.
+
+## Tooling
+
+`scripts/harness.py` runs a pathway end to end: switches renderer, kills the stale wineserver,
+launches, samples fps/CPU/GPU on an interval, screenshots every display in the background and
+scores each frame for actual picture content. `scripts/drive.py` clicks through Rules of Conduct →
+character select → login using window-relative coordinates, so a full in-zone verification is one
+command rather than twenty minutes of hand-driving.

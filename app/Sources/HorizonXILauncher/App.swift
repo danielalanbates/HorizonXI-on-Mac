@@ -6,7 +6,7 @@ struct HorizonXILauncherApp: App {
     var body: some Scene {
         WindowGroup("HorizonXI on Mac") {
             ContentView()
-                .frame(minWidth: 900, minHeight: 560)
+                .frame(minWidth: 940, minHeight: 600)
                 .preferredColorScheme(.dark)
         }
         .windowResizability(.contentMinSize)
@@ -14,16 +14,36 @@ struct HorizonXILauncherApp: App {
 }
 
 // MARK: - Palette
+//
+// Vana'diel by way of the crystal: deep indigo night, crystal cyan, and the warm gold the game
+// uses for every selected menu item. Deliberately not macOS-grey — this is a game launcher.
 
-private enum Sky {
-    static let ink       = Color(red: 0.04, green: 0.05, blue: 0.10)
-    static let deep      = Color(red: 0.07, green: 0.09, blue: 0.19)
-    static let panel     = Color.white.opacity(0.06)
-    static let stroke    = Color.white.opacity(0.12)
-    static let gold      = Color(red: 0.85, green: 0.72, blue: 0.42)
-    static let goldDim   = Color(red: 0.62, green: 0.52, blue: 0.30)
-    static let text      = Color(red: 0.92, green: 0.93, blue: 0.97)
-    static let muted     = Color(red: 0.62, green: 0.66, blue: 0.76)
+enum Vana {
+    static let night     = Color(red: 0.05, green: 0.05, blue: 0.12)
+    static let indigo    = Color(red: 0.11, green: 0.10, blue: 0.26)
+    static let violet    = Color(red: 0.20, green: 0.14, blue: 0.36)
+    static let crystal   = Color(red: 0.55, green: 0.83, blue: 0.95)
+    static let crystalDim = Color(red: 0.33, green: 0.55, blue: 0.70)
+    static let gold      = Color(red: 0.93, green: 0.79, blue: 0.44)
+    static let goldDim   = Color(red: 0.66, green: 0.55, blue: 0.29)
+    static let ember     = Color(red: 0.90, green: 0.45, blue: 0.35)
+    static let panel     = Color(red: 0.08, green: 0.08, blue: 0.17).opacity(0.85)
+    static let stroke    = Color.white.opacity(0.14)
+    static let text      = Color(red: 0.94, green: 0.95, blue: 0.99)
+    static let muted     = Color(red: 0.64, green: 0.68, blue: 0.80)
+
+    /// The blue-violet wash behind everything, with a crystal glow up top.
+    static var backdrop: some View {
+        ZStack {
+            LinearGradient(colors: [violet, indigo, night],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            RadialGradient(colors: [crystal.opacity(0.22), .clear],
+                           center: .init(x: 0.22, y: 0.08), startRadius: 8, endRadius: 460)
+            RadialGradient(colors: [gold.opacity(0.10), .clear],
+                           center: .init(x: 0.85, y: 0.95), startRadius: 8, endRadius: 380)
+        }
+        .ignoresSafeArea()
+    }
 }
 
 struct ContentView: View {
@@ -44,140 +64,213 @@ struct ContentView: View {
     @State private var remember = Credentials.remember
     @State private var showDetails = false
     @State private var notice = ""
+    @State private var scanning = false
 
     private var blocked: Bool { checks.contains { $0.state == .bad } }
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Sky.deep, Sky.ink],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-                .ignoresSafeArea()
+            Vana.backdrop
             HStack(spacing: 0) {
                 hero
-                Divider().overlay(Sky.stroke)
-                sidebar.frame(width: 360)
+                Rectangle().fill(Vana.stroke).frame(width: 1)
+                sidebar.frame(width: 372)
             }
         }
         .onAppear {
-            refresh()
             if remember, !user.isEmpty { pass = Credentials.password(for: user) }
         }
+        // Discovery walks /Volumes, and an external drive can make that take tens of seconds.
+        // Doing it on the main thread means the window never appears at all — which looked
+        // exactly like the app failing to launch. Scan off the main actor and fill the UI in.
+        .task { await refreshAsync() }
     }
 
-    // MARK: - Left: hero + status
+    // MARK: - Left: title, server, status
 
     private var hero: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text((store.selected?.name ?? "FINAL FANTASY XI").uppercased())
                     .font(.system(size: 46, weight: .light, design: .serif))
                     .tracking(10)
-                    .foregroundStyle(Sky.text)
+                    .foregroundStyle(
+                        LinearGradient(colors: [Vana.text, Vana.crystal],
+                                       startPoint: .top, endPoint: .bottom))
+                    .shadow(color: Vana.crystal.opacity(0.35), radius: 12, y: 2)
                 Text("FINAL FANTASY XI ON APPLE SILICON")
                     .font(.system(size: 11, weight: .semibold))
-                    .tracking(3)
-                    .foregroundStyle(Sky.goldDim)
+                    .tracking(3.5)
+                    .foregroundStyle(Vana.gold)
                 Text(store.selected?.note ?? "running natively — no virtual machine")
                     .font(.callout)
-                    .foregroundStyle(Sky.muted)
-                    .padding(.top, 6)
+                    .foregroundStyle(Vana.muted)
+                    .padding(.top, 4)
             }
-            .padding(.horizontal, 32).padding(.top, 32).padding(.bottom, 18)
+            .padding(.horizontal, 34).padding(.top, 34).padding(.bottom, 20)
 
-            serverBar
-
+            serverPicker
+            rendererBanner
+            notesCard
             Spacer()
 
             if showDetails {
-                ScrollView { statusList.padding(.horizontal, 32) }
-                    .frame(maxHeight: 220)
+                ScrollView { statusList.padding(.horizontal, 34) }
+                    .frame(maxHeight: 200)
             }
-
             logStrip
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// One button per server, HorizonXI first because it is the one that is actually verified.
-    private var serverBar: some View {
+    /// One dropdown for every server. HorizonXI is pinned to the top; the rest are ordered by
+    /// community size, which is metadata the user never has to see or maintain.
+    private var serverPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("SERVER").font(.caption2).tracking(2).foregroundStyle(Sky.goldDim)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(store.servers) { s in
-                        Button { store.select(s) } label: {
-                            HStack(spacing: 6) {
-                                Text(s.name).font(.system(size: 12, weight: .medium))
-                                if !s.verified {
-                                    Image(systemName: "questionmark.circle")
-                                        .font(.system(size: 9)).foregroundStyle(Sky.muted)
-                                }
-                            }
-                            .padding(.horizontal, 14).padding(.vertical, 8)
-                            .background(RoundedRectangle(cornerRadius: 6)
-                                .fill(s.name == store.selectedID ? Sky.gold.opacity(0.22)
-                                                                 : Color.white.opacity(0.05)))
-                            .overlay(RoundedRectangle(cornerRadius: 6)
-                                .stroke(s.name == store.selectedID ? Sky.gold : Sky.stroke))
-                            .foregroundStyle(s.name == store.selectedID ? Sky.gold : Sky.text)
-                        }
-                        .buttonStyle(.plain)
-                        .help(s.verified ? s.host
-                                         : "Untested here — set the login host before playing")
-                        .contextMenu {
-                            if !Server.builtins.contains(where: { $0.name == s.name }) {
-                                Button("Remove \(s.name)") { store.remove(s) }
-                            }
-                        }
+            Text("WORLD").font(.caption2).tracking(2.5).foregroundStyle(Vana.gold)
+
+            Menu {
+                ForEach(store.ordered) { s in
+                    Button {
+                        store.select(s)
+                    } label: {
+                        if s.era.isEmpty { Text(s.name) }
+                        else { Text("\(s.name)  ·  \(s.era)") }
                     }
-                    Button { newServer = true } label: {
-                        Image(systemName: "plus")
-                            .padding(.horizontal, 12).padding(.vertical, 8)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05)))
-                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Sky.stroke))
-                            .foregroundStyle(Sky.muted)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Add a server")
                 }
+                Divider()
+                Button("Add a server…") { newServer = true }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "diamond.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Vana.crystal)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(store.selected?.name ?? "Choose a world")
+                            .font(.system(size: 15, weight: .semibold, design: .serif))
+                            .foregroundStyle(Vana.text)
+                        if let era = store.selected?.era, !era.isEmpty {
+                            Text(era).font(.caption2).foregroundStyle(Vana.muted)
+                        }
+                    }
+                    Spacer()
+                    if store.selected?.verified == true {
+                        Label("verified", systemImage: "checkmark.seal.fill")
+                            .labelStyle(.iconOnly)
+                            .foregroundStyle(Vana.crystal)
+                            .help("This project logs into this server successfully.")
+                    } else {
+                        Image(systemName: "questionmark.circle")
+                            .foregroundStyle(Vana.muted)
+                            .help("Untested here — set the login host before playing.")
+                    }
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10)).foregroundStyle(Vana.muted)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .frame(width: 430, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.32)))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Vana.crystalDim.opacity(0.7)))
+                .contentShape(Rectangle())
             }
-            if let s = store.selected, !s.verified {
-                Text(s.host.isEmpty
-                     ? "No login host set for \(s.name) — add it below before playing."
-                     : "\(s.host) — untested by this project.")
-                    .font(.caption2).foregroundStyle(.orange)
-            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+
             if let s = store.selected, !s.verified {
                 HStack(spacing: 6) {
                     TextField("login host", text: Binding(
-                        get: { s.host },
-                        set: { var c = s; c.host = $0; store.update(c) }))
+                        get: { s.host }, set: { var c = s; c.host = $0; store.update(c) }))
                         .textFieldStyle(.roundedBorder).font(.caption)
                     TextField("boot profile .ini", text: Binding(
-                        get: { s.bootProfile },
-                        set: { var c = s; c.bootProfile = $0; store.update(c) }))
+                        get: { s.bootProfile }, set: { var c = s; c.bootProfile = $0; store.update(c) }))
                         .textFieldStyle(.roundedBorder).font(.caption).frame(width: 150)
+                    if !Server.builtins.contains(where: { $0.name == s.name }) {
+                        Button(role: .destructive) { store.remove(s) } label: {
+                            Image(systemName: "trash")
+                        }.buttonStyle(.borderless)
+                    }
                 }
+                .frame(maxWidth: 430)
+                Text(s.host.isEmpty
+                     ? "No login host set for \(s.name) — add it before playing."
+                     : "\(s.host) — untested by this project.")
+                    .font(.caption2).foregroundStyle(Vana.ember)
             }
         }
-        .padding(.horizontal, 32)
-        .sheet(isPresented: $newServer) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Add a server").font(.headline)
-                TextField("Name", text: $newName).textFieldStyle(.roundedBorder)
-                TextField("Login host", text: $newHost).textFieldStyle(.roundedBorder)
-                TextField("Boot profile (.ini)", text: $newProfile).textFieldStyle(.roundedBorder)
-                HStack {
-                    Spacer()
-                    Button("Cancel") { newServer = false }
-                    Button("Add") {
-                        store.add(name: newName, host: newHost, profile: newProfile)
-                        newName = ""; newHost = ""; newProfile = ""; newServer = false
-                    }
-                    .keyboardShortcut(.defaultAction)
+        .padding(.horizontal, 34)
+        .sheet(isPresented: $newServer) { addServerSheet }
+    }
+
+    private var addServerSheet: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Add a server").font(.headline)
+            TextField("Name", text: $newName).textFieldStyle(.roundedBorder)
+            TextField("Login host", text: $newHost).textFieldStyle(.roundedBorder)
+            TextField("Boot profile (.ini)", text: $newProfile).textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Cancel") { newServer = false }
+                Button("Add") {
+                    store.add(name: newName, host: newHost, profile: newProfile)
+                    newName = ""; newHost = ""; newProfile = ""; newServer = false
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20).frame(width: 360)
+    }
+
+    /// Say plainly when the chosen renderer is not one you can actually play on.
+    @ViewBuilder private var rendererBanner: some View {
+        if !perf.renderer.playable {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Vana.ember)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(perf.renderer.title) is experimental")
+                        .font(.caption).foregroundStyle(Vana.text)
+                    Text(perf.renderer.blurb).font(.caption2).foregroundStyle(Vana.muted)
                 }
             }
-            .padding(20).frame(width: 340)
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Vana.ember.opacity(0.10)))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Vana.ember.opacity(0.35)))
+            .padding(.horizontal, 34).padding(.top, 14)
+            .frame(maxWidth: 500, alignment: .leading)
+        }
+    }
+
+    /// The Horizon launcher fills this space with news. This project's equivalent is honest
+    /// status: what the current renderer does, and where the write-up lives.
+    private var notesCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Vana'diel on Apple Silicon", systemImage: "sparkles")
+                .font(.system(size: 12, weight: .semibold, design: .serif))
+                .foregroundStyle(Vana.gold)
+
+            row("Renderer", perf.renderer.title)
+            row("Wine prefix", selected?.prefixName ?? (scanning ? "scanning…" : "not found"))
+            row("Client", selected == nil ? (scanning ? "scanning…" : "not found") : "Ashita · \(store.selected?.bootProfile ?? "")")
+
+            Text("Frame rates measured on this Mac: OpenGL 3 fps in a zone, Vulkan 20 fps "
+                 + "untextured, DXVK 29 fps with the world still black. Classic is the only "
+                 + "pathway you can actually play on today.")
+                .font(.caption2).foregroundStyle(Vana.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: 500, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.25)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Vana.stroke))
+        .padding(.horizontal, 34).padding(.top, 16)
+    }
+
+    private func row(_ k: String, _ v: String) -> some View {
+        HStack(spacing: 8) {
+            Text(k.uppercased()).font(.system(size: 9)).tracking(1.2)
+                .foregroundStyle(Vana.crystalDim).frame(width: 84, alignment: .leading)
+            Text(v).font(.caption).foregroundStyle(Vana.text)
+            Spacer()
         }
     }
 
@@ -187,8 +280,8 @@ struct ContentView: View {
                 HStack(alignment: .top, spacing: 8) {
                     Circle().fill(color(c.state)).frame(width: 7, height: 7).padding(.top, 5)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(c.title).font(.caption).foregroundStyle(Sky.text)
-                        Text(c.detail).font(.caption2).foregroundStyle(Sky.muted)
+                        Text(c.title).font(.caption).foregroundStyle(Vana.text)
+                        Text(c.detail).font(.caption2).foregroundStyle(Vana.muted)
                             .textSelection(.enabled)
                     }
                 }
@@ -198,12 +291,12 @@ struct ContentView: View {
 
     private var logStrip: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Divider().overlay(Sky.stroke)
+            Rectangle().fill(Vana.stroke).frame(height: 1)
             ScrollViewReader { sp in
                 ScrollView {
                     Text(runner.log.isEmpty ? "ready." : runner.log)
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Sky.muted)
+                        .foregroundStyle(Vana.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                         .padding(10)
@@ -213,6 +306,7 @@ struct ContentView: View {
                 .onChange(of: runner.log) { _ in sp.scrollTo("end", anchor: .bottom) }
             }
         }
+        .background(Color.black.opacity(0.28))
     }
 
     // MARK: - Right: account + play
@@ -220,17 +314,18 @@ struct ContentView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("ACCOUNT").font(.caption).tracking(2).foregroundStyle(Sky.goldDim)
+                Text("ACCOUNT").font(.caption).tracking(2.5).foregroundStyle(Vana.gold)
                 Spacer()
                 Button { refresh() } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.borderless).foregroundStyle(Sky.muted)
+                    .buttonStyle(.borderless).foregroundStyle(Vana.muted)
                     .help("Rescan for installs")
             }
 
             field("Account name", text: $user, secure: false)
             field("Password", text: $pass, secure: true)
             Toggle("Remember me", isOn: $remember)
-                .toggleStyle(.checkbox).font(.caption).foregroundStyle(Sky.muted)
+                .toggleStyle(.checkbox).font(.caption).foregroundStyle(Vana.muted)
+                .help("Stored in the macOS Keychain, never in a file in this project.")
 
             if installs.count > 1 {
                 Picker("", selection: Binding(
@@ -247,10 +342,12 @@ struct ContentView: View {
             playButton
 
             if !notice.isEmpty {
-                Text(notice).font(.caption2).foregroundStyle(Sky.gold)
+                Text(notice).font(.caption2).foregroundStyle(Vana.gold)
             }
 
-            Divider().overlay(Sky.stroke)
+            Rectangle().fill(Vana.stroke).frame(height: 1)
+
+            rendererSection
 
             DisclosureGroup(isExpanded: $showDetails) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -267,7 +364,7 @@ struct ContentView: View {
                     .padding(.top, 4)
                 }
                 .font(.caption)
-                .foregroundStyle(Sky.muted)
+                .foregroundStyle(Vana.muted)
                 .padding(.top, 8)
                 .onChange(of: perf.msync) { _ in perf.save() }
                 .onChange(of: perf.silenceWineDebug) { _ in perf.save() }
@@ -275,50 +372,66 @@ struct ContentView: View {
                 .onChange(of: perf.largeAddressAware) { _ in perf.save() }
                 .onChange(of: perf.metalHUD) { _ in perf.save() }
             } label: {
-                Text("SETUP & GRAPHICS").font(.caption).tracking(2).foregroundStyle(Sky.goldDim)
+                Text("SETUP & DIAGNOSTICS").font(.caption).tracking(2.5)
+                    .foregroundStyle(Vana.gold)
             }
 
             Spacer()
 
-            HStack(spacing: 4) {
-                Circle().fill(blocked ? .red : .green).frame(width: 6, height: 6)
-                Text(blocked ? "setup incomplete" : "ready to play")
-                    .font(.caption2).foregroundStyle(Sky.muted)
+            HStack(spacing: 5) {
+                Circle().fill(scanning ? Vana.gold : (blocked ? Vana.ember : Vana.crystal)).frame(width: 6, height: 6)
+                Text(scanning ? "looking for your install…" : (blocked ? "setup incomplete" : "ready to play"))
+                    .font(.caption2).foregroundStyle(Vana.muted)
             }
         }
         .padding(22)
-        .background(Sky.panel)
+        .background(Vana.panel)
+    }
+
+    private var rendererSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("RENDERER").font(.caption).tracking(2.5).foregroundStyle(Vana.gold)
+            Picker("", selection: $perf.renderer) {
+                ForEach(Renderer.allCases) { r in Text(r.title).tag(r) }
+            }
+            .labelsHidden()
+            .onChange(of: perf.renderer) { _ in perf.save() }
+            Text(perf.renderer.blurb)
+                .font(.caption2).foregroundStyle(Vana.muted).fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func field(_ title: String, text: Binding<String>, secure: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased()).font(.caption2).tracking(1.5).foregroundStyle(Sky.muted)
+            Text(title.uppercased()).font(.caption2).tracking(1.5).foregroundStyle(Vana.muted)
             Group {
                 if secure { SecureField("", text: text) } else { TextField("", text: text) }
             }
             .textFieldStyle(.plain)
             .padding(8)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.35)))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Sky.stroke))
-            .foregroundStyle(Sky.text)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.40)))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Vana.crystalDim.opacity(0.5)))
+            .foregroundStyle(Vana.text)
         }
     }
 
     private var playButton: some View {
         Button(action: play) {
             Text(runner.running ? "RUNNING" : "PLAY")
-                .font(.system(size: 15, weight: .semibold)).tracking(4)
-                .frame(maxWidth: .infinity).padding(.vertical, 12)
+                .font(.system(size: 15, weight: .semibold, design: .serif)).tracking(5)
+                .frame(maxWidth: .infinity).padding(.vertical, 13)
                 .background(
-                    LinearGradient(colors: runner.running ? [Sky.goldDim.opacity(0.4), Sky.goldDim.opacity(0.25)]
-                                                          : [Sky.gold, Sky.goldDim],
+                    LinearGradient(colors: runner.running
+                                   ? [Vana.goldDim.opacity(0.45), Vana.goldDim.opacity(0.25)]
+                                   : [Vana.gold, Vana.goldDim],
                                    startPoint: .top, endPoint: .bottom))
-                .foregroundStyle(Color.black.opacity(0.85))
-                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .foregroundStyle(Color.black.opacity(0.86))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .shadow(color: Vana.gold.opacity(runner.running ? 0 : 0.35), radius: 10, y: 3)
         }
         .buttonStyle(.plain)
         .keyboardShortcut(.defaultAction)
-        .disabled(selected == nil || runner.running || blocked)
+        .disabled(selected == nil || runner.running || blocked || scanning)
     }
 
     // MARK: - Actions
@@ -345,15 +458,25 @@ struct ContentView: View {
         runner.launch(i, perf: perf, profile: server.bootProfile)
     }
 
-    private func refresh() {
-        installs = Install.discover()
-        if selected == nil || !installs.contains(where: { $0.id == selected?.id }) {
-            selected = installs.first
+    private func refresh() { Task { await refreshAsync() } }
+
+    private func refreshAsync() async {
+        scanning = true
+        let found = await Task.detached(priority: .userInitiated) { Install.discover() }.value
+        installs = found
+        if selected == nil || !found.contains(where: { $0.id == selected?.id }) {
+            selected = found.first
         }
-        recheck()
+        await recheckAsync()
+        scanning = false
     }
 
-    private func recheck() { checks = selected.map { Preflight.run($0) } ?? [] }
+    private func recheck() { Task { await recheckAsync() } }
+
+    private func recheckAsync() async {
+        guard let i = selected else { checks = []; return }
+        checks = await Task.detached(priority: .userInitiated) { Preflight.run(i) }.value
+    }
 
     private func openFFXIConfig() {
         guard let i = selected else { return }
@@ -369,9 +492,9 @@ struct ContentView: View {
 
     private func color(_ s: Check.State) -> Color {
         switch s {
-        case .ok: return .green
-        case .warn: return .orange
-        case .bad: return .red
+        case .ok: return Vana.crystal
+        case .warn: return Vana.gold
+        case .bad: return Vana.ember
         }
     }
 }

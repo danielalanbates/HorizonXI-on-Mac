@@ -44,6 +44,11 @@ final class Runner: ObservableObject {
     func launch(_ install: Install, perf: PerfSettings, profile: String = "horizonxi.ini") {
         guard !running else { return }
         running = true
+        // The renderer lives in the prefix's registry and DLLs, not in the environment, so it has
+        // to be written before the process starts — and after any wineserver holding the old copy
+        // of the registry has exited.
+        RendererSetup.apply(perf.renderer, to: install) { [weak self] in self?.appendLine($0) }
+        Credentials.applyIniOverrides(perf.renderer.iniOverrides, to: install, profile: profile)
         appendLine("==> launching \(profile)")
         spawn(install.wine,
               args: ["C:\\HorizonXI\\Ashita-cli.exe", profile],

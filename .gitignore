@@ -8,3 +8,7 @@ dist/
 config/boot/*.ini
 *.premetal
 sweep-out/
+
+# harness output
+scripts/shots/
+*.vkbak
