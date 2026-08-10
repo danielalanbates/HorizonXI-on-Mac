@@ -3,6 +3,10 @@
 Running **HorizonXI** (Final Fantasy XI private server) natively on Apple Silicon macOS under
 Wine — no virtual machine.
 
+> ## 📣 Open beta — [read the announcement](docs/ANNOUNCEMENT.md)
+> Launcher and install script are ready for testers. It works; it is slow. Testers wanted,
+> especially on Apple Silicon with more than 8GB and on Intel Macs.
+
 > **Status: PLAYABLE.** As of 2026-08-08, Final Fantasy XI runs natively on Apple Silicon macOS
 > under Wine — logged in, in-world, chat live, Ashita macros bound. As far as a full GitHub sweep
 > can tell this is the first time that has happened: every other FFXI-on-a-non-Windows-machine
@@ -116,9 +120,11 @@ silently broken before, one-click prefix repair, graphics settings, and a live l
 
 ## Known limitations
 
-- **Performance is the open problem.** Wine's built-in D3D8 goes through OpenGL, the slowest path
-  on macOS; loading screens take minutes on an M1/8GB. Routing D3D8 → d3d8to9 → DXVK (d9vk) to
-  reach Metal was tried and broke Ashita injection — reverted, still unsolved.
+- **Performance is the open problem, and it is CPU-bound, not GPU-bound.** Measured during play:
+  GPU device utilization **6%**, game CPU **148%**. The GPU is starved because wine's built-in
+  D3D8 translates every call on one thread (D3D8 → WineD3D → OpenGL → Metal). Loading screens take
+  ~4 minutes on an M1/8GB. Routing D3D8 → d3d8to9 → d9vk to reach Metal was tried twice and broke
+  Ashita injection — reverted, still unsolved.
 - Five Ashita plugins fail to load: built against plugin interface 4.15, this Ashita wants 4.16.
 - The `.dmg` is unsigned and un-notarised, so Gatekeeper blocks it on other Macs.
 - Tested on exactly one machine: M1 MacBook Pro, 8GB, macOS 26.5.
