@@ -430,6 +430,10 @@ Those numbers are **not** a speedup. A renderer that never presents a frame is a
 some of that CPU drop is simply work not being done. Taking the counters as success was the
 mistake here; the acceptance test is a visible frame, not a busy GPU.
 
+`d3d9.deferSurfaceCreation = True` — DXVK's own option for exactly this class of wine
+presentation failure — was tried and changes nothing; the option is confirmed applied in the log
+(`info: d3d9.deferSurfaceCreation = True`) and the window is still black.
+
 So: **unsolved, and reverted.** What is genuinely new is that the three blockers above are gone —
 the DLLs load, Ashita injects, and `vkCreateDevice` succeeds. What remains is presentation:
 getting DXVK's swapchain onto the wine window on macOS. `scripts/install.sh` can still apply the
