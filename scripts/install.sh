@@ -86,10 +86,14 @@ done
 # ---------------------------------------------------------------------------
 # 3b. Metal renderer (the performance fix).
 #
+# EXPERIMENTAL, OFF BY DEFAULT -- set HXI_METAL=1 to try it.
+#
 # Wine's builtin D3D8 runs through OpenGL and is translated on a single CPU thread: measured at
-# 148% CPU with the GPU at 6%, i.e. the GPU sits idle while one core is the ceiling. Routing
-# D3D8 -> d3d8to9 -> DXVK 1.10.3 -> MoltenVK -> Metal drops that to ~11-16% CPU with the GPU at
-# 24-32%.
+# 148% CPU with the GPU at 6%. Routing D3D8 -> d3d8to9 -> DXVK 1.10.3 -> MoltenVK -> Metal gets
+# the CPU down to ~11-16% with the GPU at 24-32% -- but the window stays BLACK. DXVK creates the
+# device, the GPU does work, and no frame is ever presented (watched for 6 minutes; the OpenGL
+# path draws its splash in ~40s). So the low CPU partly reflects it not drawing. Presentation is
+# the unsolved part; do not mistake the counters for a working renderer.
 #
 # Three things all have to be true or it silently fails:
 #
@@ -104,7 +108,7 @@ done
 #      reports Vulkan 1.2 and works. DXVK 2.x/3.x cannot be used at all -- they require Vulkan 1.3
 #      and geometryShader, which Metal has no equivalent for.
 # ---------------------------------------------------------------------------
-if [[ -n "${HXI_METAL:-1}" && -f "${0:h}/../vendor/d3d8to9.dll" && -f "${0:h}/../vendor/dxvk-1.10.3-x32-d3d9.dll" ]]; then
+if [[ -n "${HXI_METAL:-}" && -f "${0:h}/../vendor/d3d8to9.dll" && -f "${0:h}/../vendor/dxvk-1.10.3-x32-d3d9.dll" ]]; then
   info "installing the Metal renderer (DXVK 1.10.3 + d3d8to9)"
   SYSWOW="$WINEPREFIX/drive_c/windows/syswow64"
   mkdir -p "$WINEPREFIX/drive_c/dll-backup"

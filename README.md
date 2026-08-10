@@ -4,9 +4,9 @@ Running **HorizonXI** (Final Fantasy XI private server) natively on Apple Silico
 Wine — no virtual machine.
 
 > ## 📣 Open beta — [read the announcement](docs/ANNOUNCEMENT.md)
-> Launcher and install script are ready for testers, and the renderer is now on Metal —
-> game CPU 148% → 11–16%. Testers wanted, especially on Apple Silicon with more than 8GB
-> and on Intel Macs.
+> Launcher and install script are ready for testers. It works; it is slow, and the Metal
+> renderer is close but not there yet (see below). Testers wanted, especially on Apple
+> Silicon with more than 8GB and on Intel Macs.
 
 > **Status: PLAYABLE.** As of 2026-08-08, Final Fantasy XI runs natively on Apple Silicon macOS
 > under Wine — logged in, in-world, chat live, Ashita macros bound. As far as a full GitHub sweep
@@ -119,17 +119,19 @@ silently broken before, one-click prefix repair, graphics settings, and a live l
 
 ![Main menu](docs/img/main-menu.png)
 
-## Performance — now on Metal
+## Performance — the open problem
 
-| | builtin D3D8 (OpenGL) | d3d8to9 + DXVK 1.10.3 (Metal) |
-| --- | --- | --- |
-| Game CPU | 148% | **11–16%** |
-| GPU device utilization | 6% | **24–32%** |
+The game runs on wine's builtin D3D8, which goes through OpenGL and is translated on a single CPU
+thread: **148% CPU with the GPU at 6%**. The GPU is starved, not unused.
 
-`scripts/install.sh` sets this up. Three things must all be true or it silently falls back:
-the `api-ms-win-crt-*` DLLs wine does not ship, a `d3d8.dll` on **Ashita's** search path as well
-as the game's, and the `moltenvkcx` MoltenVK (Vulkan 1.2) rather than the default (1.1). DXVK
-2.x/3.x cannot work on Apple Silicon at all. Details in [`docs/FINDINGS.md`](docs/FINDINGS.md).
+Getting onto Metal is *close*. D3D8 → d3d8to9 → DXVK 1.10.3 → MoltenVK now gets all the way to a
+live Vulkan device — three separate blockers solved (the `api-ms-win-crt-*` DLLs wine does not
+ship, a `d3d8.dll` on **Ashita's** search path as well as the game's, and the `moltenvkcx`
+MoltenVK that speaks Vulkan 1.2 rather than the default 1.1). **But it never presents a frame** —
+the window stays black while the GPU does work. That last step, DXVK's swapchain onto a wine
+window on macOS, is unsolved. `HXI_METAL=1 ./scripts/install.sh …` applies the configuration for
+anyone who wants to attack it. DXVK 2.x/3.x cannot work on Apple Silicon at all (Vulkan 1.3 +
+`geometryShader`). Details in [`docs/FINDINGS.md`](docs/FINDINGS.md).
 
 ## Known limitations
 
@@ -146,8 +148,7 @@ as the game's, and the `moltenvkcx` MoltenVK (Vulkan 1.2) rather than the defaul
 - [x] Character select and login — driven end to end from the host
 - [x] `HorizonXI-on-Mac.app` — launcher with preflight, repair, account login
 - [x] `package.sh` — distributable disk image
-- [x] **Renderer on Metal** — D3D8 → d3d8to9 → DXVK 1.10.3 → MoltenVK → Metal.
-      Game CPU 148% → 11–16%, GPU 6% → 24–32%
+- [ ] **Renderer on Metal** — device creation solved; presentation (black window) is not
 - [ ] Bundle Wine + client acquisition for non-technical users (first-run downloader)
 - [ ] Developer ID signature + notarisation
 - [ ] Announcement / macOS entry on the HorizonXI wiki — draft in

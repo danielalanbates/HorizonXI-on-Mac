@@ -33,17 +33,12 @@ was eventually found. This may be useful to the Linux side too.
 
 ## Read this before you try it
 
-**It used to be slow. It is not any more.** Wine's builtin Direct3D 8 runs through OpenGL and is
-translated on one CPU thread, which pegged a core while the GPU sat idle. Routing
-D3D8 → [d3d8to9](https://github.com/crosire/d3d8to9) → DXVK 1.10.3 → MoltenVK → Metal fixes it:
+**It is slow, and the fix is one step away.** Wine's builtin Direct3D 8 runs through OpenGL and is
+translated on a single CPU thread — **148% CPU with the GPU at 6%**. The GPU is starved, not
+unused, so there is no "enable the GPU" switch; the answer is removing translation layers.
 
-| | builtin D3D8 (OpenGL) | DXVK on Metal |
-| --- | --- | --- |
-| Game CPU | 148% | **11–16%** |
-| GPU device utilization | 6% | **24–32%** |
-
-Three things have to be true at once, and each one fails silently on its own — which is why this
-took a while and why it is worth writing down:
+D3D8 → [d3d8to9](https://github.com/crosire/d3d8to9) → DXVK 1.10.3 → MoltenVK now gets all the way
+to a **live Vulkan device**. Three blockers had to fall first, and each failed silently on its own:
 
 - **`Ashita.dll` imports `d3d8.dll` itself.** A native D3D8 shim must sit on *Ashita's* search
   path, not just the game's. Miss that and you get `[E] Injection failed!`, which looks exactly
@@ -51,13 +46,21 @@ took a while and why it is worth writing down:
 - **This wine build ships zero `api-ms-win-crt-*` DLLs**, and every renderer DLL imports a dozen
   of them, so none of them can load in a stock prefix. Working 32-bit copies are sitting in the
   wrapper's own `wine.cx32bak/lib32on64/wine/`.
-- **The default MoltenVK reports Vulkan 1.1** and DXVK cannot create a device on it. The
-  `moltenvkcx` build shipped alongside it reports 1.2 and works.
+- **The default MoltenVK reports Vulkan 1.1** and DXVK cannot create a device on it
+  (`DxvkAdapter: Failed to create device`, `timelineSemaphore : 0`). The `moltenvkcx` build
+  shipped alongside it reports 1.2 and works.
 
-Also worth knowing for anyone else attempting this: **DXVK 2.x/3.x cannot work on Apple Silicon.**
-It requires Vulkan 1.3 and `geometryShader`; Metal has no geometry shaders, so MoltenVK can never
-expose one. DXVK 3.0.2 loads, finds the M1, and rejects it. Use 1.10.3 from doitsujin's releases —
-Gcenx's macOS repack of that same version omits `d3d9.dll`.
+**And then it draws nothing.** The window opens, the device is live, the GPU shows 24–32%
+utilization, CPU drops to 11–16% — and the window stays black for as long as you care to watch.
+That is not a speedup; a renderer that never presents a frame is also cheap. **Getting DXVK's
+swapchain onto a wine window on macOS is the one remaining step, and it is where help would make
+the most difference.** `HXI_METAL=1 ./scripts/install.sh …` sets the whole thing up if you want to
+attack it; it is off by default and the shipped configuration uses the working OpenGL path.
+
+Also worth knowing: **DXVK 2.x/3.x cannot work on Apple Silicon.** It requires Vulkan 1.3 and
+`geometryShader`; Metal has no geometry shaders, so MoltenVK can never expose one. DXVK 3.0.2
+loads, finds the M1, and rejects it. Use 1.10.3 from doitsujin's releases — Gcenx's macOS repack
+of that same version omits `d3d9.dll`.
 
 Other known limitations:
 

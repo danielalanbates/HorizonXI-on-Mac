@@ -403,7 +403,7 @@ Four things were established, each of which cost a run to find:
    clean (advapi32, gdi32, kernel32, user32, the api-sets), so the failure is in the module
    itself, not a missing dependency.
 
-### SOLVED — the Metal path, and the fifth thing
+### The Metal path — device yes, picture no
 
 **Upstream DXVK 1.10.3's x32 `d3d9.dll` works.** It predates the Vulkan 1.3 requirement, does not
 ask for `geometryShader`, maps cleanly, and enumerates the M1. Pair it with `d3d8to9` for the
@@ -417,15 +417,23 @@ That alone still failed at `vkCreateDevice` — `err: DxvkAdapter: Failed to cre
 Repointing `SharedSupport/wine/lib/libMoltenVK.dylib` at that one makes device creation succeed
 and the game window appear.
 
-Measured on the same scene, before and after:
+**And then it renders nothing.** The window is created, DXVK reports a live device, the GPU shows
+real utilization — and the window stays black. Watched for six minutes; the OpenGL path draws its
+splash in about forty seconds and reaches the menu in one to four. Counters on the same scene:
 
-| | builtin D3D8 (OpenGL) | d3d8to9 + DXVK 1.10.3 (Metal) |
+| | builtin D3D8 (OpenGL) | d3d8to9 + DXVK 1.10.3 |
 | --- | --- | --- |
-| Game CPU | 148% | **11–16%** |
-| GPU device utilization | 6% | **24–32%** |
+| Game CPU | 148% | 11–16% |
+| GPU device utilization | 6% | 24–32% |
 
-A ~10x drop in CPU, and the GPU is finally doing the work. `scripts/install.sh` applies all of it;
-set `HXI_METAL=` to skip it. Backups: `drive_c/dll-backup/*.builtin.dll` and
-`wine/lib/libMoltenVK.dylib.stock`.
+Those numbers are **not** a speedup. A renderer that never presents a frame is also cheap, and
+some of that CPU drop is simply work not being done. Taking the counters as success was the
+mistake here; the acceptance test is a visible frame, not a busy GPU.
+
+So: **unsolved, and reverted.** What is genuinely new is that the three blockers above are gone —
+the DLLs load, Ashita injects, and `vkCreateDevice` succeeds. What remains is presentation:
+getting DXVK's swapchain onto the wine window on macOS. `scripts/install.sh` can still apply the
+whole configuration for anyone who wants to attack that (`HXI_METAL=1`, off by default). Backups:
+`drive_c/dll-backup/*.builtin.dll` and `wine/lib/libMoltenVK.dylib.stock`.
 Backups live in `prefix10/drive_c/dll-backup/`. Note that `reg delete` does not flush to
 `user.reg` until `wineserver` exits — kill it before editing, or the change silently persists.
