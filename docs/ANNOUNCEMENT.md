@@ -45,18 +45,35 @@ The GPU is idle because it is starved. Wine's built-in Direct3D 8 translates eve
 thread — D3D8 → WineD3D → OpenGL → Metal — and that thread is the ceiling. The fix is removing
 translation layers, not "turning on the GPU".
 
-Routing D3D8 → [d3d8to9](https://github.com/crosire/d3d8to9) → d9vk (the 32-bit D3D9-on-Vulkan
-build that ships in the wrapper) to reach Metal has been tried twice, with the shims in
-`syswow64` and beside the game executables. Both give `[E] Injection failed!` and no game window.
-Reverted both times. **This is the single biggest thing standing between here and "actually
-playable", and help on it is very welcome.**
+Getting to Metal has been investigated properly and the results are in
+[`docs/FINDINGS.md` §9](FINDINGS.md). Three things are now known:
+
+- `Ashita.dll` imports `d3d8.dll` itself, so a native D3D8 shim must sit on **Ashita's** search
+  path, not just the game's. Miss that and you get `[E] Injection failed!`, which looks like the
+  renderer breaking Ashita and is not.
+- This wine build ships **zero `api-ms-win-crt-*` DLLs**, and every renderer DLL imports a dozen
+  of them, so none of them can load in a stock prefix. Fifteen working 32-bit forwarders exist in
+  the wrapper's own `wine.cx32bak/lib32on64/wine/`.
+- **DXVK 2.x/3.x cannot work on Apple Silicon at all**: it requires Vulkan 1.3 and
+  `geometryShader`, and Metal has no geometry shaders, so MoltenVK can never expose it. DXVK 3.0.2
+  loads, finds the M1, and rejects it.
+
+What is still needed is a **32-bit D3D9-on-Metal/Vulkan** implementation. The wrapper's D3DMetal
+is x86_64-only, and its 32-bit `d9vk` will not map (`c0000335`-class load failure) even as a wine
+builtin. **This is the single biggest thing standing between here and "actually playable", and
+help on it is very welcome — especially from anyone who has built DXVK 1.10.3's `d3d9.dll` for
+32-bit macOS.**
 
 Other known limitations:
 
 - Five Ashita plugins (`addons`, `screenshot`, `Nameplate`, `PacketFlow`, `thirdparty`) fail to
   load — built against plugin interface 4.15, this Ashita expects 4.16.
 - The `.dmg` is unsigned and un-notarised, so Gatekeeper blocks it on other Macs.
-- The client itself (~27GB) and the Wine wrapper are not bundled. You supply both.
+- The client itself (~27GB) and the Wine wrapper are not bundled. You supply both;
+  `scripts/Install FFXI on Mac.command` walks you through the rest.
+- Only **HorizonXI** is tested. The launcher has buttons for Eden, CatsEyeXI and Nasomi, but
+  their login hosts are left blank on purpose rather than guessed at — fill them in from each
+  server's own installer.
 - Tested on exactly one machine: M1 MacBook Pro, 8GB, macOS 26.5.
 
 ## Testers wanted
