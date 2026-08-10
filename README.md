@@ -118,13 +118,20 @@ silently broken before, one-click prefix repair, graphics settings, and a live l
 
 ![Main menu](docs/img/main-menu.png)
 
+## Performance — now on Metal
+
+| | builtin D3D8 (OpenGL) | d3d8to9 + DXVK 1.10.3 (Metal) |
+| --- | --- | --- |
+| Game CPU | 148% | **11–16%** |
+| GPU device utilization | 6% | **24–32%** |
+
+`scripts/install.sh` sets this up. Three things must all be true or it silently falls back:
+the `api-ms-win-crt-*` DLLs wine does not ship, a `d3d8.dll` on **Ashita's** search path as well
+as the game's, and the `moltenvkcx` MoltenVK (Vulkan 1.2) rather than the default (1.1). DXVK
+2.x/3.x cannot work on Apple Silicon at all. Details in [`docs/FINDINGS.md`](docs/FINDINGS.md).
+
 ## Known limitations
 
-- **Performance is the open problem, and it is CPU-bound, not GPU-bound.** Measured during play:
-  GPU device utilization **6%**, game CPU **148%**. The GPU is starved because wine's built-in
-  D3D8 translates every call on one thread (D3D8 → WineD3D → OpenGL → Metal). Loading screens take
-  ~4 minutes on an M1/8GB. Routing D3D8 → d3d8to9 → d9vk to reach Metal was tried twice and broke
-  Ashita injection — reverted, still unsolved.
 - Five Ashita plugins fail to load: built against plugin interface 4.15, this Ashita wants 4.16.
 - The `.dmg` is unsigned and un-notarised, so Gatekeeper blocks it on other Macs.
 - Tested on exactly one machine: M1 MacBook Pro, 8GB, macOS 26.5.
@@ -138,7 +145,8 @@ silently broken before, one-click prefix repair, graphics settings, and a live l
 - [x] Character select and login — driven end to end from the host
 - [x] `HorizonXI-on-Mac.app` — launcher with preflight, repair, account login
 - [x] `package.sh` — distributable disk image
-- [ ] **Frame-rate tuning** — get off the OpenGL D3D8 path
+- [x] **Renderer on Metal** — D3D8 → d3d8to9 → DXVK 1.10.3 → MoltenVK → Metal.
+      Game CPU 148% → 11–16%, GPU 6% → 24–32%
 - [ ] Bundle Wine + client acquisition for non-technical users (first-run downloader)
 - [ ] Developer ID signature + notarisation
 - [ ] Announcement / macOS entry on the HorizonXI wiki — draft in

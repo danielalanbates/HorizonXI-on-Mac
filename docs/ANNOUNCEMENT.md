@@ -33,36 +33,31 @@ was eventually found. This may be useful to the Linux side too.
 
 ## Read this before you try it
 
-**It is slow.** Loading screens take around four minutes on an M1 with 8GB. The cause is measured,
-not guessed:
+**It used to be slow. It is not any more.** Wine's builtin Direct3D 8 runs through OpenGL and is
+translated on one CPU thread, which pegged a core while the GPU sat idle. Routing
+D3D8 → [d3d8to9](https://github.com/crosire/d3d8to9) → DXVK 1.10.3 → MoltenVK → Metal fixes it:
 
-| | |
-| --- | --- |
-| GPU device utilization | 6% |
-| Game CPU | 148% (~1.5 cores) |
+| | builtin D3D8 (OpenGL) | DXVK on Metal |
+| --- | --- | --- |
+| Game CPU | 148% | **11–16%** |
+| GPU device utilization | 6% | **24–32%** |
 
-The GPU is idle because it is starved. Wine's built-in Direct3D 8 translates every call on one CPU
-thread — D3D8 → WineD3D → OpenGL → Metal — and that thread is the ceiling. The fix is removing
-translation layers, not "turning on the GPU".
+Three things have to be true at once, and each one fails silently on its own — which is why this
+took a while and why it is worth writing down:
 
-Getting to Metal has been investigated properly and the results are in
-[`docs/FINDINGS.md` §9](FINDINGS.md). Three things are now known:
+- **`Ashita.dll` imports `d3d8.dll` itself.** A native D3D8 shim must sit on *Ashita's* search
+  path, not just the game's. Miss that and you get `[E] Injection failed!`, which looks exactly
+  like the renderer breaking Ashita and is nothing of the sort.
+- **This wine build ships zero `api-ms-win-crt-*` DLLs**, and every renderer DLL imports a dozen
+  of them, so none of them can load in a stock prefix. Working 32-bit copies are sitting in the
+  wrapper's own `wine.cx32bak/lib32on64/wine/`.
+- **The default MoltenVK reports Vulkan 1.1** and DXVK cannot create a device on it. The
+  `moltenvkcx` build shipped alongside it reports 1.2 and works.
 
-- `Ashita.dll` imports `d3d8.dll` itself, so a native D3D8 shim must sit on **Ashita's** search
-  path, not just the game's. Miss that and you get `[E] Injection failed!`, which looks like the
-  renderer breaking Ashita and is not.
-- This wine build ships **zero `api-ms-win-crt-*` DLLs**, and every renderer DLL imports a dozen
-  of them, so none of them can load in a stock prefix. Fifteen working 32-bit forwarders exist in
-  the wrapper's own `wine.cx32bak/lib32on64/wine/`.
-- **DXVK 2.x/3.x cannot work on Apple Silicon at all**: it requires Vulkan 1.3 and
-  `geometryShader`, and Metal has no geometry shaders, so MoltenVK can never expose it. DXVK 3.0.2
-  loads, finds the M1, and rejects it.
-
-What is still needed is a **32-bit D3D9-on-Metal/Vulkan** implementation. The wrapper's D3DMetal
-is x86_64-only, and its 32-bit `d9vk` will not map (`c0000335`-class load failure) even as a wine
-builtin. **This is the single biggest thing standing between here and "actually playable", and
-help on it is very welcome — especially from anyone who has built DXVK 1.10.3's `d3d9.dll` for
-32-bit macOS.**
+Also worth knowing for anyone else attempting this: **DXVK 2.x/3.x cannot work on Apple Silicon.**
+It requires Vulkan 1.3 and `geometryShader`; Metal has no geometry shaders, so MoltenVK can never
+expose one. DXVK 3.0.2 loads, finds the M1, and rejects it. Use 1.10.3 from doitsujin's releases —
+Gcenx's macOS repack of that same version omits `d3d9.dll`.
 
 Other known limitations:
 
