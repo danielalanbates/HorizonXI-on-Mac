@@ -4,15 +4,22 @@
 The game draws (418 calls/frame) and DXVK presents (the HUD is visible), but the game's own
 output is black. That points at the back buffer format / depth-stencil setup rather than
 presentation, so vary those and look at the pictures.
+
+Usage:
+    HXI_WRAPPER=/path/to/wrapper.app ./scripts/sweep-present.py [case ...]
+
+Screenshots land in ./sweep-out/. Run it, then look at the pictures -- the whole point is that
+counters cannot tell you whether a frame appeared.
 """
 import os, re, subprocess, sys, time
 
-S = "/Volumes/x10/Video Games/Mac HorizonXI/siku.app/Contents/SharedSupport"
-W = "/Volumes/x10/Video Games/Mac HorizonXI/siku.app"
-P = f"{S}/prefix10"
+W = os.environ.get("HXI_WRAPPER", "/Volumes/x10/Video Games/Mac HorizonXI/siku.app")
+S = f"{W}/Contents/SharedSupport"
+P = f"{S}/{os.environ.get('HXI_PREFIX', 'prefix10')}"
 G = f"{P}/drive_c/HorizonXI"
 INI = f"{G}/config/boot/horizonxi.ini"
-OUT = "/private/tmp/claude-501/-Users-daniel/e76088d1-7627-4973-8b4e-9377b2f8d1cd/scratchpad"
+OUT = os.environ.get("HXI_OUT", os.path.abspath("sweep-out"))
+os.makedirs(OUT, exist_ok=True)
 
 # name -> (ini overrides, extra env)
 CASES = {

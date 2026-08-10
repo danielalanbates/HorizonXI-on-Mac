@@ -3,3 +3,8 @@
 app/.build/
 app/build/
 dist/
+
+# never commit a boot profile — it holds the account name and password
+config/boot/*.ini
+*.premetal
+sweep-out/
