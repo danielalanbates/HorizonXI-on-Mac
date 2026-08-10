@@ -120,11 +120,26 @@ correctly at 29 fps (`docs/img/dxvk-world-black.png`). Sky renders at character 
 and models do not. The shape of the failure — vertex-coloured geometry appears, textured geometry
 does not — points at texture sampling returning black rather than at presentation.
 
-**Next thing to try:** run with `DXVK_LOG_LEVEL=debug` and look at the `CheckDeviceFormat` traffic
-for `D3DFMT_P8` / `A8P8`. FFXI leans on palettised textures, DXVK's D3D9 has historically not
-implemented them, and "palettised textures sample as black while uncompressed UI is fine" fits
-every observation. If that is it, the options are a DXVK patch or forcing FFXI to non-palettised
-assets.
+**The lead, and its caveat.** `DXVK_LOG_LEVEL=debug` produces exactly one repeated complaint, and
+it repeats a lot — **1126 times** by character select:
+
+```
+warn:  ConvertFormat: Unknown format encountered: 65
+```
+
+65 is `D3DFMT_W11V11U10`, a **D3D8-only** bump-map format that was removed in D3D9. d3d8to9 passes
+it through unchanged and DXVK has no idea what it is. That is a genuine translation gap and it is
+worth pursuing.
+
+Be careful with it, though: it is not proven to be *the* cause. FFXI's bump mapping is already off
+(`ffxi.registry 0017 = 0`), and zeroing `0018`–`0021`, `0034` and `0035` did not reduce the count.
+`ConvertFormat` is also reached from `CheckDeviceFormat`, so 1126 hits may be capability probing
+rather than 1126 failed texture uploads. Confirm which before building anything on it.
+
+One trap found while bisecting those keys: **`0034` is Window Mode** (0 = full screen). Setting it
+to 0 sends the game into fullscreen, `EnterFullscreenMode` fails on macOS, and the process exits —
+which reads as "the experiment produced zero format errors" when really it produced zero frames.
+Always check the game is still alive before believing a count went down.
 
 Things already ruled out for this pathway: it is not the present parameters (the old
 `swapeffect = 1` / `backbuffercount = 1` workaround is no longer needed — defaults work now), and
