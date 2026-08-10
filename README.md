@@ -4,8 +4,9 @@ Running **HorizonXI** (Final Fantasy XI private server) natively on Apple Silico
 Wine — no virtual machine.
 
 > ## 📣 Open beta — [read the announcement](docs/ANNOUNCEMENT.md)
-> Launcher and install script are ready for testers. It works; it is slow. Testers wanted,
-> especially on Apple Silicon with more than 8GB and on Intel Macs.
+> Launcher and install script are ready for testers, and the renderer is now on Metal —
+> game CPU 148% → 11–16%. Testers wanted, especially on Apple Silicon with more than 8GB
+> and on Intel Macs.
 
 > **Status: PLAYABLE.** As of 2026-08-08, Final Fantasy XI runs natively on Apple Silicon macOS
 > under Wine — logged in, in-world, chat live, Ashita macros bound. As far as a full GitHub sweep
