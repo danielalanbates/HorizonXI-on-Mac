@@ -356,3 +356,59 @@ Daniel's password is currently in `config/boot/horizonxi.ini` on the `command` l
 (`--user … --pass …`, chmod 600) to enable autologin. Remove those two arguments to disable.
 It has never been written to iCloud, a log, or any remote service; the one Ashita log that
 captured it was scrubbed.
+
+---
+
+## 9. The Metal renderer investigation (2026-08-09) — why D3D8 is still on OpenGL
+
+The performance problem is **CPU-bound, not GPU-bound**. Measured mid-session:
+
+| | |
+| --- | --- |
+| GPU device utilization (`ioreg -c IOAccelerator`) | **6%** |
+| `horizon-loader.exe` CPU | **148%** (~1.5 cores) |
+
+The GPU is starved. Wine's builtin D3D8 translates on one thread — D3D8 → WineD3D → OpenGL →
+Metal. So the goal is deleting translation layers, not "enabling the GPU".
+
+Four things were established, each of which cost a run to find:
+
+1. **`Ashita.dll` imports `d3d8.dll` directly.** With `*d3d8`=native, wine refuses the builtin and
+   looks for a native file on *Ashita.dll's* search path. Put the shim only in the game
+   directories and you get `err:module:import_dll Library d3d8.dll (which is needed by
+   L"C:\HorizonXI\Ashita.dll") not found` → `[E] Injection failed!`. This is what made the first
+   two attempts look like "the renderer breaks Ashita". It does not; the DLL was simply not where
+   Ashita could see it.
+
+2. **This wine build ships zero `api-ms-win-crt-*` DLLs.** Every modern renderer DLL —
+   d3d8to9 (MSVC), DXVK (MinGW), d9vk — imports 12 to 15 of them, so *none of them can load in a
+   stock prefix*. `vc_redist.x86.exe` does not help: it carries the VC runtime, not the UCRT
+   api-sets. Fifteen working 32-bit forwarders were recovered from the wrapper's own
+   `wine.cx32bak/lib32on64/wine/` and copied into `syswow64`, after which DXVK loaded cleanly.
+
+3. **DXVK 2.x/3.x is impossible on Apple Silicon.** With the api-sets in place, DXVK 3.0.2's
+   `d3d8.dll` + `d3d9.dll` load and initialise, then:
+   ```
+   info:  Found device: Apple M1 (MoltenVK 0.2.2209)
+   info:    Skipping: Device does not support required feature 'geometryShader'
+   warn:  DXVK: No adapters found. ... A Vulkan 1.3 capable setup is required.
+   terminate called after throwing an instance of 'dxvk::DxvkError'
+   ```
+   Metal has no geometry shaders, so MoltenVK cannot expose the feature. This is a hard ceiling,
+   not a configuration problem, and it is why Gcenx's macOS DXVK repack is pinned at 1.10.3.
+
+4. **The wrapper's own 32-bit `d9vk` d3d9 will not map at all** — `status=c0000135` from
+   `load_dll`, before any of its imports are touched, whether installed as native in `syswow64`,
+   next to the executables, or as a builtin in `wine/lib/wine/i386-windows/`. Its import table is
+   clean (advapi32, gdi32, kernel32, user32, the api-sets), so the failure is in the module
+   itself, not a missing dependency.
+
+**Where that leaves it.** The route that can work is a D3D8→D3D9 shim (`d3d8to9` loads fine now)
+plus a 32-bit D3D9 implementation that runs on Metal. The wrapper's D3DMetal provides d3d11/d3d12
+for **x86_64 only**; the only 32-bit D3D9-on-Vulkan it ships is the d9vk that will not map. So the
+next step is a working 32-bit d3d9: either a DXVK 1.10.3 x32 `d3d9.dll` built against Vulkan 1.1
+(the Gcenx repack omits d3d9), or finding why this d9vk fails to map.
+
+Everything above was reverted; the prefix is back on wine's builtin D3D8 and the game runs.
+Backups live in `prefix10/drive_c/dll-backup/`. Note that `reg delete` does not flush to
+`user.reg` until `wineserver` exits — kill it before editing, or the change silently persists.

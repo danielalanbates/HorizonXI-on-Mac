@@ -41,12 +41,12 @@ final class Runner: ObservableObject {
         }
     }
 
-    func launch(_ install: Install, perf: PerfSettings) {
+    func launch(_ install: Install, perf: PerfSettings, profile: String = "horizonxi.ini") {
         guard !running else { return }
         running = true
-        appendLine("==> launching HorizonXI")
+        appendLine("==> launching \(profile)")
         spawn(install.wine,
-              args: ["C:\\HorizonXI\\Ashita-cli.exe", "horizonxi.ini"],
+              args: ["C:\\HorizonXI\\Ashita-cli.exe", profile],
               env: perf.environment(for: install),
               cwd: install.gameDir) { [weak self] code in
             self?.running = false

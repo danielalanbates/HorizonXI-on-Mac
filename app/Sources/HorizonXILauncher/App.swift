@@ -33,6 +33,12 @@ struct ContentView: View {
     @State private var perf = PerfSettings.load()
     @StateObject private var runner = Runner()
 
+    @StateObject private var store = ServerStore()
+    @State private var newServer = false
+    @State private var newName = ""
+    @State private var newHost = ""
+    @State private var newProfile = ""
+
     @State private var user = Credentials.username
     @State private var pass = ""
     @State private var remember = Credentials.remember
@@ -63,20 +69,22 @@ struct ContentView: View {
     private var hero: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("HORIZON XI")
+                Text((store.selected?.name ?? "FINAL FANTASY XI").uppercased())
                     .font(.system(size: 46, weight: .light, design: .serif))
                     .tracking(10)
                     .foregroundStyle(Sky.text)
-                Text("FINAL FANTASY XI · 75 ERA+ SERVER")
+                Text("FINAL FANTASY XI ON APPLE SILICON")
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(3)
                     .foregroundStyle(Sky.goldDim)
-                Text("running natively on Apple Silicon macOS — no virtual machine")
+                Text(store.selected?.note ?? "running natively — no virtual machine")
                     .font(.callout)
                     .foregroundStyle(Sky.muted)
                     .padding(.top, 6)
             }
-            .padding(32)
+            .padding(.horizontal, 32).padding(.top, 32).padding(.bottom, 18)
+
+            serverBar
 
             Spacer()
 
@@ -88,6 +96,89 @@ struct ContentView: View {
             logStrip
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One button per server, HorizonXI first because it is the one that is actually verified.
+    private var serverBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("SERVER").font(.caption2).tracking(2).foregroundStyle(Sky.goldDim)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(store.servers) { s in
+                        Button { store.select(s) } label: {
+                            HStack(spacing: 6) {
+                                Text(s.name).font(.system(size: 12, weight: .medium))
+                                if !s.verified {
+                                    Image(systemName: "questionmark.circle")
+                                        .font(.system(size: 9)).foregroundStyle(Sky.muted)
+                                }
+                            }
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 6)
+                                .fill(s.name == store.selectedID ? Sky.gold.opacity(0.22)
+                                                                 : Color.white.opacity(0.05)))
+                            .overlay(RoundedRectangle(cornerRadius: 6)
+                                .stroke(s.name == store.selectedID ? Sky.gold : Sky.stroke))
+                            .foregroundStyle(s.name == store.selectedID ? Sky.gold : Sky.text)
+                        }
+                        .buttonStyle(.plain)
+                        .help(s.verified ? s.host
+                                         : "Untested here — set the login host before playing")
+                        .contextMenu {
+                            if !Server.builtins.contains(where: { $0.name == s.name }) {
+                                Button("Remove \(s.name)") { store.remove(s) }
+                            }
+                        }
+                    }
+                    Button { newServer = true } label: {
+                        Image(systemName: "plus")
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05)))
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Sky.stroke))
+                            .foregroundStyle(Sky.muted)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Add a server")
+                }
+            }
+            if let s = store.selected, !s.verified {
+                Text(s.host.isEmpty
+                     ? "No login host set for \(s.name) — add it below before playing."
+                     : "\(s.host) — untested by this project.")
+                    .font(.caption2).foregroundStyle(.orange)
+            }
+            if let s = store.selected, !s.verified {
+                HStack(spacing: 6) {
+                    TextField("login host", text: Binding(
+                        get: { s.host },
+                        set: { var c = s; c.host = $0; store.update(c) }))
+                        .textFieldStyle(.roundedBorder).font(.caption)
+                    TextField("boot profile .ini", text: Binding(
+                        get: { s.bootProfile },
+                        set: { var c = s; c.bootProfile = $0; store.update(c) }))
+                        .textFieldStyle(.roundedBorder).font(.caption).frame(width: 150)
+                }
+            }
+        }
+        .padding(.horizontal, 32)
+        .sheet(isPresented: $newServer) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Add a server").font(.headline)
+                TextField("Name", text: $newName).textFieldStyle(.roundedBorder)
+                TextField("Login host", text: $newHost).textFieldStyle(.roundedBorder)
+                TextField("Boot profile (.ini)", text: $newProfile).textFieldStyle(.roundedBorder)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { newServer = false }
+                    Button("Add") {
+                        store.add(name: newName, host: newHost, profile: newProfile)
+                        newName = ""; newHost = ""; newProfile = ""; newServer = false
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(20).frame(width: 340)
+        }
     }
 
     private var statusList: some View {
@@ -240,12 +331,18 @@ struct ContentView: View {
         if remember { Credentials.savePassword(pass, for: user) }
         else { Credentials.deletePassword(for: user) }
 
+        let server = store.selected ?? Server.builtins[0]
+        guard !server.host.isEmpty else {
+            notice = "\(server.name) has no login host set."
+            return
+        }
         if !user.isEmpty, !pass.isEmpty {
-            if !Credentials.apply(user: user, password: pass, to: i) {
-                notice = "Could not write config/boot/horizonxi.ini — launching with its existing account."
+            if !Credentials.apply(user: user, password: pass, to: i,
+                                  profile: server.bootProfile, server: server.host) {
+                notice = "Could not write config/boot/\(server.bootProfile) — launching with its existing account."
             }
         }
-        runner.launch(i, perf: perf)
+        runner.launch(i, perf: perf, profile: server.bootProfile)
     }
 
     private func refresh() {
