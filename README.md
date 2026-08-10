@@ -101,6 +101,28 @@ size mismatches vs `file.txt` are intentional Horizon overrides, byte-identical 
 Windows install) · `dgVoodoo2` and the `winefix` addon, which the Linux guides recommend —
 `winefix` ships with the client and its own description says it only fixes a micro-stutter.
 
+## The launcher
+
+`HorizonXI-on-Mac.app` — account login (password in the Keychain, written into Ashita's boot
+profile at launch and never into this repo), a preflight check for every precondition that has
+silently broken before, one-click prefix repair, graphics settings, and a live log.
+
+```sh
+./app/bundle.sh          # build the .app (no Xcode needed — Command Line Tools only)
+./scripts/package.sh     # build dist/HorizonXI-on-Mac-<version>.dmg
+```
+
+![Main menu](docs/img/main-menu.png)
+
+## Known limitations
+
+- **Performance is the open problem.** Wine's built-in D3D8 goes through OpenGL, the slowest path
+  on macOS; loading screens take minutes on an M1/8GB. Routing D3D8 → d3d8to9 → DXVK (d9vk) to
+  reach Metal was tried and broke Ashita injection — reverted, still unsolved.
+- Five Ashita plugins fail to load: built against plugin interface 4.15, this Ashita wants 4.16.
+- The `.dmg` is unsigned and un-notarised, so Gatekeeper blocks it on other Macs.
+- Tested on exactly one machine: M1 MacBook Pro, 8GB, macOS 26.5.
+
 ## Roadmap
 
 - [x] Login and server connection
@@ -108,9 +130,13 @@ Windows install) · `dgVoodoo2` and the `winefix` addon, which the Linux guides 
 - [x] **Game window opens, D3D8 device created, game loads**
 - [x] `install.sh` — bare prefix to running game, no GUI
 - [x] Character select and login — driven end to end from the host
-- [ ] `HorizonXI-on-Mac.app` — SwiftUI installer/launcher, modelled on
-      [`marzent/XIV-on-Mac`](https://github.com/marzent/XIV-on-Mac)
-- [ ] Frame-rate tuning, notarised download, macOS entry on the HorizonXI wiki
+- [x] `HorizonXI-on-Mac.app` — launcher with preflight, repair, account login
+- [x] `package.sh` — distributable disk image
+- [ ] **Frame-rate tuning** — get off the OpenGL D3D8 path
+- [ ] Bundle Wine + client acquisition for non-technical users (first-run downloader)
+- [ ] Developer ID signature + notarisation
+- [ ] Announcement / macOS entry on the HorizonXI wiki — draft in
+      [`docs/ANNOUNCEMENT.md`](docs/ANNOUNCEMENT.md)
 
 ## Licence
 

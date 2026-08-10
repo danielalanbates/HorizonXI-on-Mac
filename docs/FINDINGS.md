@@ -16,7 +16,7 @@ Machine: MacBook Pro **M1, 8GB RAM**, macOS 26.5.2. Internal disk ~14GB free (94
 | Engine | Wine 10.0 (Sikarugir) — matches the Proton 10 Linux users run |
 | Active prefix | `siku.app/Contents/SharedSupport/prefix10` (64-bit host, new-WoW64) |
 | Client | HorizonXI **1.9.0**, ~27GB extracted (100,976 files) |
-| Login | ✅ `Successfully logged in as danielalanbates!` / `Connected to server!` — every run |
+| Login | ✅ `Successfully logged in as <your-account>!` / `Connected to server!` — every run |
 | Ashita | ✅ 4.3.1.2 injects, all plugins load, **zero errors** in the log |
 | POL plugins | ✅ Sandbox, pivot, quicky, extraslots all load |
 | DAT overlays | ✅ horizonmusic, horizonoverrides, remapster, xiview |
@@ -29,7 +29,7 @@ Murn has **not** been logged in. Everything up to display init works.
 ## 2. The failure signature, precisely
 
 ```
-[..] Successfully logged in as danielalanbates!
+[..] Successfully logged in as <your-account>!
 [..] Connected to server!
 [..] Closing...
 ```

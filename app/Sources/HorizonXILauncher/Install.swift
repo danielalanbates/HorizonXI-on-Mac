@@ -62,8 +62,17 @@ struct Install: Identifiable, Hashable {
                 }
             }
         }
-        // Prefer prefixes whose client is actually present and largest-numbered (newest attempt).
-        return found.sorted { $0.prefixName > $1.prefixName }
+        // Rank by how many preconditions the prefix already satisfies, so a half-finished
+        // experiment never outranks a configured one. Equal scores fall back to name order,
+        // which puts the plain `prefixNN` prefixes ahead of suffixed experiments.
+        return found.sorted { a, b in
+            let sa = score(a), sb = score(b)
+            return sa == sb ? a.prefixName < b.prefixName : sa > sb
+        }
+    }
+
+    private static func score(_ i: Install) -> Int {
+        Preflight.run(i).reduce(0) { $0 + ($1.state == .ok ? 1 : 0) }
     }
 
     private static func appsUnder(_ root: URL, depth: Int) -> [URL] {
