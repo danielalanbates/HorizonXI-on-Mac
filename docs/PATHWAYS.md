@@ -40,6 +40,18 @@ draw calls, 4 render passes, 11 graphics pipelines. **Presentation is solved.** 
 still draws black, which is now a content problem (format, render target, or depth-stencil), not
 a presentation one.
 
+**Confirmed since:** waiting is not the answer. A verified-DXVK run (banner `info: DXVK: v1.10.3`
+present in the log *before* judging) was left for four and a half minutes — the same span in which
+Pathway A reaches the Rules of Conduct screen — and the HUD held a steady 29 FPS with the draw
+call count pinned at exactly **418 every frame** while the scene stayed black. A constant draw
+count means the game is happily re-submitting the same frame; its output is going somewhere that
+is not the swap chain.
+
+**A trap worth naming:** `reg` edits do not reach a running `wineserver`. A run that looks like a
+Pathway B success may quietly be Pathway A, because the old registry was still cached. Always
+`pkill wineserver` before launching, and always confirm the `DXVK: v1.10.3` banner in the log
+before believing anything you see. This caught me once and nearly produced a third false victory.
+
 **This distinction matters and is easy to get wrong.** Low CPU and busy GPU are *not* evidence of
 success — a renderer that never presents is also cheap. The acceptance test is a visible frame.
 An earlier pass of this work declared victory on counters alone and had to be retracted; don't
@@ -68,6 +80,10 @@ Metal route a 32-bit game has here.
 
 ## What to try next, in the order I would try it
 
+0. **Find where the game's render target goes.** The draw call count is constant at 418/frame and
+   the HUD composites fine, so `Present` is reaching the swap chain but the scene is not in it.
+   Suspect Ashita's D3D8 device wrapper, or a render-to-texture path whose result never gets
+   blitted. This is the highest-value question left.
 1. **Sweep the present parameters.** `[ffxi.direct3d8]` in the boot profile exposes
    `backbufferformat`, `multisampletype`, `enableautodepthstencil`, `autodepthstencilformat` and
    `swapeffect`. A black-but-drawing frame is classic format mismatch. `scripts/sweep-present.py`
