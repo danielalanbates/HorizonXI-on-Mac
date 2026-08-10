@@ -449,3 +449,32 @@ whole configuration for anyone who wants to attack that (`HXI_METAL=1`, off by d
 `drive_c/dll-backup/*.builtin.dll` and `wine/lib/libMoltenVK.dylib.stock`.
 Backups live in `prefix10/drive_c/dll-backup/`. Note that `reg delete` does not flush to
 `user.reg` until `wineserver` exits — kill it before editing, or the change silently persists.
+
+### The reason, found last: the whole wine build is x86_64 under Rosetta
+
+```
+$ file siku.app/Contents/SharedSupport/wine/bin/wine
+... Mach-O 64-bit executable x86_64
+```
+
+Every piece of this stack — `wine`, `wineserver`, the game — is Intel code being translated by
+Rosetta 2 on an M1. macOS itself flagged it during this session: *"This version of 'siku' includes
+a component that will not work with a future release of macOS."*
+
+That single fact explains the whole session:
+
+- **The OpenGL path is slow** partly because it is Rosetta-translated x86 wine doing the D3D8 →
+  OpenGL translation, on one thread. Two translation layers stacked.
+- **DXVK creates a device but never presents.** Vulkan→Metal surface and drawable handling from a
+  Rosetta process is exactly where MoltenVK is least reliable, and no amount of DXVK configuration
+  (`deferSurfaceCreation`, virtual desktop, a different MoltenVK) reaches it.
+- **D3DMetal only ships x86_64 DLLs in this wrapper** — consistent with a wrapper built for Intel.
+
+So the fix is not to patch DXVK. **It is a native arm64 wine wrapper.** On arm64 wine, D3DMetal
+and DXVK are both known to work, and the Rosetta tax on the CPU side disappears at the same time.
+Whisky is not the answer either — it was discontinued upstream (disabled 2026-04-09) and no longer
+downloads its wine libraries at all; a bottle created with `whisky create` comes up empty.
+
+Next step, and it needs a decision rather than more experiments: get a native arm64 wine
+(Kegworks, or a current CrossOver), build a fresh prefix, and re-run `scripts/install.sh` there.
+The client can be symlinked rather than copied — there is not 27GB free on the internal disk.
