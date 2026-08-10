@@ -434,7 +434,15 @@ mistake here; the acceptance test is a visible frame, not a busy GPU.
 presentation failure — was tried and changes nothing; the option is confirmed applied in the log
 (`info: d3d9.deferSurfaceCreation = True`) and the window is still black.
 
-So: **unsolved, and reverted.** What is genuinely new is that the three blockers above are gone —
+Running the whole thing inside a **wine virtual desktop** (`explorer /desktop=hxi,1280x720`),
+which changes how the window and its HWND are created and is a known fix for DXVK presentation
+elsewhere, also leaves the window black.
+
+So: **unsolved, and reverted.** Three distinct presentation mechanisms tried (plain window,
+`deferSurfaceCreation`, virtual desktop); all black. The next moves are bigger than
+configuration: build DXVK 1.10.3 from source with a patched macOS presenter, or test the same
+D3D8→D3D9 chain under a different wrapper (Whisky, or a newer CrossOver wine) to find out whether
+this is DXVK's problem or this wine build's `winemac.drv`. What is genuinely new is that the three blockers above are gone —
 the DLLs load, Ashita injects, and `vkCreateDevice` succeeds. What remains is presentation:
 getting DXVK's swapchain onto the wine window on macOS. `scripts/install.sh` can still apply the
 whole configuration for anyone who wants to attack that (`HXI_METAL=1`, off by default). Backups:
