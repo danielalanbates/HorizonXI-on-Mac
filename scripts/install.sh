@@ -19,6 +19,7 @@ SHARED="$APP/Contents/SharedSupport"
 export WINEPREFIX="$SHARED/$PREFIX_NAME"
 WINE="$SHARED/wine/bin/wine"
 GAME_C='C:\HorizonXI'
+GAME_DIR="$WINEPREFIX/drive_c/HorizonXI"
 SE_C="$GAME_C\\SquareEnix"
 REG32='C:\windows\syswow64\reg.exe'
 
@@ -81,6 +82,69 @@ for d in FFXi.dll FFXiMain.dll FFXiVersions.dll; do
   "$WINE" regsvr32 /s "$SE_C\\FINAL FANTASY XI\\$d" >/dev/null 2>&1
 done
 "$WINE" regsvr32 /s "$SE_C\\PlayOnlineViewer\\viewer\\com\\polcore.dll" >/dev/null 2>&1
+
+# ---------------------------------------------------------------------------
+# 3b. Metal renderer (the performance fix).
+#
+# Wine's builtin D3D8 runs through OpenGL and is translated on a single CPU thread: measured at
+# 148% CPU with the GPU at 6%, i.e. the GPU sits idle while one core is the ceiling. Routing
+# D3D8 -> d3d8to9 -> DXVK 1.10.3 -> MoltenVK -> Metal drops that to ~11-16% CPU with the GPU at
+# 24-32%.
+#
+# Three things all have to be true or it silently fails:
+#
+#   1. api-ms-win-crt-*. This wine build ships NONE, and every renderer DLL imports a dozen of
+#      them, so none of them can load in a stock prefix. The wrapper's own wine.cx32bak has
+#      working 32-bit copies.
+#   2. Ashita.dll imports d3d8.dll itself, so the shim must also sit where Ashita can see it --
+#      C:\HorizonXI and bootloader\ -- not only in the game directories. Miss this and you get
+#      "[E] Injection failed!", which looks like the renderer breaking Ashita and is not.
+#   3. MoltenVK. The default libMoltenVK in the wrapper reports Vulkan 1.1 and DXVK cannot create
+#      a device on it ("DxvkAdapter: Failed to create device"). The moltenvkcx build alongside it
+#      reports Vulkan 1.2 and works. DXVK 2.x/3.x cannot be used at all -- they require Vulkan 1.3
+#      and geometryShader, which Metal has no equivalent for.
+# ---------------------------------------------------------------------------
+if [[ -n "${HXI_METAL:-1}" && -f "${0:h}/../vendor/d3d8to9.dll" && -f "${0:h}/../vendor/dxvk-1.10.3-x32-d3d9.dll" ]]; then
+  info "installing the Metal renderer (DXVK 1.10.3 + d3d8to9)"
+  SYSWOW="$WINEPREFIX/drive_c/windows/syswow64"
+  mkdir -p "$WINEPREFIX/drive_c/dll-backup"
+  for d in d3d8 d3d9; do
+    [[ -f "$SYSWOW/$d.dll" && ! -f "$WINEPREFIX/drive_c/dll-backup/$d.builtin.dll" ]] \
+      && cp "$SYSWOW/$d.dll" "$WINEPREFIX/drive_c/dll-backup/$d.builtin.dll"
+  done
+
+  # 1. the CRT api-sets wine does not ship
+  CRT="$SHARED/wine.cx32bak/lib32on64/wine"
+  if [[ -d "$CRT" ]]; then
+    cp "$CRT"/api-ms-win-crt-*.dll "$SYSWOW/" 2>/dev/null || true
+  else
+    echo "  ! no api-ms-win-crt-* source found; the renderer will not load" >&2
+  fi
+
+  # 2. every directory whose process loads d3d8 -- including Ashita's
+  for d in "$WINEPREFIX/drive_c/windows/syswow64" \
+           "$GAME_DIR" "$GAME_DIR/bootloader" \
+           "$GAME_DIR/SquareEnix/PlayOnlineViewer" "$GAME_DIR/SquareEnix/FINAL FANTASY XI"; do
+    [[ -d "$d" ]] || continue
+    cp "${0:h}/../vendor/d3d8to9.dll" "$d/d3d8.dll"
+    cp "${0:h}/../vendor/dxvk-1.10.3-x32-d3d9.dll" "$d/d3d9.dll"
+  done
+
+  for REG in "$REG32" reg; do
+    "$WINE" $REG add "HKCU\\Software\\Wine\\DllOverrides" /v "*d3d8" /d native /f >/dev/null 2>&1
+    "$WINE" $REG add "HKCU\\Software\\Wine\\DllOverrides" /v "*d3d9" /d native /f >/dev/null 2>&1
+  done
+
+  # 3. the MoltenVK that can actually create a Vulkan 1.2 device
+  MVK="$APP/Contents/Frameworks/moltenvkcx/libMoltenVK.dylib"
+  LINK="$SHARED/wine/lib/libMoltenVK.dylib"
+  if [[ -f "$MVK" ]]; then
+    [[ -e "$LINK" && ! -e "$LINK.stock" ]] && mv "$LINK" "$LINK.stock"
+    ln -sf "$MVK" "$LINK"
+  else
+    echo "  ! moltenvkcx not found; DXVK will fail to create a device" >&2
+  fi
+fi
 
 # ---------------------------------------------------------------------------
 # 4. Launcher.

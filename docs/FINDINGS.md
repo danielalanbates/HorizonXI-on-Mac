@@ -403,12 +403,29 @@ Four things were established, each of which cost a run to find:
    clean (advapi32, gdi32, kernel32, user32, the api-sets), so the failure is in the module
    itself, not a missing dependency.
 
-**Where that leaves it.** The route that can work is a D3D8→D3D9 shim (`d3d8to9` loads fine now)
-plus a 32-bit D3D9 implementation that runs on Metal. The wrapper's D3DMetal provides d3d11/d3d12
-for **x86_64 only**; the only 32-bit D3D9-on-Vulkan it ships is the d9vk that will not map. So the
-next step is a working 32-bit d3d9: either a DXVK 1.10.3 x32 `d3d9.dll` built against Vulkan 1.1
-(the Gcenx repack omits d3d9), or finding why this d9vk fails to map.
+### SOLVED — the Metal path, and the fifth thing
 
-Everything above was reverted; the prefix is back on wine's builtin D3D8 and the game runs.
+**Upstream DXVK 1.10.3's x32 `d3d9.dll` works.** It predates the Vulkan 1.3 requirement, does not
+ask for `geometryShader`, maps cleanly, and enumerates the M1. Pair it with `d3d8to9` for the
+D3D8→D3D9 hop. (Gcenx's macOS repack of the same version omits `d3d9.dll`; take it from
+doitsujin's release instead.)
+
+That alone still failed at `vkCreateDevice` — `err: DxvkAdapter: Failed to create device`, with
+`timelineSemaphore : 0`. The cause is the **MoltenVK the wrapper loads by default**: it reports
+`Driver 0.2.2209 / Vulkan 1.1.334`. The wrapper ships a second one at
+`Contents/Frameworks/moltenvkcx/libMoltenVK.dylib` reporting `Driver 0.2.2018 / Vulkan 1.2.290`.
+Repointing `SharedSupport/wine/lib/libMoltenVK.dylib` at that one makes device creation succeed
+and the game window appear.
+
+Measured on the same scene, before and after:
+
+| | builtin D3D8 (OpenGL) | d3d8to9 + DXVK 1.10.3 (Metal) |
+| --- | --- | --- |
+| Game CPU | 148% | **11–16%** |
+| GPU device utilization | 6% | **24–32%** |
+
+A ~10x drop in CPU, and the GPU is finally doing the work. `scripts/install.sh` applies all of it;
+set `HXI_METAL=` to skip it. Backups: `drive_c/dll-backup/*.builtin.dll` and
+`wine/lib/libMoltenVK.dylib.stock`.
 Backups live in `prefix10/drive_c/dll-backup/`. Note that `reg delete` does not flush to
 `user.reg` until `wineserver` exits — kill it before editing, or the change silently persists.
