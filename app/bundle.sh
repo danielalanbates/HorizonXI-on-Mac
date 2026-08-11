@@ -28,6 +28,10 @@ for dll in d3d8to9.dll dxvk-1.10.3-x32-d3d9.dll dxvk-1.10.3-x32-d3d9-nofog.dll; 
   [[ -f "$REPO/vendor/$dll" ]] && cp "$REPO/vendor/$dll" "$APP/Contents/Resources/$dll"
 done
 
+# Dock/Finder icon: the FFXI Vana'diel sphere, lifted from the icon resources of the game's own
+# DONTTOUCH_Registry.exe (the only 256px source on disk) and upscaled into a full .icns.
+[[ -f "$HERE/AppIcon.icns" ]] && cp "$HERE/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -36,6 +40,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key><string>HorizonXI on Mac</string>
   <key>CFBundleDisplayName</key><string>HorizonXI on Mac</string>
   <key>CFBundleExecutable</key><string>HorizonXI-on-Mac</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIconName</key><string>AppIcon</string>
   <key>CFBundleIdentifier</key><string>org.batesai.horizonxi-on-mac</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>2.2</string>

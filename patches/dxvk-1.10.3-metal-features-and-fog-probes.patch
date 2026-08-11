@@ -1,0 +1,2124 @@
+diff --git a/src/d3d11/d3d11_annotation.h b/src/d3d11/d3d11_annotation.h
+index 06d80af..f66818d 100644
+--- a/src/d3d11/d3d11_annotation.h
++++ b/src/d3d11/d3d11_annotation.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d11_include.h"
+ #include "../dxvk/dxvk_annotation.h"
+ 
+diff --git a/src/d3d11/d3d11_buffer.h b/src/d3d11/d3d11_buffer.h
+index c0472fd..cc12776 100644
+--- a/src/d3d11/d3d11_buffer.h
++++ b/src/d3d11/d3d11_buffer.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk/dxvk_cs.h"
+ #include "../dxvk/dxvk_device.h"
+ 
+diff --git a/src/d3d11/d3d11_cmd.h b/src/d3d11/d3d11_cmd.h
+index 52f2f4d..504ac48 100644
+--- a/src/d3d11/d3d11_cmd.h
++++ b/src/d3d11/d3d11_cmd.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d11_include.h"
+ 
+ namespace dxvk {
+diff --git a/src/d3d11/d3d11_cmdlist.h b/src/d3d11/d3d11_cmdlist.h
+index 8be313a..fd5a06d 100644
+--- a/src/d3d11/d3d11_cmdlist.h
++++ b/src/d3d11/d3d11_cmdlist.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d11_context.h"
+ 
+ namespace dxvk {
+diff --git a/src/d3d11/d3d11_context.h b/src/d3d11/d3d11_context.h
+index 3bd60a5..2de5366 100644
+--- a/src/d3d11/d3d11_context.h
++++ b/src/d3d11/d3d11_context.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk/dxvk_adapter.h"
+ #include "../dxvk/dxvk_cs.h"
+ #include "../dxvk/dxvk_device.h"
+diff --git a/src/d3d11/d3d11_context_ext.h b/src/d3d11/d3d11_context_ext.h
+index 2109a0d..5e5f63d 100644
+--- a/src/d3d11/d3d11_context_ext.h
++++ b/src/d3d11/d3d11_context_ext.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d11_interfaces.h"
+ 
+ namespace dxvk {
+diff --git a/src/d3d11/d3d11_context_imm.h b/src/d3d11/d3d11_context_imm.h
+index 9a5ba21..759626b 100644
+--- a/src/d3d11/d3d11_context_imm.h
++++ b/src/d3d11/d3d11_context_imm.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../util/util_time.h"
+ 
+ #include "../util/sync/sync_signal.h"
+diff --git a/src/d3d11/d3d11_context_state.h b/src/d3d11/d3d11_context_state.h
+index eca2a3c..7b99a2e 100644
+--- a/src/d3d11/d3d11_context_state.h
++++ b/src/d3d11/d3d11_context_state.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <array>
+ 
+ #include "d3d11_buffer.h"
+diff --git a/src/d3d11/d3d11_cuda.h b/src/d3d11/d3d11_cuda.h
+index a9fcdf4..1002331 100644
+--- a/src/d3d11/d3d11_cuda.h
++++ b/src/d3d11/d3d11_cuda.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <utility>
+ #include <vector>
+ 
+diff --git a/src/d3d11/d3d11_device.h b/src/d3d11/d3d11_device.h
+index 5a99bd6..2e09c0b 100644
+--- a/src/d3d11/d3d11_device.h
++++ b/src/d3d11/d3d11_device.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <mutex>
+ #include <vector>
+ 
+diff --git a/src/d3d11/d3d11_device_child.h b/src/d3d11/d3d11_device_child.h
+index 60eff07..20f63cd 100644
+--- a/src/d3d11/d3d11_device_child.h
++++ b/src/d3d11/d3d11_device_child.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d11_include.h"
+ 
+ #include "../util/com/com_private_data.h"
+diff --git a/src/d3d11/d3d11_gdi.h b/src/d3d11/d3d11_gdi.h
+index a2656c0..90b2eed 100644
+--- a/src/d3d11/d3d11_gdi.h
++++ b/src/d3d11/d3d11_gdi.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <vector>
+ 
+ #include "d3d11_include.h"
+diff --git a/src/d3d11/d3d11_initializer.h b/src/d3d11/d3d11_initializer.h
+index 8c96bab..fa453e9 100644
+--- a/src/d3d11/d3d11_initializer.h
++++ b/src/d3d11/d3d11_initializer.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d11_buffer.h"
+ #include "d3d11_texture.h"
+ 
+diff --git a/src/d3d11/d3d11_input_layout.h b/src/d3d11/d3d11_input_layout.h
+index 8e472e2..16d6ecd 100644
+--- a/src/d3d11/d3d11_input_layout.h
++++ b/src/d3d11/d3d11_input_layout.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d11_device_child.h"
+ 
+ #include "../d3d10/d3d10_input_layout.h"
+diff --git a/src/d3d11/d3d11_interfaces.h b/src/d3d11/d3d11_interfaces.h
+index 3b0629b..7e217ec 100644
+--- a/src/d3d11/d3d11_interfaces.h
++++ b/src/d3d11/d3d11_interfaces.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxgi/dxgi_interfaces.h"
+ 
+ #include "d3d11_include.h"
+diff --git a/src/d3d11/d3d11_interop.h b/src/d3d11/d3d11_interop.h
+index 48ee4c3..bd71251 100644
+--- a/src/d3d11/d3d11_interop.h
++++ b/src/d3d11/d3d11_interop.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxgi/dxgi_interfaces.h"
+ 
+ #include "d3d11_include.h"
+diff --git a/src/d3d11/d3d11_options.h b/src/d3d11/d3d11_options.h
+index 99353b3..c496649 100644
+--- a/src/d3d11/d3d11_options.h
++++ b/src/d3d11/d3d11_options.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../util/config/config.h"
+ 
+ #include "../dxgi/dxgi_options.h"
+diff --git a/src/d3d11/d3d11_query.h b/src/d3d11/d3d11_query.h
+index a1853cf..cd17679 100644
+--- a/src/d3d11/d3d11_query.h
++++ b/src/d3d11/d3d11_query.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk/dxvk_gpu_event.h"
+ #include "../dxvk/dxvk_gpu_query.h"
+ 
+diff --git a/src/d3d11/d3d11_sampler.h b/src/d3d11/d3d11_sampler.h
+index 57fa139..971876f 100644
+--- a/src/d3d11/d3d11_sampler.h
++++ b/src/d3d11/d3d11_sampler.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk/dxvk_device.h"
+ 
+ #include "../d3d10/d3d10_sampler.h"
+diff --git a/src/d3d11/d3d11_shader.h b/src/d3d11/d3d11_shader.h
+index 3ab1685..c069936 100644
+--- a/src/d3d11/d3d11_shader.h
++++ b/src/d3d11/d3d11_shader.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <mutex>
+ #include <unordered_map>
+ 
+diff --git a/src/d3d11/d3d11_state.h b/src/d3d11/d3d11_state.h
+index e807d1a..a334b25 100644
+--- a/src/d3d11/d3d11_state.h
++++ b/src/d3d11/d3d11_state.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <unordered_map>
+ 
+ #include "d3d11_blend.h"
+diff --git a/src/d3d11/d3d11_swapchain.h b/src/d3d11/d3d11_swapchain.h
+index f4debea..a66243b 100644
+--- a/src/d3d11/d3d11_swapchain.h
++++ b/src/d3d11/d3d11_swapchain.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d11_texture.h"
+ 
+ #include "../dxvk/hud/dxvk_hud.h"
+diff --git a/src/d3d11/d3d11_texture.h b/src/d3d11/d3d11_texture.h
+index 2db2bc0..b25a72f 100644
+--- a/src/d3d11/d3d11_texture.h
++++ b/src/d3d11/d3d11_texture.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk/dxvk_cs.h"
+ #include "../dxvk/dxvk_device.h"
+ 
+diff --git a/src/d3d11/d3d11_util.h b/src/d3d11/d3d11_util.h
+index 749dc8b..797aeff 100644
+--- a/src/d3d11/d3d11_util.h
++++ b/src/d3d11/d3d11_util.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk/dxvk_device.h"
+ 
+ #include "../dxbc/dxbc_util.h"
+diff --git a/src/d3d11/d3d11_video.h b/src/d3d11/d3d11_video.h
+index 85979eb..9f64f77 100644
+--- a/src/d3d11/d3d11_video.h
++++ b/src/d3d11/d3d11_video.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d11_device.h"
+ 
+ namespace dxvk {
+diff --git a/src/d3d11/d3d11_view.h b/src/d3d11/d3d11_view.h
+index 50fcef1..90cbdfd 100644
+--- a/src/d3d11/d3d11_view.h
++++ b/src/d3d11/d3d11_view.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d11_include.h"
+ 
+ namespace dxvk {
+diff --git a/src/d3d9/d3d9_annotation.h b/src/d3d9/d3d9_annotation.h
+index 1fdb19f..d34120a 100644
+--- a/src/d3d9/d3d9_annotation.h
++++ b/src/d3d9/d3d9_annotation.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_device.h"
+ #include "d3d9_include.h"
+ #include "../dxvk/dxvk_annotation.h"
+diff --git a/src/d3d9/d3d9_caps.h b/src/d3d9/d3d9_caps.h
+index a894de1..43fb8c9 100644
+--- a/src/d3d9/d3d9_caps.h
++++ b/src/d3d9/d3d9_caps.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_include.h"
+ 
+ namespace dxvk::caps {
+diff --git a/src/d3d9/d3d9_common_buffer.h b/src/d3d9/d3d9_common_buffer.h
+index c3bc413..ba918ae 100644
+--- a/src/d3d9/d3d9_common_buffer.h
++++ b/src/d3d9/d3d9_common_buffer.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk/dxvk_device.h"
+ #include "../dxvk/dxvk_cs.h"
+ 
+diff --git a/src/d3d9/d3d9_common_texture.h b/src/d3d9/d3d9_common_texture.h
+index e52ead2..cf7a5e5 100644
+--- a/src/d3d9/d3d9_common_texture.h
++++ b/src/d3d9/d3d9_common_texture.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_format.h"
+ #include "d3d9_util.h"
+ #include "d3d9_caps.h"
+diff --git a/src/d3d9/d3d9_cursor.h b/src/d3d9/d3d9_cursor.h
+index 32645d2..f729b8f 100644
+--- a/src/d3d9/d3d9_cursor.h
++++ b/src/d3d9/d3d9_cursor.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_include.h"
+ 
+ namespace dxvk {
+diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
+index 734a7a0..93f2053 100644
+--- a/src/d3d9/d3d9_device.cpp
++++ b/src/d3d9/d3d9_device.cpp
+@@ -3892,8 +3892,13 @@ namespace dxvk {
+     DxvkDeviceFeatures enabled = {};
+ 
+     // Geometry shaders are used for some meta ops
+-    enabled.core.features.geometryShader = VK_TRUE;
+-    enabled.core.features.robustBufferAccess = VK_TRUE;
++    // MoltenVK 1.3+ correctly reports that Metal supports neither geometry shaders nor
++    // robust buffer access. Demanding them unconditionally makes device creation fail on
++    // every honest Metal driver, which is why DXVK on macOS was stuck on MoltenVK 1.2.10.
++    // Both are optional here: the geometry-shader meta ops are already guarded at use, and
++    // robustness only affects out-of-bounds behaviour, not correctness of in-bounds draws.
++    enabled.core.features.geometryShader = supported.core.features.geometryShader;
++    enabled.core.features.robustBufferAccess = supported.core.features.robustBufferAccess;
+     enabled.extRobustness2.robustBufferAccess2 = supported.extRobustness2.robustBufferAccess2;
+ 
+     enabled.extMemoryPriority.memoryPriority = supported.extMemoryPriority.memoryPriority;
+@@ -3921,7 +3926,10 @@ namespace dxvk {
+     enabled.core.features.sampleRateShading = VK_TRUE;
+     enabled.core.features.samplerAnisotropy = supported.core.features.samplerAnisotropy;
+     enabled.core.features.shaderClipDistance = VK_TRUE;
+-    enabled.core.features.shaderCullDistance = VK_TRUE;
++    // Metal exposes clip distance but not cull distance. D3D9 only ever needs clip distance
++    // (user clip planes), so requesting cull distance unconditionally locks the whole D3D9
++    // frontend out of every Metal driver for a feature it does not use.
++    enabled.core.features.shaderCullDistance = supported.core.features.shaderCullDistance;
+ 
+     // Ensure we support real BC formats and unofficial vendor ones.
+     enabled.core.features.textureCompressionBC = VK_TRUE;
+diff --git a/src/d3d9/d3d9_device.h b/src/d3d9/d3d9_device.h
+index cec4829..74155f0 100644
+--- a/src/d3d9/d3d9_device.h
++++ b/src/d3d9/d3d9_device.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk/dxvk_device.h"
+ #include "../dxvk/dxvk_cs.h"
+ 
+diff --git a/src/d3d9/d3d9_device_child.h b/src/d3d9/d3d9_device_child.h
+index 433a269..1b62f06 100644
+--- a/src/d3d9/d3d9_device_child.h
++++ b/src/d3d9/d3d9_device_child.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_include.h"
+ 
+ namespace dxvk {
+diff --git a/src/d3d9/d3d9_fixed_function.cpp b/src/d3d9/d3d9_fixed_function.cpp
+index 37f6e1a..13bfd05 100644
+--- a/src/d3d9/d3d9_fixed_function.cpp
++++ b/src/d3d9/d3d9_fixed_function.cpp
+@@ -1,4 +1,6 @@
+ #include "d3d9_fixed_function.h"
++#include <cstdlib>
++#include <string>
+ 
+ #include "d3d9_device.h"
+ #include "d3d9_util.h"
+@@ -182,6 +184,36 @@ namespace dxvk {
+       std::array<uint32_t, 3> fogFacIndices = { fogFactor, fogFactor, fogFactor };
+       uint32_t fogFact3 = spvModule.opCompositeConstruct(vec3Type, fogFacIndices.size(), fogFacIndices.data());
+ 
++      // Diagnostic: DXVK_DEBUG_SHOW=end|scale|density|depth|color paints that input as the
++      // colour, with fog disabled, so the value can be read straight off the screen.
++      if (const char* what = std::getenv("DXVK_DEBUG_SHOW")) {
++        uint32_t v = 0;
++        std::string w(what);
++        if      (w == "end")     v = spvModule.opFMul(floatType, fogEnd, spvModule.constf32(0.001f));
++        else if (w == "scale")   v = spvModule.opFMul(floatType, fogScale, spvModule.constf32(100.0f));
++        else if (w == "density") v = fogDensity;
++        else if (w == "depth")   v = spvModule.opFMul(floatType, depth, spvModule.constf32(0.001f));
++        else                     v = spvModule.constf32(0.5f);
++        if (w == "color") {
++          color3 = fogColor;
++        } else {
++          std::array<uint32_t,3> vv = { v, v, v };
++          color3 = spvModule.opCompositeConstruct(vec3Type, vv.size(), vv.data());
++        }
++        std::array<uint32_t,3> one = { spvModule.constf32(1.0f), spvModule.constf32(1.0f), spvModule.constf32(1.0f) };
++        fogFact3 = spvModule.opCompositeConstruct(vec3Type, one.size(), one.data());
++      }
++
++      // Diagnostic: paint the computed fog factor as greyscale. White = factor 1 (no fog,
++      // picture should be intact), black = factor 0 (fully fogged -> the fog colour wins).
++      // This separates "fog inputs are wrong" from "the constants never arrived".
++      if (std::getenv("DXVK_DEBUG_FOGFACTOR") != nullptr)
++        color3 = fogFact3;
++      // Diagnostic: force no fog while keeping the whole fog code path compiled and running.
++      if (std::getenv("DXVK_DEBUG_FOGFACTOR_ONE") != nullptr)
++        fogFact3 = spvModule.opCompositeConstruct(vec3Type, 3, std::array<uint32_t,3>{
++          spvModule.constf32(1.0f), spvModule.constf32(1.0f), spvModule.constf32(1.0f) }.data());
++
+       uint32_t lerpedFrog = spvModule.opFMix(vec3Type, fogColor, color3, fogFact3);
+ 
+       fogRetValue = spvModule.opVectorShuffle(vec4Type, lerpedFrog, color, indices.size(), indices.data());
+diff --git a/src/d3d9/d3d9_fixed_function.h b/src/d3d9/d3d9_fixed_function.h
+index 8e312aa..a183ca2 100644
+--- a/src/d3d9/d3d9_fixed_function.h
++++ b/src/d3d9/d3d9_fixed_function.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_include.h"
+ 
+ #include "d3d9_caps.h"
+diff --git a/src/d3d9/d3d9_format.h b/src/d3d9/d3d9_format.h
+index 0c9ab16..499d233 100644
+--- a/src/d3d9/d3d9_format.h
++++ b/src/d3d9/d3d9_format.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <d3d9.h>
+ #include "d3d9_options.h"
+ 
+diff --git a/src/d3d9/d3d9_format_helpers.h b/src/d3d9/d3d9_format_helpers.h
+index 16348ed..589dcfd 100644
+--- a/src/d3d9/d3d9_format_helpers.h
++++ b/src/d3d9/d3d9_format_helpers.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_include.h"
+ #include "d3d9_format.h"
+ #include "../dxvk/dxvk_device.h"
+diff --git a/src/d3d9/d3d9_include.h b/src/d3d9/d3d9_include.h
+index 8762265..9d89f12 100644
+--- a/src/d3d9/d3d9_include.h
++++ b/src/d3d9/d3d9_include.h
+@@ -79,10 +79,7 @@
+ 
+ // MinGW headers are broken. Who'dve guessed?
+ #ifndef _MSC_VER
+-typedef struct _D3DDEVINFO_RESOURCEMANAGER
+-{
+-  char dummy;
+-} D3DDEVINFO_RESOURCEMANAGER, * LPD3DDEVINFO_RESOURCEMANAGER;
++// mingw-w64 14 defines this itself now; DXVK's old workaround is the conflict.
+ 
+ #ifndef __WINE__
+ extern "C" WINUSERAPI WINBOOL WINAPI SetProcessDPIAware(VOID);
+diff --git a/src/d3d9/d3d9_initializer.h b/src/d3d9/d3d9_initializer.h
+index 59802f9..8e290b7 100644
+--- a/src/d3d9/d3d9_initializer.h
++++ b/src/d3d9/d3d9_initializer.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_common_buffer.h"
+ #include "d3d9_common_texture.h"
+ 
+diff --git a/src/d3d9/d3d9_monitor.h b/src/d3d9/d3d9_monitor.h
+index 0a9d1a8..cab252e 100644
+--- a/src/d3d9/d3d9_monitor.h
++++ b/src/d3d9/d3d9_monitor.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_include.h"
+ 
+ #include "d3d9_format.h"
+diff --git a/src/d3d9/d3d9_options.h b/src/d3d9/d3d9_options.h
+index 17ffb41..5ca2a9a 100644
+--- a/src/d3d9/d3d9_options.h
++++ b/src/d3d9/d3d9_options.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../util/config/config.h"
+ #include "../dxvk/dxvk_device.h"
+ 
+diff --git a/src/d3d9/d3d9_query.h b/src/d3d9/d3d9_query.h
+index 8d742c9..095b5d6 100644
+--- a/src/d3d9/d3d9_query.h
++++ b/src/d3d9/d3d9_query.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_device_child.h"
+ 
+ #include "../dxvk/dxvk_context.h"
+diff --git a/src/d3d9/d3d9_sampler.h b/src/d3d9/d3d9_sampler.h
+index 4447109..7040738 100644
+--- a/src/d3d9/d3d9_sampler.h
++++ b/src/d3d9/d3d9_sampler.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_include.h"
+ 
+ #include "d3d9_util.h"
+diff --git a/src/d3d9/d3d9_shader.h b/src/d3d9/d3d9_shader.h
+index d896f01..72a718b 100644
+--- a/src/d3d9/d3d9_shader.h
++++ b/src/d3d9/d3d9_shader.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_resource.h"
+ #include "../dxso/dxso_module.h"
+ #include "d3d9_shader_permutations.h"
+diff --git a/src/d3d9/d3d9_state.h b/src/d3d9/d3d9_state.h
+index d87b8f5..cda1b3e 100644
+--- a/src/d3d9/d3d9_state.h
++++ b/src/d3d9/d3d9_state.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_caps.h"
+ #include "d3d9_constant_set.h"
+ #include "../dxso/dxso_common.h"
+diff --git a/src/d3d9/d3d9_stateblock.h b/src/d3d9/d3d9_stateblock.h
+index 43a712a..e0bcc25 100644
+--- a/src/d3d9/d3d9_stateblock.h
++++ b/src/d3d9/d3d9_stateblock.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_device_child.h"
+ #include "d3d9_device.h"
+ #include "d3d9_state.h"
+diff --git a/src/d3d9/d3d9_swapchain.h b/src/d3d9/d3d9_swapchain.h
+index 150578c..5bdacb6 100644
+--- a/src/d3d9/d3d9_swapchain.h
++++ b/src/d3d9/d3d9_swapchain.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_device_child.h"
+ #include "d3d9_device.h"
+ #include "d3d9_format.h"
+diff --git a/src/d3d9/d3d9_swvp_emu.h b/src/d3d9/d3d9_swvp_emu.h
+index 91aae4c..8d521b8 100644
+--- a/src/d3d9/d3d9_swvp_emu.h
++++ b/src/d3d9/d3d9_swvp_emu.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <unordered_map>
+ 
+ #include "d3d9_include.h"
+diff --git a/src/d3d9/d3d9_texture.h b/src/d3d9/d3d9_texture.h
+index 317f72e..f54cb82 100644
+--- a/src/d3d9/d3d9_texture.h
++++ b/src/d3d9/d3d9_texture.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_device.h"
+ #include "d3d9_surface.h"
+ #include "d3d9_volume.h"
+diff --git a/src/d3d9/d3d9_util.h b/src/d3d9/d3d9_util.h
+index 5899cd4..fea5fb1 100644
+--- a/src/d3d9/d3d9_util.h
++++ b/src/d3d9/d3d9_util.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #define D3D11_NO_HELPERS
+ 
+ #include "d3d9_include.h"
+diff --git a/src/d3d9/d3d9_vertex_declaration.h b/src/d3d9/d3d9_vertex_declaration.h
+index 240aa6e..6ad76e1 100644
+--- a/src/d3d9/d3d9_vertex_declaration.h
++++ b/src/d3d9/d3d9_vertex_declaration.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "d3d9_device_child.h"
+ #include "d3d9_util.h"
+ 
+diff --git a/src/dxbc/dxbc_analysis.h b/src/dxbc/dxbc_analysis.h
+index b40cc94..a168f7e 100644
+--- a/src/dxbc/dxbc_analysis.h
++++ b/src/dxbc/dxbc_analysis.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxbc_chunk_isgn.h"
+ #include "dxbc_decoder.h"
+ #include "dxbc_defs.h"
+diff --git a/src/dxbc/dxbc_chunk_isgn.h b/src/dxbc/dxbc_chunk_isgn.h
+index 030372f..b57bc75 100644
+--- a/src/dxbc/dxbc_chunk_isgn.h
++++ b/src/dxbc/dxbc_chunk_isgn.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <cctype>
+ 
+ #include "dxbc_common.h"
+diff --git a/src/dxbc/dxbc_chunk_shex.h b/src/dxbc/dxbc_chunk_shex.h
+index 8deecc8..fe17ea7 100644
+--- a/src/dxbc/dxbc_chunk_shex.h
++++ b/src/dxbc/dxbc_chunk_shex.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxbc_common.h"
+ #include "dxbc_decoder.h"
+ #include "dxbc_reader.h"
+diff --git a/src/dxbc/dxbc_common.h b/src/dxbc/dxbc_common.h
+index 9c490d6..d445d6b 100644
+--- a/src/dxbc/dxbc_common.h
++++ b/src/dxbc/dxbc_common.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxbc_include.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxbc/dxbc_compiler.h b/src/dxbc/dxbc_compiler.h
+index 2216642..85a6123 100644
+--- a/src/dxbc/dxbc_compiler.h
++++ b/src/dxbc/dxbc_compiler.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <array>
+ #include <vector>
+ 
+diff --git a/src/dxbc/dxbc_decoder.h b/src/dxbc/dxbc_decoder.h
+index 72b4e96..65fa01a 100644
+--- a/src/dxbc/dxbc_decoder.h
++++ b/src/dxbc/dxbc_decoder.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <array>
+ 
+ #include "dxbc_common.h"
+diff --git a/src/dxbc/dxbc_defs.h b/src/dxbc/dxbc_defs.h
+index decd767..3ced0bb 100644
+--- a/src/dxbc/dxbc_defs.h
++++ b/src/dxbc/dxbc_defs.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxbc_enums.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxbc/dxbc_enums.h b/src/dxbc/dxbc_enums.h
+index 214780d..2687930 100644
+--- a/src/dxbc/dxbc_enums.h
++++ b/src/dxbc/dxbc_enums.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxbc_include.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxbc/dxbc_header.h b/src/dxbc/dxbc_header.h
+index 8eca0d4..798a41a 100644
+--- a/src/dxbc/dxbc_header.h
++++ b/src/dxbc/dxbc_header.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <vector>
+ 
+ #include "dxbc_reader.h"
+diff --git a/src/dxbc/dxbc_modinfo.h b/src/dxbc/dxbc_modinfo.h
+index 13e733d..8b9e091 100644
+--- a/src/dxbc/dxbc_modinfo.h
++++ b/src/dxbc/dxbc_modinfo.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxbc_options.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxbc/dxbc_options.h b/src/dxbc/dxbc_options.h
+index d21f3b1..ad74f00 100644
+--- a/src/dxbc/dxbc_options.h
++++ b/src/dxbc/dxbc_options.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk/dxvk_device.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxbc/dxbc_reader.h b/src/dxbc/dxbc_reader.h
+index a160001..5184f55 100644
+--- a/src/dxbc/dxbc_reader.h
++++ b/src/dxbc/dxbc_reader.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <cstddef>
+ #include <string>
+ 
+diff --git a/src/dxbc/dxbc_tag.h b/src/dxbc/dxbc_tag.h
+index 2ba1750..3168b57 100644
+--- a/src/dxbc/dxbc_tag.h
++++ b/src/dxbc/dxbc_tag.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxbc_include.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxbc/dxbc_util.h b/src/dxbc/dxbc_util.h
+index 4bc4962..766bae0 100644
+--- a/src/dxbc/dxbc_util.h
++++ b/src/dxbc/dxbc_util.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxbc_common.h"
+ #include "dxbc_enums.h"
+ 
+diff --git a/src/dxgi/dxgi_format.h b/src/dxgi/dxgi_format.h
+index 59e6493..4d1a573 100644
+--- a/src/dxgi/dxgi_format.h
++++ b/src/dxgi/dxgi_format.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxgi_include.h"
+ 
+ #include "../dxvk/dxvk_adapter.h"
+diff --git a/src/dxgi/dxgi_interfaces.h b/src/dxgi/dxgi_interfaces.h
+index f7a9395..e9abce7 100644
+--- a/src/dxgi/dxgi_interfaces.h
++++ b/src/dxgi/dxgi_interfaces.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk/dxvk_include.h"
+ 
+ #include "dxgi_format.h"
+diff --git a/src/dxgi/dxgi_monitor.h b/src/dxgi/dxgi_monitor.h
+index 0c70101..6afd63c 100644
+--- a/src/dxgi/dxgi_monitor.h
++++ b/src/dxgi/dxgi_monitor.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <mutex>
+ #include <unordered_map>
+ 
+diff --git a/src/dxgi/dxgi_options.h b/src/dxgi/dxgi_options.h
+index 8eb19d0..40454c6 100644
+--- a/src/dxgi/dxgi_options.h
++++ b/src/dxgi/dxgi_options.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../util/config/config.h"
+ 
+ #include "../dxvk/dxvk_include.h"
+diff --git a/src/dxgi/dxgi_output.h b/src/dxgi/dxgi_output.h
+index 0dc3086..d1b93ae 100644
+--- a/src/dxgi/dxgi_output.h
++++ b/src/dxgi/dxgi_output.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxgi_monitor.h"
+ #include "dxgi_object.h"
+ 
+diff --git a/src/dxso/dxso_analysis.h b/src/dxso/dxso_analysis.h
+index c1321e0..e52cb03 100644
+--- a/src/dxso/dxso_analysis.h
++++ b/src/dxso/dxso_analysis.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxso_modinfo.h"
+ #include "dxso_decoder.h"
+ 
+diff --git a/src/dxso/dxso_compiler.h b/src/dxso/dxso_compiler.h
+index f26732f..33e065d 100644
+--- a/src/dxso/dxso_compiler.h
++++ b/src/dxso/dxso_compiler.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxso_decoder.h"
+ #include "dxso_header.h"
+ #include "dxso_modinfo.h"
+diff --git a/src/dxso/dxso_ctab.h b/src/dxso/dxso_ctab.h
+index 56f4f94..cd8601c 100644
+--- a/src/dxso/dxso_ctab.h
++++ b/src/dxso/dxso_ctab.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxso_common.h"
+ 
+ #include "dxso_reader.h"
+diff --git a/src/dxso/dxso_decoder.h b/src/dxso/dxso_decoder.h
+index 178f807..132632e 100644
+--- a/src/dxso/dxso_decoder.h
++++ b/src/dxso/dxso_decoder.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxso_common.h"
+ #include "dxso_enums.h"
+ #include "dxso_code.h"
+diff --git a/src/dxso/dxso_isgn.h b/src/dxso/dxso_isgn.h
+index 2faa04e..ade58a8 100644
+--- a/src/dxso/dxso_isgn.h
++++ b/src/dxso/dxso_isgn.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxso_decoder.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxso/dxso_module.h b/src/dxso/dxso_module.h
+index 4b8238d..354e630 100644
+--- a/src/dxso/dxso_module.h
++++ b/src/dxso/dxso_module.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxso_reader.h"
+ #include "dxso_code.h"
+ #include "dxso_header.h"
+diff --git a/src/dxso/dxso_options.h b/src/dxso/dxso_options.h
+index c977ce8..bd39cc9 100644
+--- a/src/dxso/dxso_options.h
++++ b/src/dxso/dxso_options.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk/dxvk_device.h"
+ #include "../d3d9/d3d9_options.h"
+ 
+diff --git a/src/dxso/dxso_tables.h b/src/dxso/dxso_tables.h
+index 73e3801..7c8a1da 100644
+--- a/src/dxso/dxso_tables.h
++++ b/src/dxso/dxso_tables.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxso_enums.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxvk/dxvk_adapter.h b/src/dxvk/dxvk_adapter.h
+index f2fb1f0..67fe43d 100644
+--- a/src/dxvk/dxvk_adapter.h
++++ b/src/dxvk/dxvk_adapter.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_device_info.h"
+ #include "dxvk_extensions.h"
+ #include "dxvk_include.h"
+diff --git a/src/dxvk/dxvk_barrier.h b/src/dxvk/dxvk_barrier.h
+index f7a7713..405add3 100644
+--- a/src/dxvk/dxvk_barrier.h
++++ b/src/dxvk/dxvk_barrier.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <utility>
+ #include <vector>
+ 
+diff --git a/src/dxvk/dxvk_bind_mask.h b/src/dxvk/dxvk_bind_mask.h
+index b45b9b6..a09118d 100644
+--- a/src/dxvk/dxvk_bind_mask.h
++++ b/src/dxvk/dxvk_bind_mask.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_buffer.h"
+ #include "dxvk_descriptor.h"
+ #include "dxvk_image.h"
+diff --git a/src/dxvk/dxvk_buffer.h b/src/dxvk/dxvk_buffer.h
+index 4d94cec..a5c23d8 100644
+--- a/src/dxvk/dxvk_buffer.h
++++ b/src/dxvk/dxvk_buffer.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <unordered_map>
+ #include <vector>
+ 
+diff --git a/src/dxvk/dxvk_cmdlist.h b/src/dxvk/dxvk_cmdlist.h
+index 02549df..843c81c 100644
+--- a/src/dxvk/dxvk_cmdlist.h
++++ b/src/dxvk/dxvk_cmdlist.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <limits>
+ 
+ #include "dxvk_bind_mask.h"
+diff --git a/src/dxvk/dxvk_compute.h b/src/dxvk/dxvk_compute.h
+index 186d17e..9820956 100644
+--- a/src/dxvk/dxvk_compute.h
++++ b/src/dxvk/dxvk_compute.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <vector>
+ 
+ #include "../util/sync/sync_list.h"
+diff --git a/src/dxvk/dxvk_constant_state.h b/src/dxvk/dxvk_constant_state.h
+index b17dd9b..8035d6a 100644
+--- a/src/dxvk/dxvk_constant_state.h
++++ b/src/dxvk/dxvk_constant_state.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_buffer.h"
+ #include "dxvk_framebuffer.h"
+ #include "dxvk_limits.h"
+diff --git a/src/dxvk/dxvk_context.h b/src/dxvk/dxvk_context.h
+index c5547c1..2e53717 100644
+--- a/src/dxvk/dxvk_context.h
++++ b/src/dxvk/dxvk_context.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_barrier.h"
+ #include "dxvk_bind_mask.h"
+ #include "dxvk_cmdlist.h"
+diff --git a/src/dxvk/dxvk_context_state.h b/src/dxvk/dxvk_context_state.h
+index 27a6de5..f98f4c5 100644
+--- a/src/dxvk/dxvk_context_state.h
++++ b/src/dxvk/dxvk_context_state.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_buffer.h"
+ #include "dxvk_compute.h"
+ #include "dxvk_constant_state.h"
+diff --git a/src/dxvk/dxvk_cs.h b/src/dxvk/dxvk_cs.h
+index ab2733c..5ec525e 100644
+--- a/src/dxvk/dxvk_cs.h
++++ b/src/dxvk/dxvk_cs.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <atomic>
+ #include <condition_variable>
+ #include <mutex>
+diff --git a/src/dxvk/dxvk_data.h b/src/dxvk/dxvk_data.h
+index 2a5ee92..e3b6e5f 100644
+--- a/src/dxvk/dxvk_data.h
++++ b/src/dxvk/dxvk_data.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_include.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxvk/dxvk_device.h b/src/dxvk/dxvk_device.h
+index e23f2c6..32c8d92 100644
+--- a/src/dxvk/dxvk_device.h
++++ b/src/dxvk/dxvk_device.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_adapter.h"
+ #include "dxvk_buffer.h"
+ #include "dxvk_compute.h"
+diff --git a/src/dxvk/dxvk_extension_provider.h b/src/dxvk/dxvk_extension_provider.h
+index 090d56d..cc6ff2d 100644
+--- a/src/dxvk/dxvk_extension_provider.h
++++ b/src/dxvk/dxvk_extension_provider.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_include.h"
+ #include "dxvk_extensions.h"
+ 
+diff --git a/src/dxvk/dxvk_extensions.h b/src/dxvk/dxvk_extensions.h
+index 0e2808d..8cc6d24 100644
+--- a/src/dxvk/dxvk_extensions.h
++++ b/src/dxvk/dxvk_extensions.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <algorithm>
+ #include <map>
+ #include <vector>
+diff --git a/src/dxvk/dxvk_fence.h b/src/dxvk/dxvk_fence.h
+index 7974528..be790cb 100644
+--- a/src/dxvk/dxvk_fence.h
++++ b/src/dxvk/dxvk_fence.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <functional>
+ #include <queue>
+ #include <utility>
+diff --git a/src/dxvk/dxvk_framebuffer.h b/src/dxvk/dxvk_framebuffer.h
+index b55e6e5..febe642 100644
+--- a/src/dxvk/dxvk_framebuffer.h
++++ b/src/dxvk/dxvk_framebuffer.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_image.h"
+ #include "dxvk_renderpass.h"
+ 
+diff --git a/src/dxvk/dxvk_gpu_event.h b/src/dxvk/dxvk_gpu_event.h
+index d1f4d1b..01ab19d 100644
+--- a/src/dxvk/dxvk_gpu_event.h
++++ b/src/dxvk/dxvk_gpu_event.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <vector>
+ 
+ #include "dxvk_resource.h"
+diff --git a/src/dxvk/dxvk_gpu_query.h b/src/dxvk/dxvk_gpu_query.h
+index 0c45d12..2a9bb83 100644
+--- a/src/dxvk/dxvk_gpu_query.h
++++ b/src/dxvk/dxvk_gpu_query.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <mutex>
+ #include <vector>
+ 
+diff --git a/src/dxvk/dxvk_graphics.h b/src/dxvk/dxvk_graphics.h
+index 50d16b1..68ee6bc 100644
+--- a/src/dxvk/dxvk_graphics.h
++++ b/src/dxvk/dxvk_graphics.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <mutex>
+ 
+ #include "../util/sync/sync_list.h"
+diff --git a/src/dxvk/dxvk_graphics_state.h b/src/dxvk/dxvk_graphics_state.h
+index b10f783..ee9e395 100644
+--- a/src/dxvk/dxvk_graphics_state.h
++++ b/src/dxvk/dxvk_graphics_state.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_limits.h"
+ 
+ #include <cstring>
+diff --git a/src/dxvk/dxvk_hash.h b/src/dxvk/dxvk_hash.h
+index a0fe561..27060d1 100644
+--- a/src/dxvk/dxvk_hash.h
++++ b/src/dxvk/dxvk_hash.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <cstddef>
+ 
+ namespace dxvk {
+diff --git a/src/dxvk/dxvk_image.h b/src/dxvk/dxvk_image.h
+index b3b8a58..401d284 100644
+--- a/src/dxvk/dxvk_image.h
++++ b/src/dxvk/dxvk_image.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_descriptor.h"
+ #include "dxvk_format.h"
+ #include "dxvk_memory.h"
+diff --git a/src/dxvk/dxvk_instance.h b/src/dxvk/dxvk_instance.h
+index f945ed6..7abd483 100644
+--- a/src/dxvk/dxvk_instance.h
++++ b/src/dxvk/dxvk_instance.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../util/config/config.h"
+ 
+ #include "dxvk_adapter.h"
+diff --git a/src/dxvk/dxvk_limits.h b/src/dxvk/dxvk_limits.h
+index eb2431e..f86b70b 100644
+--- a/src/dxvk/dxvk_limits.h
++++ b/src/dxvk/dxvk_limits.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_include.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxvk/dxvk_memory.h b/src/dxvk/dxvk_memory.h
+index 795dd74..1377ec2 100644
+--- a/src/dxvk/dxvk_memory.h
++++ b/src/dxvk/dxvk_memory.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_adapter.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxvk/dxvk_meta_blit.h b/src/dxvk/dxvk_meta_blit.h
+index 28f8616..d24af49 100644
+--- a/src/dxvk/dxvk_meta_blit.h
++++ b/src/dxvk/dxvk_meta_blit.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <mutex>
+ #include <unordered_map>
+ 
+diff --git a/src/dxvk/dxvk_meta_clear.h b/src/dxvk/dxvk_meta_clear.h
+index eaf12ad..e38e43c 100644
+--- a/src/dxvk/dxvk_meta_clear.h
++++ b/src/dxvk/dxvk_meta_clear.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_format.h"
+ #include "dxvk_include.h"
+ 
+diff --git a/src/dxvk/dxvk_meta_copy.h b/src/dxvk/dxvk_meta_copy.h
+index c80b7f7..a9df5f1 100644
+--- a/src/dxvk/dxvk_meta_copy.h
++++ b/src/dxvk/dxvk_meta_copy.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <mutex>
+ #include <unordered_map>
+ 
+diff --git a/src/dxvk/dxvk_meta_mipgen.h b/src/dxvk/dxvk_meta_mipgen.h
+index a5d2d60..5fd94bf 100644
+--- a/src/dxvk/dxvk_meta_mipgen.h
++++ b/src/dxvk/dxvk_meta_mipgen.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <vector>
+ 
+ #include "dxvk_meta_blit.h"
+diff --git a/src/dxvk/dxvk_meta_pack.h b/src/dxvk/dxvk_meta_pack.h
+index 7c69d8c..c064f62 100644
+--- a/src/dxvk/dxvk_meta_pack.h
++++ b/src/dxvk/dxvk_meta_pack.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../spirv/spirv_code_buffer.h"
+ 
+ #include "dxvk_cmdlist.h"
+diff --git a/src/dxvk/dxvk_meta_resolve.h b/src/dxvk/dxvk_meta_resolve.h
+index 7216132..34662b9 100644
+--- a/src/dxvk/dxvk_meta_resolve.h
++++ b/src/dxvk/dxvk_meta_resolve.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <mutex>
+ #include <unordered_map>
+ 
+diff --git a/src/dxvk/dxvk_openvr.h b/src/dxvk/dxvk_openvr.h
+index a7d1042..15cb268 100644
+--- a/src/dxvk/dxvk_openvr.h
++++ b/src/dxvk/dxvk_openvr.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <mutex>
+ #include <vector>
+ 
+diff --git a/src/dxvk/dxvk_openxr.h b/src/dxvk/dxvk_openxr.h
+index a368035..5fe44ee 100644
+--- a/src/dxvk/dxvk_openxr.h
++++ b/src/dxvk/dxvk_openxr.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <mutex>
+ #include <vector>
+ 
+diff --git a/src/dxvk/dxvk_options.h b/src/dxvk/dxvk_options.h
+index 992ec76..d47a8ae 100644
+--- a/src/dxvk/dxvk_options.h
++++ b/src/dxvk/dxvk_options.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../util/config/config.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxvk/dxvk_pipelayout.h b/src/dxvk/dxvk_pipelayout.h
+index 9e96b34..64dd83f 100644
+--- a/src/dxvk/dxvk_pipelayout.h
++++ b/src/dxvk/dxvk_pipelayout.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <vector>
+ 
+ #include "dxvk_include.h"
+diff --git a/src/dxvk/dxvk_pipemanager.h b/src/dxvk/dxvk_pipemanager.h
+index 08c79e0..f93d67d 100644
+--- a/src/dxvk/dxvk_pipemanager.h
++++ b/src/dxvk/dxvk_pipemanager.h
+@@ -1,6 +1,9 @@
+ 
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <mutex>
+ #include <unordered_map>
+ 
+diff --git a/src/dxvk/dxvk_platform_exts.h b/src/dxvk/dxvk_platform_exts.h
+index f6f0306..eb34942 100644
+--- a/src/dxvk/dxvk_platform_exts.h
++++ b/src/dxvk/dxvk_platform_exts.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_extension_provider.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxvk/dxvk_queue.h b/src/dxvk/dxvk_queue.h
+index 374da55..4327561 100644
+--- a/src/dxvk/dxvk_queue.h
++++ b/src/dxvk/dxvk_queue.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <condition_variable>
+ #include <mutex>
+ #include <queue>
+diff --git a/src/dxvk/dxvk_recycler.h b/src/dxvk/dxvk_recycler.h
+index b90befd..973351a 100644
+--- a/src/dxvk/dxvk_recycler.h
++++ b/src/dxvk/dxvk_recycler.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <mutex>
+ #include <vector>
+ 
+diff --git a/src/dxvk/dxvk_renderpass.h b/src/dxvk/dxvk_renderpass.h
+index 2dff878..455a5a9 100644
+--- a/src/dxvk/dxvk_renderpass.h
++++ b/src/dxvk/dxvk_renderpass.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <mutex>
+ #include <vector>
+ #include <unordered_map>
+diff --git a/src/dxvk/dxvk_resource.h b/src/dxvk/dxvk_resource.h
+index 9a73ed8..d66b4ba 100644
+--- a/src/dxvk/dxvk_resource.h
++++ b/src/dxvk/dxvk_resource.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_include.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxvk/dxvk_shader.h b/src/dxvk/dxvk_shader.h
+index 0be8b49..75308bc 100644
+--- a/src/dxvk/dxvk_shader.h
++++ b/src/dxvk/dxvk_shader.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <vector>
+ 
+ #include "dxvk_include.h"
+diff --git a/src/dxvk/dxvk_shader_key.h b/src/dxvk/dxvk_shader_key.h
+index 4a66e52..1a48f83 100644
+--- a/src/dxvk/dxvk_shader_key.h
++++ b/src/dxvk/dxvk_shader_key.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_hash.h"
+ #include "dxvk_include.h"
+ 
+diff --git a/src/dxvk/dxvk_signal.h b/src/dxvk/dxvk_signal.h
+index fa99f78..99c1cf8 100644
+--- a/src/dxvk/dxvk_signal.h
++++ b/src/dxvk/dxvk_signal.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_include.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxvk/dxvk_spec_const.h b/src/dxvk/dxvk_spec_const.h
+index df4f041..b0662b0 100644
+--- a/src/dxvk/dxvk_spec_const.h
++++ b/src/dxvk/dxvk_spec_const.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_limits.h"
+ #include "dxvk_shader.h"
+ 
+diff --git a/src/dxvk/dxvk_state_cache.h b/src/dxvk/dxvk_state_cache.h
+index f23c85f..b14a571 100644
+--- a/src/dxvk/dxvk_state_cache.h
++++ b/src/dxvk/dxvk_state_cache.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <atomic>
+ #include <condition_variable>
+ #include <fstream>
+diff --git a/src/dxvk/dxvk_state_cache_types.h b/src/dxvk/dxvk_state_cache_types.h
+index 41ff4d4..d8b4b9a 100644
+--- a/src/dxvk/dxvk_state_cache_types.h
++++ b/src/dxvk/dxvk_state_cache_types.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_pipemanager.h"
+ #include "dxvk_renderpass.h"
+ 
+diff --git a/src/dxvk/dxvk_stats.h b/src/dxvk/dxvk_stats.h
+index 9138c7c..2ba6f1b 100644
+--- a/src/dxvk/dxvk_stats.h
++++ b/src/dxvk/dxvk_stats.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_include.h"
+ 
+ namespace dxvk {
+diff --git a/src/dxvk/dxvk_swapchain_blitter.h b/src/dxvk/dxvk_swapchain_blitter.h
+index 915bb53..2ca1918 100644
+--- a/src/dxvk/dxvk_swapchain_blitter.h
++++ b/src/dxvk/dxvk_swapchain_blitter.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk/dxvk_device.h"
+ #include "../dxvk/dxvk_context.h"
+ 
+diff --git a/src/dxvk/dxvk_unbound.h b/src/dxvk/dxvk_unbound.h
+index d9ae01e..685a9b8 100644
+--- a/src/dxvk/dxvk_unbound.h
++++ b/src/dxvk/dxvk_unbound.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_buffer.h"
+ #include "dxvk_image.h"
+ #include "dxvk_sampler.h"
+diff --git a/src/dxvk/dxvk_util.h b/src/dxvk/dxvk_util.h
+index 94fd06d..afbf5d6 100644
+--- a/src/dxvk/dxvk_util.h
++++ b/src/dxvk/dxvk_util.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "dxvk_include.h"
+ 
+ namespace dxvk::util {
+diff --git a/src/dxvk/hud/dxvk_hud.h b/src/dxvk/hud/dxvk_hud.h
+index d6217b8..2e09291 100644
+--- a/src/dxvk/hud/dxvk_hud.h
++++ b/src/dxvk/hud/dxvk_hud.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk_device.h"
+ 
+ #include "dxvk_hud_item.h"
+diff --git a/src/dxvk/hud/dxvk_hud_item.h b/src/dxvk/hud/dxvk_hud_item.h
+index 275461c..d68d680 100644
+--- a/src/dxvk/hud/dxvk_hud_item.h
++++ b/src/dxvk/hud/dxvk_hud_item.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <string>
+ #include <unordered_map>
+ #include <unordered_set>
+diff --git a/src/dxvk/hud/dxvk_hud_renderer.h b/src/dxvk/hud/dxvk_hud_renderer.h
+index 3986fba..cfc9b47 100644
+--- a/src/dxvk/hud/dxvk_hud_renderer.h
++++ b/src/dxvk/hud/dxvk_hud_renderer.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "../dxvk_device.h"
+ 
+ #include "dxvk_hud_font.h"
+diff --git a/src/spirv/spirv_code_buffer.h b/src/spirv/spirv_code_buffer.h
+index a0ed227..3c44515 100644
+--- a/src/spirv/spirv_code_buffer.h
++++ b/src/spirv/spirv_code_buffer.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <spirv/spirv.hpp>
+ 
+ #include <iostream>
+diff --git a/src/spirv/spirv_compression.h b/src/spirv/spirv_compression.h
+index e48f398..4f2cb54 100644
+--- a/src/spirv/spirv_compression.h
++++ b/src/spirv/spirv_compression.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <vector>
+ 
+ #include "spirv_code_buffer.h"
+diff --git a/src/spirv/spirv_instruction.h b/src/spirv/spirv_instruction.h
+index ada816e..b53ba6d 100644
+--- a/src/spirv/spirv_instruction.h
++++ b/src/spirv/spirv_instruction.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <spirv/spirv.hpp>
+ #include <spirv/GLSL.std.450.hpp>
+ 
+diff --git a/src/spirv/spirv_module.h b/src/spirv/spirv_module.h
+index 7ce5b8f..b79b4f5 100644
+--- a/src/spirv/spirv_module.h
++++ b/src/spirv/spirv_module.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <unordered_set>
+ 
+ #include "spirv_code_buffer.h"
+diff --git a/src/util/com/com_object.h b/src/util/com/com_object.h
+index 75188d5..aadac88 100644
+--- a/src/util/com/com_object.h
++++ b/src/util/com/com_object.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <atomic>
+ 
+ #include "com_include.h"
+diff --git a/src/util/config/config.h b/src/util/config/config.h
+index f947272..bd1a4a0 100644
+--- a/src/util/config/config.h
++++ b/src/util/config/config.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <string>
+ #include <unordered_map>
+ 
+diff --git a/src/util/log/log.h b/src/util/log/log.h
+index 5d30162..d2a60fa 100644
+--- a/src/util/log/log.h
++++ b/src/util/log/log.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <array>
+ #include <fstream>
+ #include <iostream>
+diff --git a/src/util/rc/util_rc.h b/src/util/rc/util_rc.h
+index c33d0c6..caee61b 100644
+--- a/src/util/rc/util_rc.h
++++ b/src/util/rc/util_rc.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <atomic>
+ 
+ namespace dxvk {
+diff --git a/src/util/sha1/sha1.h b/src/util/sha1/sha1.h
+index 06867b3..80caf78 100644
+--- a/src/util/sha1/sha1.h
++++ b/src/util/sha1/sha1.h
+@@ -11,6 +11,7 @@
+ 
+ #include <stddef.h>
+ #include <stdint.h>
++#include <stdint.h>
+ 
+ #define	SHA1_BLOCK_LENGTH		64
+ #define	SHA1_DIGEST_LENGTH		20
+diff --git a/src/util/sha1/sha1_util.h b/src/util/sha1/sha1_util.h
+index 9d83ab8..e9bc184 100644
+--- a/src/util/sha1/sha1_util.h
++++ b/src/util/sha1/sha1_util.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <array>
+ #include <cstring>
+ #include <string>
+diff --git a/src/util/sync/sync_recursive.h b/src/util/sync/sync_recursive.h
+index 1bb64db..0689dcb 100644
+--- a/src/util/sync/sync_recursive.h
++++ b/src/util/sync/sync_recursive.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <atomic>
+ 
+ #include "../com/com_include.h"
+diff --git a/src/util/sync/sync_signal.h b/src/util/sync/sync_signal.h
+index cdbcae8..36a0316 100644
+--- a/src/util/sync/sync_signal.h
++++ b/src/util/sync/sync_signal.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <atomic>
+ #include <functional>
+ #include <list>
+diff --git a/src/util/sync/sync_spinlock.h b/src/util/sync/sync_spinlock.h
+index 2715792..b16b911 100644
+--- a/src/util/sync/sync_spinlock.h
++++ b/src/util/sync/sync_spinlock.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <atomic>
+ 
+ #include "../thread.h"
+diff --git a/src/util/sync/sync_ticketlock.h b/src/util/sync/sync_ticketlock.h
+index 1c47f83..1845b35 100644
+--- a/src/util/sync/sync_ticketlock.h
++++ b/src/util/sync/sync_ticketlock.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <atomic>
+ 
+ #include "../thread.h"
+diff --git a/src/util/thread.h b/src/util/thread.h
+index bc58d22..e905545 100644
+--- a/src/util/thread.h
++++ b/src/util/thread.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <chrono>
+ #include <condition_variable>
+ #include <functional>
+diff --git a/src/util/util_bit.h b/src/util/util_bit.h
+index 7682ace..5d3b5eb 100644
+--- a/src/util/util_bit.h
++++ b/src/util/util_bit.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #ifndef _MSC_VER
+ #if defined(__WINE__) && defined(__clang__)
+ #pragma push_macro("_WIN32")
+diff --git a/src/util/util_enum.h b/src/util/util_enum.h
+index 85b9b21..c977da0 100644
+--- a/src/util/util_enum.h
++++ b/src/util/util_enum.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #define ENUM_NAME(name) \
+   case name: return os << #name
+ 
+diff --git a/src/util/util_env.h b/src/util/util_env.h
+index 80efcbc..8ccfcfa 100644
+--- a/src/util/util_env.h
++++ b/src/util/util_env.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "util_string.h"
+ 
+ namespace dxvk::env {
+diff --git a/src/util/util_fps_limiter.h b/src/util/util_fps_limiter.h
+index 9601dc9..58fdc23 100644
+--- a/src/util/util_fps_limiter.h
++++ b/src/util/util_fps_limiter.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "thread.h"
+ #include "util_time.h"
+ 
+diff --git a/src/util/util_math.h b/src/util/util_math.h
+index 5457ef0..a83745e 100644
+--- a/src/util/util_math.h
++++ b/src/util/util_math.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <cmath>
+ 
+ namespace dxvk {
+diff --git a/src/util/util_matrix.h b/src/util/util_matrix.h
+index 98f260f..d908eb8 100644
+--- a/src/util/util_matrix.h
++++ b/src/util/util_matrix.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include "util_vector.h"
+ 
+ namespace dxvk {
+diff --git a/src/util/util_small_vector.h b/src/util/util_small_vector.h
+index c313ca4..98d9d10 100644
+--- a/src/util/util_small_vector.h
++++ b/src/util/util_small_vector.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <type_traits>
+ 
+ namespace dxvk {
+diff --git a/src/util/util_string.h b/src/util/util_string.h
+index ae67403..6b9d332 100644
+--- a/src/util/util_string.h
++++ b/src/util/util_string.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <cstring>
+ #include <string>
+ #include <sstream>
+diff --git a/src/util/util_vector.h b/src/util/util_vector.h
+index 77cdf29..cd1af57 100644
+--- a/src/util/util_vector.h
++++ b/src/util/util_vector.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <iostream>
+ 
+ #include "util_bit.h"
+diff --git a/src/vulkan/vulkan_presenter.h b/src/vulkan/vulkan_presenter.h
+index 40562f6..409f9a8 100644
+--- a/src/vulkan/vulkan_presenter.h
++++ b/src/vulkan/vulkan_presenter.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <vector>
+ 
+ #include "../util/log/log.h"
+diff --git a/src/vulkan/vulkan_util.h b/src/vulkan/vulkan_util.h
+index 38e0217..61cb692 100644
+--- a/src/vulkan/vulkan_util.h
++++ b/src/vulkan/vulkan_util.h
+@@ -1,5 +1,8 @@
+ #pragma once
+ 
++#include <cstdint>
++#include <cstddef>
++
+ #include <utility>
+ 
+ #include "vulkan_loader.h"
