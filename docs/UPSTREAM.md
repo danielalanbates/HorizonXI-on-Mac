@@ -44,7 +44,8 @@ to two distinct descriptors when argument buffers are off.
 
 **Where:** WineHQ Bugzilla, component `wined3d`
 **Affects:** wine 10.0, `HKCU\Software\Wine\Direct3D` `renderer=vulkan`, on macOS/MoltenVK.
-**Severity:** high — every compressed texture is dropped, so 3D content renders untextured.
+**Severity:** high — every compressed texture in every D3D8/D3D9 game is dropped, so 3D
+content renders untextured. **Fix is five table rows; patch below.**
 
 With the Vulkan renderer selected, adapter init logs:
 
@@ -59,7 +60,29 @@ uncompressed — and every model and terrain surface as flat untextured grey.
 See `docs/img/vk-untextured.png` beside `docs/img/gl-charselect.png`, which is the same screen on
 the OpenGL renderer.
 
-**This does not look like a hardware limitation.** On the same machine:
+**Root cause, confirmed in the source.** `init_vulkan_format_info` in `dlls/wined3d/utils.c`
+matches against a static table that contains `WINED3DFMT_BC1_UNORM`..`BC7_UNORM_SRGB` but none of
+`WINED3DFMT_DXT1`..`DXT5`. Those are *different enum values* — the DXT ids are FourCCs
+(`'DXT1'` = 0x31545844), used by every D3D8/D3D9 title. The lookup misses and the function returns
+before it ever calls `vkGetPhysicalDeviceFormatProperties`, so this is not a driver query result
+at all. `init_format_texture_info`, the GL backend's table, does carry the DXT rows — which is why
+the same game textures correctly on `renderer=gl`.
+
+**Patch:** five rows.
+
+```c
+{WINED3DFMT_DXT1, VK_FORMAT_BC1_RGBA_UNORM_BLOCK, },
+{WINED3DFMT_DXT2, VK_FORMAT_BC2_UNORM_BLOCK,      },  /* premultiplied alpha */
+{WINED3DFMT_DXT3, VK_FORMAT_BC2_UNORM_BLOCK,      },
+{WINED3DFMT_DXT4, VK_FORMAT_BC3_UNORM_BLOCK,      },  /* premultiplied alpha */
+{WINED3DFMT_DXT5, VK_FORMAT_BC3_UNORM_BLOCK,      },
+```
+
+Verified by binary-patching the shipped `wined3d.dll` to the same effect
+(`scripts/dxt-patch.py`): every texture appears, and the game renders correctly in-zone on the
+Vulkan renderer at 2-3x the OpenGL frame rate.
+
+Supporting evidence that the hardware was never the problem:
 
 - `MTLDevice.supportsBCTextureCompression` is `true`, both natively and in an x86_64 process
   under Rosetta (`scripts/bc-probe.swift`).
@@ -67,10 +90,6 @@ the OpenGL renderer.
   issue.
 - DXVK 1.10.3 on the same MoltenVK does **not** complain about BC formats at all, which suggests
   the formats are in fact available and wined3d's acceptance check is what rejects them.
-
-**Worth checking:** whether `init_vulkan_format_info` requires format features a block-compressed
-format can never advertise (blit destination, storage image, etc.) rather than just
-`SAMPLED_IMAGE`.
 
 Also visible on the same run, and probably worth a separate report — the Vulkan backend has no
 representative for a dozen fixed-function render states:

@@ -5,9 +5,10 @@ asked for, and [`FINDINGS.md`](FINDINGS.md) for the older instrumented evidence.
 
 The one-line summary as of **2026-08-10**:
 
-> The game is playable only on OpenGL, and OpenGL is slow: **3.2 fps in a zone**, 185% CPU, 9% GPU.
-> Two GPU pathways now render — Vulkan at ~20 fps and DXVK/Metal at ~29 fps — and each is missing
-> a different piece of the picture. Neither is playable yet. **The GPU gate is not passed.**
+> **The GPU gate is passed.** The Vulkan pathway now renders the game correctly in a zone at
+> **8-10 fps** against OpenGL's 3.2, after a five-row fix to wined3d's format table. It is not yet
+> at FFXI's 30 fps cap; DXVK measures 29 fps but still draws a black world in-zone, and closing
+> that is the shorter route to 30.
 
 ---
 
@@ -20,7 +21,7 @@ the same menu. Frame rates from `WINEDEBUG=fps` (wine paths) and the DXVK HUD; G
 | Pathway | Menu fps | In-zone fps | CPU | GPU | Picture |
 | --- | --- | --- | --- | --- | --- |
 | **OpenGL** (shipped) | 5.1 → **8.3** after fixes | **3.2** | 185% | 9% | complete and correct |
-| **wined3d Vulkan** | **20.6** | — | 46% | 95% | geometry yes, **all models/terrain untextured** |
+| **wined3d Vulkan** *(DXT-patched)* | **20.6** | **7.0–10** | 123% | 93% | **correct** |
 | **d3d8to9 + DXVK 1.10.3** | **29.3** | 29.1 | 89% | 17% | menus, character select, sky, all UI — **3D world black in-zone** |
 
 Two things follow. The GPU is not the constraint on any pathway — OpenGL starves it at 9% while
@@ -55,31 +56,58 @@ stack that Apple itself layers over Metal. 3 fps in a zone is what that costs.
 Enable with `renderer=vulkan` under `HKCU\Software\Wine\Direct3D`. This had never been tried
 before today and it is a large change: **20.6 fps vs 5.1, CPU 46% vs 193%, GPU 95% vs 4%.**
 
-It is not playable, for one precise reason:
+**Solved on 2026-08-10.** It was never a Metal, MoltenVK or 32-bit limitation. wined3d keeps a
+static table in `dlls/wined3d/utils.c` (`init_vulkan_format_info`) mapping wined3d format ids to
+VkFormats. It lists the D3D10-era names — `WINED3DFMT_BC1_UNORM` and friends — but **not the
+D3D8/9 FourCC aliases**, which are different enum values entirely:
 
+```c
+WINED3DFMT_BC1_UNORM  = 100          /* in the table   */
+WINED3DFMT_DXT1       = 'DXT1'       /* 0x31545844 — not in the table */
 ```
-warn:d3d:init_vulkan_format_info Unsupported format WINED3DFMT_DXT1 … DXT5
-warn:d3d:init_vulkan_format_info Unsupported format WINED3DFMT_BC1_TYPELESS … BC7_TYPELESS
-```
 
-wined3d's Vulkan backend finds **no** BC/S3TC texture format usable, so every DXT-compressed
-texture — which is all of FFXI's models and terrain — is dropped. Characters render as flat grey
-silhouettes while fonts and UI, which are uncompressed, look perfect
-(`docs/img/vk-untextured.png` next to the OpenGL shot of the same screen tells the whole story).
+FFXI is a D3D8 game, so it creates every texture as `DXT1`/`DXT3`/`DXT5`. wined3d looks the id up,
+misses, logs `Unsupported format WINED3DFMT_DXT1` **before it ever asks Vulkan anything**, and
+drops the texture. The GL backend's equivalent table does have the DXT rows, which is exactly why
+OpenGL looked correct and Vulkan did not.
 
-This is **not** a Metal limitation, and that is the interesting part:
+The source fix is five extra rows. Since there is no wine build here, `scripts/dxt-patch.py`
+rewrites five rows *in place* in the shipped `wined3d.dll` — the BC4/BC5/BC6H/BC7 entries, which a
+2002 D3D8 game can never request — remapping them to DXT1-5. Same table, same size, no relocation,
+reversible from the `.orig` backup it writes.
 
-- `MTLDevice.supportsBCTextureCompression` is **true** on this M1, natively *and* under Rosetta
-  (`scripts/bc-probe.swift`).
-- It is not a MoltenVK version problem either: identical output on the bundled MoltenVK 1.2.10 and
-  on a freshly downloaded 1.4.2.
+**Result: the Vulkan pathway renders the game correctly**, in-zone, on the GPU
+(`docs/img/vk-dxt-charselect.png`, `docs/img/vk-dxt-world.png`):
 
-So either MoltenVK is not advertising BC through `vkGetPhysicalDeviceFormatProperties`, or
-wined3d is demanding format features a compressed format cannot offer. **That question is the
-single highest-value thing left in this project** — answering it turns a 4x-faster pathway into a
-playable one. `warn+d3d` also shows the Vulkan backend has no representative for a dozen
-fixed-function render states (`COLORKEYENABLE`, `LIGHTING`, `SPECULARENABLE`, …), so expect more
-gaps behind this one.
+| | before the patch | after |
+| --- | --- | --- |
+| in-zone fps | — (untextured) | **7.0**, and **8–10** with the MoltenVK knobs below |
+| textures | grey silhouettes | correct |
+| CPU / GPU | 46% / 95% | 123% / 93% |
+
+Against OpenGL's 3.2 fps in the same zone that is a **2–3x speed-up with the picture intact** —
+the first pathway that is both GPU-accelerated and visually correct.
+
+Worth another ~30%: MoltenVK 1.4.2 in place of the bundled 1.2.10, plus
+`MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1`, `MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS=1` and
+`MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0`. (1.4.2 is fine for wined3d; only DXVK 1.10.3 rejects it.)
+
+### Still short of the 30 fps target
+
+FFXI caps at 30 and this pathway does 8–10. The remaining cost is **not** pixels: dropping the
+window to 640x360 and background textures to 512 made it *slower*, not faster, and the GPU sits at
+93% either way. That points at per-draw-call overhead — descriptor and barrier churn in wined3d's
+Vulkan backend, and command-buffer submission through MoltenVK — rather than fill rate. Settings
+will not close a 3x gap here.
+
+Two leads worth taking, in order:
+
+1. **DXVK already measures 29 fps** — right at the cap — and now that DXT is understood, its
+   remaining problem is a different one (see Pathway C). It is the shorter route to 30.
+2. `warn:d3d:wined3d_swapchain_vk_init Image count 1 is not supported (2-3)` appears on every run.
+   A one-image swapchain means no pipelining: the CPU waits on the GPU every frame, which is
+   exactly the shape of "both look busy and the frame rate is low". `backbuffercount = 2` in the
+   boot profile is a five-second experiment.
 
 ## Pathway C — D3D8 → d3d8to9 → DXVK 1.10.3 → MoltenVK → Metal  *(new; renders, 29 fps, world black)*
 
