@@ -166,3 +166,30 @@ real frame-rate measurements.
 `patches/dxvk-1.10.3-metal-features-and-fog-probes.patch` is a **superset**: it already
 contains the GCC 14 `<cstdint>` header fixes. Apply it alone to a clean `v1.10.3` checkout —
 applying `dxvk-1.10.3-build-gcc14.patch` first will conflict.
+
+
+## Implementation status
+
+**Done — shader side (`DXVK_FF_INSTANCING=1`, off by default).**
+
+`d3d9_fixed_function.cpp` can now source the fixed-function WorldView matrix per instance
+instead of from device state. It declares `gl_InstanceIndex` as a builtin input and indexes
+DXVK's existing `D3D9FF_VertexBlendData` storage buffer (`WorldViewArray`) with it — the same
+buffer, descriptor and upload path already used for vertex blending, so no new binding was
+needed. Regression-checked with the flag off: rendering is unchanged, landscape, textures and
+fog all correct.
+
+**Not done — CPU side.** Nothing fills that array per instance or issues an instanced draw
+yet, so turning the flag on will render incorrectly (every instance reads
+`WorldViewArray[0]`). Do not ship it enabled until the following exists:
+
+1. A deferral queue in `D3D9DeviceEx` for opaque fixed-function draws, bucketed by
+   (state signature, vertex buffer, index buffer, primitive type, index range).
+2. Per-batch upload of the WorldView matrices into the vertex-blend storage buffer.
+3. Flush as one `DrawIndexedPrimitive` with `instanceCount = N`, before the first
+   alpha-blended draw and at end of frame.
+4. Blended draws submitted immediately and in order, unchanged.
+
+The delivery path needs no new work: the launcher already installs our `d3d9.dll` into the
+game on every launch, so this reaches every user and every private server automatically once
+the CPU side lands.

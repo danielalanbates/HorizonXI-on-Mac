@@ -402,10 +402,10 @@ index 32645d2..f729b8f 100644
  
  namespace dxvk {
 diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
-index 734a7a0..22af361 100644
+index 734a7a0..4d18840 100644
 --- a/src/d3d9/d3d9_device.cpp
 +++ b/src/d3d9/d3d9_device.cpp
-@@ -30,6 +30,48 @@
+@@ -30,6 +30,53 @@
  #pragma fenv_access (on)
  #endif
  
@@ -425,12 +425,15 @@ index 734a7a0..22af361 100644
 +    std::set<uint64_t> groups;         // distinct (shaders, textures, decl) signatures
 +    std::set<uint64_t> texGroups;      // distinct texture-0 bindings alone
 +    std::set<uint64_t> fullGroups;     // signature + world transform + FF render states
++    std::set<uint64_t> meshGroups;     // signature + the actual mesh (vertex+index buffer)
++    uint64_t instanceable = 0;         // draws that repeat a mesh already seen this frame
 +    uint64_t frames = 0;
 +    FILE* out = nullptr;
 +    bool enabled = std::getenv("DXVK_BATCH_PROBE") != nullptr;
-+    void note(uint64_t sig, uint64_t tex, uint64_t full) {
++    void note(uint64_t sig, uint64_t tex, uint64_t full, uint64_t mesh) {
 +      if (!enabled) return;
 +      draws++; groups.insert(sig); texGroups.insert(tex); fullGroups.insert(full);
++      if (!meshGroups.insert(mesh).second) instanceable++;   // this mesh+state seen before
 +    }
 +    void frame() {
 +      if (!enabled) return;
@@ -438,14 +441,16 @@ index 734a7a0..22af361 100644
 +      if (draws == 0) return;
 +      if (!out) out = fopen("/tmp/dxvk-batch-probe.log", "w");
 +      if (out && (frames % 30) == 0) {
-+        fprintf(out, "frame %llu draws %llu stategroups %zu texgroups %zu fullgroups %zu  merge_ratio %.1fx  trivial_merge %.1fx\n",
++        fprintf(out, "frame %llu draws %llu stategroups %zu texgroups %zu fullgroups %zu meshgroups %zu instanceable %llu  merge_ratio %.1fx  trivial_merge %.1fx  instancing_ratio %.1fx\n",
 +                (unsigned long long)frames, (unsigned long long)draws,
-+                groups.size(), texGroups.size(), fullGroups.size(),
++                groups.size(), texGroups.size(), fullGroups.size(), meshGroups.size(),
++                (unsigned long long)instanceable,
 +                groups.empty() ? 0.0 : double(draws) / double(groups.size()),
-+                fullGroups.empty() ? 0.0 : double(draws) / double(fullGroups.size()));
++                fullGroups.empty() ? 0.0 : double(draws) / double(fullGroups.size()),
++                meshGroups.empty() ? 0.0 : double(draws) / double(meshGroups.size()));
 +        fflush(out);
 +      }
-+      draws = 0; groups.clear(); texGroups.clear(); fullGroups.clear();
++      draws = 0; instanceable = 0; groups.clear(); texGroups.clear(); fullGroups.clear(); meshGroups.clear();
 +    }
 +  };
 +  static BatchProbe g_batchProbe;
@@ -454,7 +459,7 @@ index 734a7a0..22af361 100644
  namespace dxvk {
  
    D3D9DeviceEx::D3D9DeviceEx(
-@@ -376,6 +418,8 @@ namespace dxvk {
+@@ -376,6 +423,8 @@ namespace dxvk {
      const RECT*    pDestRect,
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion) {
@@ -463,7 +468,7 @@ index 734a7a0..22af361 100644
      return PresentEx(
        pSourceRect,
        pDestRect,
-@@ -2397,6 +2441,32 @@ namespace dxvk {
+@@ -2397,6 +2446,36 @@ namespace dxvk {
            D3DPRIMITIVETYPE PrimitiveType,
            UINT             StartVertex,
            UINT             PrimitiveCount) {
@@ -490,13 +495,17 @@ index 734a7a0..22af361 100644
 +                         D3DRS_ZWRITEENABLE, D3DRS_ZFUNC, D3DRS_FOGENABLE })
 +          full = full * 0x100000001B3ull ^ uint64_t(m_state.renderStates[rs]);
 +      }
-+      g_batchProbe.note(sig, tex, full);
++      // mesh identity: same state AND same geometry -> this is what instancing can collapse.
++      uint64_t mesh = sig
++        ^ (reinterpret_cast<uint64_t>(m_state.vertexBuffers[0].vertexBuffer.ptr()) * 0x9E3779B97F4A7C15ull)
++        ^ (reinterpret_cast<uint64_t>(m_state.indices.ptr())                       * 0xC2B2AE3D27D4EB4Full);
++      g_batchProbe.note(sig, tex, full, mesh);
 +    }
 +
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2433,6 +2503,32 @@ namespace dxvk {
+@@ -2433,6 +2512,36 @@ namespace dxvk {
            UINT             NumVertices,
            UINT             StartIndex,
            UINT             PrimitiveCount) {
@@ -523,13 +532,17 @@ index 734a7a0..22af361 100644
 +                         D3DRS_ZWRITEENABLE, D3DRS_ZFUNC, D3DRS_FOGENABLE })
 +          full = full * 0x100000001B3ull ^ uint64_t(m_state.renderStates[rs]);
 +      }
-+      g_batchProbe.note(sig, tex, full);
++      // mesh identity: same state AND same geometry -> this is what instancing can collapse.
++      uint64_t mesh = sig
++        ^ (reinterpret_cast<uint64_t>(m_state.vertexBuffers[0].vertexBuffer.ptr()) * 0x9E3779B97F4A7C15ull)
++        ^ (reinterpret_cast<uint64_t>(m_state.indices.ptr())                       * 0xC2B2AE3D27D4EB4Full);
++      g_batchProbe.note(sig, tex, full, mesh);
 +    }
 +
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2469,6 +2565,32 @@ namespace dxvk {
+@@ -2469,6 +2578,36 @@ namespace dxvk {
            UINT             PrimitiveCount,
      const void*            pVertexStreamZeroData,
            UINT             VertexStreamZeroStride) {
@@ -556,13 +569,17 @@ index 734a7a0..22af361 100644
 +                         D3DRS_ZWRITEENABLE, D3DRS_ZFUNC, D3DRS_FOGENABLE })
 +          full = full * 0x100000001B3ull ^ uint64_t(m_state.renderStates[rs]);
 +      }
-+      g_batchProbe.note(sig, tex, full);
++      // mesh identity: same state AND same geometry -> this is what instancing can collapse.
++      uint64_t mesh = sig
++        ^ (reinterpret_cast<uint64_t>(m_state.vertexBuffers[0].vertexBuffer.ptr()) * 0x9E3779B97F4A7C15ull)
++        ^ (reinterpret_cast<uint64_t>(m_state.indices.ptr())                       * 0xC2B2AE3D27D4EB4Full);
++      g_batchProbe.note(sig, tex, full, mesh);
 +    }
 +
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2522,6 +2644,32 @@ namespace dxvk {
+@@ -2522,6 +2661,36 @@ namespace dxvk {
            D3DFORMAT        IndexDataFormat,
      const void*            pVertexStreamZeroData,
            UINT             VertexStreamZeroStride) {
@@ -589,13 +606,17 @@ index 734a7a0..22af361 100644
 +                         D3DRS_ZWRITEENABLE, D3DRS_ZFUNC, D3DRS_FOGENABLE })
 +          full = full * 0x100000001B3ull ^ uint64_t(m_state.renderStates[rs]);
 +      }
-+      g_batchProbe.note(sig, tex, full);
++      // mesh identity: same state AND same geometry -> this is what instancing can collapse.
++      uint64_t mesh = sig
++        ^ (reinterpret_cast<uint64_t>(m_state.vertexBuffers[0].vertexBuffer.ptr()) * 0x9E3779B97F4A7C15ull)
++        ^ (reinterpret_cast<uint64_t>(m_state.indices.ptr())                       * 0xC2B2AE3D27D4EB4Full);
++      g_batchProbe.note(sig, tex, full, mesh);
 +    }
 +
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -3892,8 +4040,13 @@ namespace dxvk {
+@@ -3892,8 +4061,13 @@ namespace dxvk {
      DxvkDeviceFeatures enabled = {};
  
      // Geometry shaders are used for some meta ops
@@ -611,7 +632,7 @@ index 734a7a0..22af361 100644
      enabled.extRobustness2.robustBufferAccess2 = supported.extRobustness2.robustBufferAccess2;
  
      enabled.extMemoryPriority.memoryPriority = supported.extMemoryPriority.memoryPriority;
-@@ -3921,7 +4074,10 @@ namespace dxvk {
+@@ -3921,7 +4095,10 @@ namespace dxvk {
      enabled.core.features.sampleRateShading = VK_TRUE;
      enabled.core.features.samplerAnisotropy = supported.core.features.samplerAnisotropy;
      enabled.core.features.shaderClipDistance = VK_TRUE;
@@ -650,7 +671,7 @@ index 433a269..1b62f06 100644
  
  namespace dxvk {
 diff --git a/src/d3d9/d3d9_fixed_function.cpp b/src/d3d9/d3d9_fixed_function.cpp
-index 37f6e1a..9e3d7bc 100644
+index 37f6e1a..b03453d 100644
 --- a/src/d3d9/d3d9_fixed_function.cpp
 +++ b/src/d3d9/d3d9_fixed_function.cpp
 @@ -1,4 +1,6 @@
@@ -713,6 +734,56 @@ index 37f6e1a..9e3d7bc 100644
  
      return new DxvkShader(info, m_module.compile());
    }
+@@ -1447,6 +1486,32 @@ namespace dxvk {
+     if (m_vsKey.Data.Contents.VertexBlendMode == D3D9FF_VertexBlendMode_Normal)
+       emitVertexBlendDecl();
+ 
++    // Fixed-function instancing (DXVK_FF_INSTANCING=1).
++    //
++    // FFXI redraws the same meshes over and over -- measured at 1891 draws collapsing into
++    // 191 distinct mesh+state pairs, 90% of draws repeating one already issued that frame.
++    // The only thing stopping those from being one instanced draw is that D3D9 supplies the
++    // world transform as *device state*, so each repeat needs its own WorldView matrix.
++    //
++    // DXVK already carries a storage buffer of WorldView matrices for vertex blending
++    // (D3D9FF_VertexBlendData). Here we reuse it as an instance-transform array and index it
++    // by gl_InstanceIndex, so a batch of N repeats of one mesh becomes a single draw with
++    // instanceCount = N. Off unless the env var is set; the CPU-side batching that fills the
++    // array and issues the instanced draw is a separate piece of work.
++    const bool ffInstancing = std::getenv("DXVK_FF_INSTANCING") != nullptr;
++    uint32_t instanceIndexVar = 0;
++    if (ffInstancing) {
++      if (m_vsKey.Data.Contents.VertexBlendMode != D3D9FF_VertexBlendMode_Normal)
++        emitVertexBlendDecl();
++
++      instanceIndexVar = m_module.newVar(
++        m_module.defPointerType(m_uint32Type, spv::StorageClassInput),
++        spv::StorageClassInput);
++      m_module.decorateBuiltIn(instanceIndexVar, spv::BuiltInInstanceIndex);
++      m_module.setDebugName(instanceIndexVar, "vs_instance_index");
++      m_entryPointInterfaces.push_back(instanceIndexVar);
++    }
++
+     // Load constants
+     auto LoadConstant = [&](uint32_t type, uint32_t idx) {
+       uint32_t offset  = m_module.constu32(idx);
+@@ -1457,6 +1522,16 @@ namespace dxvk {
+     };
+ 
+     m_vs.constants.worldview = LoadConstant(m_mat4Type, uint32_t(D3D9FFVSMembers::WorldViewMatrix));
++
++    if (ffInstancing) {
++      // WorldViewArray[gl_InstanceIndex] replaces the single device-state WorldView.
++      uint32_t instanceId = m_module.opLoad(m_uint32Type, instanceIndexVar);
++      std::array<uint32_t, 2> idx = { m_module.constu32(0), instanceId };
++      m_vs.constants.worldview = m_module.opLoad(m_mat4Type,
++        m_module.opAccessChain(
++          m_module.defPointerType(m_mat4Type, spv::StorageClassUniform),
++          m_vs.vertexBlendData, idx.size(), idx.data()));
++    }
+     m_vs.constants.normal    = LoadConstant(m_mat4Type, uint32_t(D3D9FFVSMembers::NormalMatrix));
+     m_vs.constants.inverseView = LoadConstant(m_mat4Type, uint32_t(D3D9FFVSMembers::InverseViewMatrix));
+     m_vs.constants.proj      = LoadConstant(m_mat4Type, uint32_t(D3D9FFVSMembers::ProjMatrix));
 diff --git a/src/d3d9/d3d9_fixed_function.h b/src/d3d9/d3d9_fixed_function.h
 index 8e312aa..a183ca2 100644
 --- a/src/d3d9/d3d9_fixed_function.h
