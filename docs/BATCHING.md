@@ -55,6 +55,46 @@ conclusion is unaffected (a world full of independently moving characters has *m
 transforms, not fewer), but the exact in-world ratio is still unmeasured and should be taken
 before implementation starts.
 
+## Third measurement: instancing is viable -- 90% of draws repeat a mesh
+
+Instancing only helps if the *same geometry* is drawn repeatedly. Different meshes sharing
+state cannot be instanced; they would need their vertices merged, which costs CPU -- the
+scarce resource. So the probe was extended to group by state **and** the actual vertex and
+index buffer:
+
+```
+frame 4410 draws 1894 stategroups 63 texgroups 56 fullgroups 1356 meshgroups 193 instanceable 1701
+           merge_ratio 30.1x  trivial_merge 1.4x  instancing_ratio 9.8x
+frame 4440 draws 1891 stategroups 61 texgroups 55 fullgroups 1354 meshgroups 191 instanceable 1700
+           merge_ratio 31.0x  trivial_merge 1.4x  instancing_ratio 9.9x
+```
+
+**1,700 of 1,891 draws -- 90% -- repeat a mesh+state combination already drawn in that frame.**
+Only 191 distinct mesh+state pairs exist. Instancing collapses the frame to ~191 draws, a
+**9.9x** reduction.
+
+That is the number that matters, and it clears the bar: 191 draws per frame is far below the
+~400-650 the 30 fps threshold allows at the measured submission ceiling. The 21-31x figures
+above are upper bounds that would additionally require merging *different* meshes; 9.9x is
+what instancing alone delivers, and 9.9x is enough.
+
+### Why the draws need reordering, and why that is safe
+
+The 90% figure counts repeats anywhere in the frame, not necessarily consecutive. Capturing
+it therefore means deferring draws and grouping them, not just merging adjacent ones.
+
+For **opaque** geometry with depth testing this is safe -- the depth buffer makes the result
+order-independent, which is exactly how modern engines batch. It is **not** safe for
+alpha-blended draws, where the result depends on submission order.
+
+So the implementation is:
+
+1. Defer opaque fixed-function draws instead of submitting them.
+2. Bucket by (state signature, vertex buffer, index buffer, primitive type, index range).
+3. Flush each bucket as one instanced draw, with the per-object world matrices in an
+   instance buffer, before the first alpha-blended draw and at end of frame.
+4. Submit blended draws immediately, in order, exactly as today.
+
 ## Why this matters
 
 The stack is bound by draw submission, not by the GPU — measured at 9–11% GPU utilisation
