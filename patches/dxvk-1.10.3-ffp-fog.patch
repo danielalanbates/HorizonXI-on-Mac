@@ -1,0 +1,32 @@
+diff --git a/src/d3d9/d3d9_fixed_function.cpp b/src/d3d9/d3d9_fixed_function.cpp
+index 37f6e1a..ef8d26c 100644
+--- a/src/d3d9/d3d9_fixed_function.cpp
++++ b/src/d3d9/d3d9_fixed_function.cpp
+@@ -10,6 +10,7 @@
+ #include "../spirv/spirv_module.h"
+ 
+ #include <cfloat>
++#include <cstdint>
+ 
+ namespace dxvk {
+ 
+@@ -1967,7 +1968,18 @@ namespace dxvk {
+     fogCtx.IsPositionT = false;
+     fogCtx.HasSpecular = false;
+     fogCtx.Specular    = 0;
+-    current = DoFixedFunctionFog(m_module, fogCtx);
++    // macOS/MoltenVK workaround — bypass fixed-function fog.
++    //
++    // Fixed-function fog is applied to *every* FFP fragment and reads its parameters out of
++    // render_state_t, the uniform block MoltenVK mis-binds on Metal (the same block that
++    // collides at [[buffer(0)]] with D3D9FixedFunctionPS unless argument buffers are on). With
++    // garbage fog parameters the fog factor saturates and every lit surface is replaced by the
++    // fog colour, so the entire 3D world renders black while the sky and the 2D UI — which do
++    // not go through FFP fog — look perfect. That is exactly the symptom FFXI showed here.
++    //
++    // Skipping fog restores the world at 29 fps. The cost is no distance fog. The real fix is
++    // to make render_state_t bind correctly on MoltenVK; until then this is the trade.
++    // current = DoFixedFunctionFog(m_module, fogCtx);
+ 
+     m_module.opStore(m_ps.out.COLOR, current);
+ 

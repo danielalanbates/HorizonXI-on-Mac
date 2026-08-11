@@ -5,10 +5,16 @@ asked for, and [`FINDINGS.md`](FINDINGS.md) for the older instrumented evidence.
 
 The one-line summary as of **2026-08-10**:
 
-> **The GPU gate is passed.** The Vulkan pathway now renders the game correctly in a zone at
-> **8-10 fps** against OpenGL's 3.2, after a five-row fix to wined3d's format table. It is not yet
-> at FFXI's 30 fps cap; DXVK measures 29 fps but still draws a black world in-zone, and closing
-> that is the shorter route to 30.
+> **Done: 29 fps in a zone, world rendering correctly — FFXI's cap is 30.**
+> The black world on DXVK was fixed-function **fog**, and the untextured Vulkan render was five
+> missing rows in wined3d's format table. Both are fixed and both are one-line-ish changes to
+> other people's code, written up in `UPSTREAM.md` and `../patches/`.
+>
+> | pathway | in-zone fps | picture |
+> | --- | --- | --- |
+> | **Metal / DXVK 1.10.3 (patched)** | **29** | **correct** (no distance fog) |
+> | Vulkan / wined3d (patched) | 8-10 | correct |
+> | Classic OpenGL | 3.2 | correct |
 
 ---
 
@@ -159,12 +165,49 @@ passes from 4 to 57. FFXI changes the x87 control word; without `D3DCREATE_FPU_P
 corrupts D3D9's own maths. This is a one-line ini change with a large effect
 (`docs/img/dxvk-charselect.png`).
 
-### What is still wrong
+### Fix 3 — bypass fixed-function fog  *(this was the black world)*
 
-In-zone the 3D world is black while nameplates, chat, the compass and the whole 2D layer render
-correctly at 29 fps (`docs/img/dxvk-world-black.png`). Sky renders at character select but terrain
-and models do not. The shape of the failure — vertex-coloured geometry appears, textured geometry
-does not — points at texture sampling returning black rather than at presentation.
+Found by building DXVK 1.10.3 from source and bisecting the fixed-function fragment shader.
+The last thing that happens to every FFP fragment, immediately before the colour is stored, is:
+
+```cpp
+current = DoFixedFunctionFog(m_module, fogCtx);   // fogCtx.RenderState = m_rsBlock
+m_module.opStore(m_ps.out.COLOR, current);
+```
+
+Fog reads its parameters out of `render_state_t` — **the same uniform block MoltenVK mis-binds**,
+the one that collides at `[[buffer(0)]]` with `D3D9FixedFunctionPS`. With garbage fog parameters
+the fog factor saturates and every lit surface is replaced by the fog colour. The sky, the 2D UI
+and the fonts do not go through FFP fog, which is exactly why those always rendered while the
+whole world was black.
+
+Bypassing fog restores the picture completely: `docs/img/dxvk-fixed-menu.png`,
+`docs/img/dxvk-fixed-charselect.png`, `docs/img/dxvk-fixed-world.png` — **29 fps in Selbina**.
+The cost is no distance fog. The proper fix is to make `render_state_t` bind correctly on
+MoltenVK; until then this is the trade, and it is worth it.
+
+Patch: `patches/dxvk-1.10.3-ffp-fog.patch`. Built DLL: `vendor/dxvk-1.10.3-x32-d3d9-nofog.dll`.
+
+### Building DXVK for this
+
+`brew install meson ninja mingw-w64 glslang`, then from a v1.10.3 checkout:
+
+```sh
+meson setup --cross-file build-win32.txt --buildtype release builddir32
+ninja -C builddir32 src/d3d9/d3d9.dll     # d3d10/d3d11 do not build with mingw 14; not needed
+i686-w64-mingw32-strip -s builddir32/src/d3d9/d3d9.dll
+```
+
+`patches/dxvk-1.10.3-build-gcc14.patch` carries the two build fixes required by modern GCC.
+
+### Why not DXVK 2.x or 3.x
+
+Tested, not guessed: DXVK 3.0.2 on MoltenVK 1.4.2 (Vulkan 1.4) still rejects the M1 for
+`geometryShader`. Relaxing that and `robustBufferAccess` in a source build gets further, then it
+wants `shaderCullDistance`, then `nullDescriptor`, then `khrPipelineLibrary` — DXVK 2.x's core
+architecture. Those are not peripheral features and faking them would produce exactly the kind of
+lying-driver situation that caused the original black window. **1.10.3 is the last usable
+version on MoltenVK**, which is why macOS DXVK stalled there.
 
 **`d3d8to9` is not the culprit — ruled out 2026-08-10.** d8vk 1.0 (AlpyneDreams/d8vk) is a
 completely independent D3D8 implementation built on the same DXVK 1.10 core, with no d3d8to9 and

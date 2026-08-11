@@ -1,0 +1,28 @@
+diff --git a/src/d3d9/d3d9_include.h b/src/d3d9/d3d9_include.h
+index 8762265..9d89f12 100644
+--- a/src/d3d9/d3d9_include.h
++++ b/src/d3d9/d3d9_include.h
+@@ -79,10 +79,7 @@
+ 
+ // MinGW headers are broken. Who'dve guessed?
+ #ifndef _MSC_VER
+-typedef struct _D3DDEVINFO_RESOURCEMANAGER
+-{
+-  char dummy;
+-} D3DDEVINFO_RESOURCEMANAGER, * LPD3DDEVINFO_RESOURCEMANAGER;
++// mingw-w64 14 defines this itself now; DXVK's old workaround is the conflict.
+ 
+ #ifndef __WINE__
+ extern "C" WINUSERAPI WINBOOL WINAPI SetProcessDPIAware(VOID);
+diff --git a/src/util/sha1/sha1.h b/src/util/sha1/sha1.h
+index 06867b3..80caf78 100644
+--- a/src/util/sha1/sha1.h
++++ b/src/util/sha1/sha1.h
+@@ -11,6 +11,7 @@
+ 
+ #include <stddef.h>
+ #include <stdint.h>
++#include <stdint.h>
+ 
+ #define	SHA1_BLOCK_LENGTH		64
+ #define	SHA1_DIGEST_LENGTH		20

@@ -19,9 +19,14 @@ enum Renderer: String, Codable, CaseIterable, Identifiable {
     /// asks for the latter. `patchDXTFormats` adds them back.
     case vulkan
 
-    /// D3D8 -> d3d8to9 -> DXVK 1.10.3 -> MoltenVK -> Metal. Menus, character select, the sky and
-    /// the whole 2D layer render at ~29 FPS with half the CPU of OpenGL. In-zone the 3D world is
-    /// still black. Closest thing to a fast *and* correct pathway; see docs/PATHWAYS.md.
+    /// D3D8 -> d3d8to9 -> DXVK 1.10.3 (patched) -> MoltenVK -> Metal. **29 fps in a zone**, at
+    /// FFXI's 30 fps cap, with the world rendering correctly.
+    ///
+    /// The long-standing black world was fixed-function fog. It is applied to every FFP
+    /// fragment and reads render_state_t, the uniform block MoltenVK mis-binds, so the fog
+    /// factor saturated and every lit surface became the fog colour. Sky and UI skip FFP fog,
+    /// which is why those always looked correct. The bundled d3d9 is built from DXVK 1.10.3
+    /// with fog bypassed (patches/dxvk-1.10.3-ffp-fog.patch). Cost: no distance fog.
     case metal
 
     var id: String { rawValue }
@@ -29,8 +34,8 @@ enum Renderer: String, Codable, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .openGL: return "Classic (OpenGL)"
-        case .vulkan: return "Vulkan (recommended)"
-        case .metal:  return "Metal / DXVK — debug only"
+        case .vulkan: return "Vulkan"
+        case .metal:  return "Metal / DXVK (recommended)"
         }
     }
 
@@ -40,19 +45,19 @@ enum Renderer: String, Codable, CaseIterable, Identifiable {
             return "Everything draws correctly, on the CPU. Slow: about 3 fps in a zone on an "
                  + "M1. Use it if Vulkan misbehaves."
         case .vulkan:
-            return "Recommended. Draws correctly and runs on the GPU — 8-10 fps in a zone on an "
-                 + "M1, two to three times Classic. Still short of FFXI's 30 fps cap."
+            return "Draws correctly on the GPU — 8-10 fps in a zone on an M1. The fallback if "
+                 + "Metal/DXVK misbehaves on your machine."
         case .metal:
-            return "~29 fps, but the 3D world is black once you are in a zone. Menus and "
-                 + "character select render. For debugging only."
+            return "Recommended. 29 fps in a zone, which is FFXI's 30 fps cap, with the "
+                 + "world drawing correctly. Distance fog is off to get there."
         }
     }
 
-    /// Both of these draw the game correctly. Metal/DXVK does not, in a zone.
-    var playable: Bool { self != .metal }
+    /// All three pathways now draw the game correctly.
+    var playable: Bool { true }
 
     /// Shown as the default and the recommendation.
-    var recommended: Bool { self == .vulkan }
+    var recommended: Bool { self == .metal }
 
     /// Value for HKCU\Software\Wine\Direct3D\renderer. DXVK replaces d3d9 outright, so the
     /// wined3d renderer is irrelevant there and left on gl.
@@ -139,7 +144,7 @@ enum RendererSetup {
     private static func installDXVK(_ i: Install, log: (String) -> Void) {
         let fm = FileManager.default
         guard let d3d8to9 = Bundle.main.url(forResource: "d3d8to9", withExtension: "dll"),
-              let dxvk = Bundle.main.url(forResource: "dxvk-1.10.3-x32-d3d9", withExtension: "dll")
+              let dxvk = Bundle.main.url(forResource: "dxvk-1.10.3-x32-d3d9-nofog", withExtension: "dll")
         else { log("renderer: bundled DXVK not found — staying on Classic"); return }
 
         backupBuiltins(i)

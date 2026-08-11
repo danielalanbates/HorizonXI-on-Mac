@@ -252,9 +252,9 @@ struct ContentView: View {
             row("Wine prefix", selected?.prefixName ?? (scanning ? "scanning…" : "not found"))
             row("Client", selected == nil ? (scanning ? "scanning…" : "not found") : "Ashita · \(store.selected?.bootProfile ?? "")")
 
-            Text("Measured in a zone on this Mac: Vulkan 8-10 fps on the GPU with the picture "
-                 + "correct, against Classic's 3. FFXI caps at 30, so there is still headroom "
-                 + "to find — see docs/PATHWAYS.md.")
+            Text("Measured in a zone on this Mac: Metal/DXVK 29 fps with the world drawing "
+                 + "correctly, against Classic OpenGL's 3.2. FFXI's cap is 30. Distance fog is "
+                 + "off on Metal — see docs/PATHWAYS.md.")
                 .font(.caption2).foregroundStyle(Vana.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -431,7 +431,9 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .keyboardShortcut(.defaultAction)
-        .disabled(selected == nil || runner.running || blocked || scanning)
+        // Only the *absence* of an install should block Play. Once we have one — remembered
+        // or found — a still-running background rescan must not hold the user up.
+        .disabled(selected == nil || runner.running || blocked)
     }
 
     // MARK: - Actions
@@ -461,14 +463,25 @@ struct ContentView: View {
     private func refresh() { Task { await refreshAsync() } }
 
     private func refreshAsync() async {
+        // Use the install we used last time straight away. Scanning /Volumes can take a long
+        // time on a slow external drive — long enough that the launcher never became usable —
+        // and there is no reason to make the user wait for a path we already know.
+        if selected == nil, let remembered = Install.remembered() {
+            selected = remembered
+            installs = [remembered]
+            await recheckAsync()
+        }
+
         scanning = true
         let found = await Task.detached(priority: .userInitiated) { Install.discover() }.value
+        scanning = false
+        guard !found.isEmpty else { return }
         installs = found
         if selected == nil || !found.contains(where: { $0.id == selected?.id }) {
             selected = found.first
         }
+        selected?.remember()
         await recheckAsync()
-        scanning = false
     }
 
     private func recheck() { Task { await recheckAsync() } }

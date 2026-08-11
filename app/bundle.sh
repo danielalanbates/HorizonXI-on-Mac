@@ -24,7 +24,7 @@ chmod +x "$APP/Contents/Resources/"*.sh
 
 # The Metal/DXVK renderer ships inside the app: Renderer.swift resolves these by name out of
 # Bundle.main, so the user never has to fetch a DLL by hand.
-for dll in d3d8to9.dll dxvk-1.10.3-x32-d3d9.dll; do
+for dll in d3d8to9.dll dxvk-1.10.3-x32-d3d9.dll dxvk-1.10.3-x32-d3d9-nofog.dll; do
   [[ -f "$REPO/vendor/$dll" ]] && cp "$REPO/vendor/$dll" "$APP/Contents/Resources/$dll"
 done
 
@@ -38,8 +38,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key><string>HorizonXI-on-Mac</string>
   <key>CFBundleIdentifier</key><string>org.batesai.horizonxi-on-mac</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>2.0</string>
-  <key>CFBundleVersion</key><string>2</string>
+  <key>CFBundleShortVersionString</key><string>2.2</string>
+  <key>CFBundleVersion</key><string>3</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.games</string>

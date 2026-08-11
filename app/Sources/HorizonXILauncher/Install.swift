@@ -15,6 +15,7 @@ struct Install: Identifiable, Hashable {
     var gameDir: URL { driveC.appendingPathComponent("HorizonXI") }
     var squareEnix: URL { gameDir.appendingPathComponent("SquareEnix") }
     var ashitaCLI: URL { gameDir.appendingPathComponent("Ashita-cli.exe") }
+    var frameworks: URL { wrapper.appendingPathComponent("Contents/Frameworks") }
     var d3dMetal: URL { wrapper.appendingPathComponent("Contents/Frameworks/renderer/d3dmetal/external") }
     var systemReg: URL { prefix.appendingPathComponent("system.reg") }
 
@@ -28,6 +29,24 @@ struct Install: Identifiable, Hashable {
     var isMounted: Bool {
         guard let v = volume else { return false }
         return FileManager.default.fileExists(atPath: v.path)
+    }
+
+    // MARK: - Remembering the last good install
+
+    private static let key = "install.last"
+
+    /// The install used last time, if it is still on disk. Lets the UI be usable before the
+    /// volume scan finishes.
+    static func remembered() -> Install? {
+        guard let s = UserDefaults.standard.string(forKey: key) else { return nil }
+        let parts = s.components(separatedBy: "#")
+        guard parts.count == 2 else { return nil }
+        let i = Install(wrapper: URL(fileURLWithPath: parts[0]), prefixName: parts[1])
+        return FileManager.default.fileExists(atPath: i.gameDir.path) ? i : nil
+    }
+
+    func remember() {
+        UserDefaults.standard.set(id, forKey: Self.key)
     }
 
     // MARK: - Discovery

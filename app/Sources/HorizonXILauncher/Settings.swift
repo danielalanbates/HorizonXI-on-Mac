@@ -18,9 +18,9 @@ struct PerfSettings: Codable {
     var largeAddressAware = true
     /// Extra environment, one KEY=VALUE per line, for experiments.
     var extraEnv = ""
-    /// Which renderer pathway to run. Vulkan draws correctly and is 2-3x OpenGL on an M1,
-    /// so it is the default; Classic is the fallback.
-    var renderer: Renderer = .vulkan
+    /// Which renderer pathway to run. Metal/DXVK reaches FFXI's 30 fps cap with the world
+    /// drawing correctly, so it is the default; Vulkan and Classic are fallbacks.
+    var renderer: Renderer = .metal
 
     static let key = "perf.settings"
 
@@ -39,6 +39,10 @@ struct PerfSettings: Codable {
         var env: [String: String] = [:]
         env["WINEPREFIX"] = install.prefix.path
         env["D3DMETAL_FRAMEWORK_PATH"] = install.d3dMetal.path
+        // Wine loads libMoltenVK and the rest of the wrapper's dylibs through this. The
+        // wrapper's own launch script sets it; without it the Vulkan renderers come up to a
+        // black window and sit there, which is a very confusing way to fail.
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = install.frameworks.path + ":/usr/lib"
         if silenceWineDebug { env["WINEDEBUG"] = "-all" }
         env["WINEMSYNC"] = msync ? "1" : "0"
         env["WINEESYNC"] = (esync && !msync) ? "1" : "0"
