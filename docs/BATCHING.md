@@ -23,6 +23,38 @@ frame 60   draws  379 stategroups 10 texgroups 10  merge_ratio 37.9x
 **1,892 draw calls collapse into 61 distinct state groups. Only 55 distinct textures are in
 play across the entire frame.** The ratio is stable at ~30–38× across scenes.
 
+## Second measurement: instancing IS required (the first number was optimistic)
+
+The signature above covers shaders, vertex declaration and textures. It does **not** cover the
+world transform, and FFXI sets that as device state. Widening the probe to include the world
+matrix and the fixed-function render states the shader reads gives the honest picture:
+
+```
+# character-select landscape, many independently placed objects
+frame 6360 draws 836 stategroups 39 texgroups 35 fullgroups 609  merge_ratio 21.4x  trivial_merge 1.4x
+
+# simpler menu scene, geometry sharing transforms
+frame 60   draws 379 stategroups 10 texgroups 10 fullgroups  13  merge_ratio 37.9x  trivial_merge 29.2x
+```
+
+Two regimes, and the difference decides the design:
+
+- **`merge_ratio`** (state only) is 21–38×. That is the ceiling if transforms are promoted to
+  per-instance data.
+- **`trivial_merge`** (state *and* transform identical) is only **1.4×** in a scene full of
+  independently placed objects. Simply concatenating consecutive draws buys almost nothing
+  there — though it is worth 29× in simple scenes where geometry shares a transform.
+
+So **naive draw concatenation is not enough for real scenes; the instancing work is
+mandatory.** The 21× headroom is real, but it has to be earned by moving the fixed-function
+transform out of device state.
+
+Caveat on scope: both samples above are menu/character-select scenes. An in-world sample was
+not captured — the probe env var was not set on the session that reached the world. The
+conclusion is unaffected (a world full of independently moving characters has *more* distinct
+transforms, not fewer), but the exact in-world ratio is still unmeasured and should be taken
+before implementation starts.
+
 ## Why this matters
 
 The stack is bound by draw submission, not by the GPU — measured at 9–11% GPU utilisation

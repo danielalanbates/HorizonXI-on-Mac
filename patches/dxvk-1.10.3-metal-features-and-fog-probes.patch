@@ -402,14 +402,15 @@ index 32645d2..f729b8f 100644
  
  namespace dxvk {
 diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
-index 734a7a0..71d4472 100644
+index 734a7a0..22af361 100644
 --- a/src/d3d9/d3d9_device.cpp
 +++ b/src/d3d9/d3d9_device.cpp
-@@ -30,6 +30,45 @@
+@@ -30,6 +30,48 @@
  #pragma fenv_access (on)
  #endif
  
 +#include <set>
++#include <cstring>
 +#include <cstdio>
 +#include <cstdlib>
 +
@@ -423,12 +424,13 @@ index 734a7a0..71d4472 100644
 +    uint64_t draws = 0;
 +    std::set<uint64_t> groups;         // distinct (shaders, textures, decl) signatures
 +    std::set<uint64_t> texGroups;      // distinct texture-0 bindings alone
++    std::set<uint64_t> fullGroups;     // signature + world transform + FF render states
 +    uint64_t frames = 0;
 +    FILE* out = nullptr;
 +    bool enabled = std::getenv("DXVK_BATCH_PROBE") != nullptr;
-+    void note(uint64_t sig, uint64_t tex) {
++    void note(uint64_t sig, uint64_t tex, uint64_t full) {
 +      if (!enabled) return;
-+      draws++; groups.insert(sig); texGroups.insert(tex);
++      draws++; groups.insert(sig); texGroups.insert(tex); fullGroups.insert(full);
 +    }
 +    void frame() {
 +      if (!enabled) return;
@@ -436,13 +438,14 @@ index 734a7a0..71d4472 100644
 +      if (draws == 0) return;
 +      if (!out) out = fopen("/tmp/dxvk-batch-probe.log", "w");
 +      if (out && (frames % 30) == 0) {
-+        fprintf(out, "frame %llu draws %llu stategroups %zu texgroups %zu  merge_ratio %.1fx\n",
++        fprintf(out, "frame %llu draws %llu stategroups %zu texgroups %zu fullgroups %zu  merge_ratio %.1fx  trivial_merge %.1fx\n",
 +                (unsigned long long)frames, (unsigned long long)draws,
-+                groups.size(), texGroups.size(),
-+                groups.empty() ? 0.0 : double(draws) / double(groups.size()));
++                groups.size(), texGroups.size(), fullGroups.size(),
++                groups.empty() ? 0.0 : double(draws) / double(groups.size()),
++                fullGroups.empty() ? 0.0 : double(draws) / double(fullGroups.size()));
 +        fflush(out);
 +      }
-+      draws = 0; groups.clear(); texGroups.clear();
++      draws = 0; groups.clear(); texGroups.clear(); fullGroups.clear();
 +    }
 +  };
 +  static BatchProbe g_batchProbe;
@@ -451,7 +454,7 @@ index 734a7a0..71d4472 100644
  namespace dxvk {
  
    D3D9DeviceEx::D3D9DeviceEx(
-@@ -376,6 +415,8 @@ namespace dxvk {
+@@ -376,6 +418,8 @@ namespace dxvk {
      const RECT*    pDestRect,
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion) {
@@ -460,7 +463,7 @@ index 734a7a0..71d4472 100644
      return PresentEx(
        pSourceRect,
        pDestRect,
-@@ -2397,6 +2438,16 @@ namespace dxvk {
+@@ -2397,6 +2441,32 @@ namespace dxvk {
            D3DPRIMITIVETYPE PrimitiveType,
            UINT             StartVertex,
            UINT             PrimitiveCount) {
@@ -471,13 +474,29 @@ index 734a7a0..71d4472 100644
 +        ^ (reinterpret_cast<uint64_t>(m_state.pixelShader.ptr())   * 0xC2B2AE3D27D4EB4Full)
 +        ^ (reinterpret_cast<uint64_t>(m_state.vertexDecl.ptr())    * 0x165667B19E3779F9ull)
 +        ^ (reinterpret_cast<uint64_t>(m_state.textures[1])         * 0x27D4EB2F165667C5ull);
-+      g_batchProbe.note(sig, tex);
++      uint64_t full = sig;
++      {
++        // fold in the world transform -- if this collapses as well, draws sharing state also
++        // share their transform and can be concatenated without any instancing work.
++        const auto& wm = m_state.transforms[GetTransformIndex(D3DTS_WORLD)];
++        const float* f = reinterpret_cast<const float*>(&wm);
++        for (int i = 0; i < 16; i++) {
++          uint32_t bits; std::memcpy(&bits, &f[i], sizeof(bits));
++          full = full * 0x100000001B3ull ^ bits;
++        }
++        // and the fixed-function render states the shader reads
++        for (auto rs : { D3DRS_ALPHABLENDENABLE, D3DRS_SRCBLEND, D3DRS_DESTBLEND,
++                         D3DRS_ALPHATESTENABLE, D3DRS_ALPHAREF, D3DRS_CULLMODE,
++                         D3DRS_ZWRITEENABLE, D3DRS_ZFUNC, D3DRS_FOGENABLE })
++          full = full * 0x100000001B3ull ^ uint64_t(m_state.renderStates[rs]);
++      }
++      g_batchProbe.note(sig, tex, full);
 +    }
 +
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2433,6 +2484,16 @@ namespace dxvk {
+@@ -2433,6 +2503,32 @@ namespace dxvk {
            UINT             NumVertices,
            UINT             StartIndex,
            UINT             PrimitiveCount) {
@@ -488,13 +507,29 @@ index 734a7a0..71d4472 100644
 +        ^ (reinterpret_cast<uint64_t>(m_state.pixelShader.ptr())   * 0xC2B2AE3D27D4EB4Full)
 +        ^ (reinterpret_cast<uint64_t>(m_state.vertexDecl.ptr())    * 0x165667B19E3779F9ull)
 +        ^ (reinterpret_cast<uint64_t>(m_state.textures[1])         * 0x27D4EB2F165667C5ull);
-+      g_batchProbe.note(sig, tex);
++      uint64_t full = sig;
++      {
++        // fold in the world transform -- if this collapses as well, draws sharing state also
++        // share their transform and can be concatenated without any instancing work.
++        const auto& wm = m_state.transforms[GetTransformIndex(D3DTS_WORLD)];
++        const float* f = reinterpret_cast<const float*>(&wm);
++        for (int i = 0; i < 16; i++) {
++          uint32_t bits; std::memcpy(&bits, &f[i], sizeof(bits));
++          full = full * 0x100000001B3ull ^ bits;
++        }
++        // and the fixed-function render states the shader reads
++        for (auto rs : { D3DRS_ALPHABLENDENABLE, D3DRS_SRCBLEND, D3DRS_DESTBLEND,
++                         D3DRS_ALPHATESTENABLE, D3DRS_ALPHAREF, D3DRS_CULLMODE,
++                         D3DRS_ZWRITEENABLE, D3DRS_ZFUNC, D3DRS_FOGENABLE })
++          full = full * 0x100000001B3ull ^ uint64_t(m_state.renderStates[rs]);
++      }
++      g_batchProbe.note(sig, tex, full);
 +    }
 +
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2469,6 +2530,16 @@ namespace dxvk {
+@@ -2469,6 +2565,32 @@ namespace dxvk {
            UINT             PrimitiveCount,
      const void*            pVertexStreamZeroData,
            UINT             VertexStreamZeroStride) {
@@ -505,13 +540,29 @@ index 734a7a0..71d4472 100644
 +        ^ (reinterpret_cast<uint64_t>(m_state.pixelShader.ptr())   * 0xC2B2AE3D27D4EB4Full)
 +        ^ (reinterpret_cast<uint64_t>(m_state.vertexDecl.ptr())    * 0x165667B19E3779F9ull)
 +        ^ (reinterpret_cast<uint64_t>(m_state.textures[1])         * 0x27D4EB2F165667C5ull);
-+      g_batchProbe.note(sig, tex);
++      uint64_t full = sig;
++      {
++        // fold in the world transform -- if this collapses as well, draws sharing state also
++        // share their transform and can be concatenated without any instancing work.
++        const auto& wm = m_state.transforms[GetTransformIndex(D3DTS_WORLD)];
++        const float* f = reinterpret_cast<const float*>(&wm);
++        for (int i = 0; i < 16; i++) {
++          uint32_t bits; std::memcpy(&bits, &f[i], sizeof(bits));
++          full = full * 0x100000001B3ull ^ bits;
++        }
++        // and the fixed-function render states the shader reads
++        for (auto rs : { D3DRS_ALPHABLENDENABLE, D3DRS_SRCBLEND, D3DRS_DESTBLEND,
++                         D3DRS_ALPHATESTENABLE, D3DRS_ALPHAREF, D3DRS_CULLMODE,
++                         D3DRS_ZWRITEENABLE, D3DRS_ZFUNC, D3DRS_FOGENABLE })
++          full = full * 0x100000001B3ull ^ uint64_t(m_state.renderStates[rs]);
++      }
++      g_batchProbe.note(sig, tex, full);
 +    }
 +
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2522,6 +2593,16 @@ namespace dxvk {
+@@ -2522,6 +2644,32 @@ namespace dxvk {
            D3DFORMAT        IndexDataFormat,
      const void*            pVertexStreamZeroData,
            UINT             VertexStreamZeroStride) {
@@ -522,13 +573,29 @@ index 734a7a0..71d4472 100644
 +        ^ (reinterpret_cast<uint64_t>(m_state.pixelShader.ptr())   * 0xC2B2AE3D27D4EB4Full)
 +        ^ (reinterpret_cast<uint64_t>(m_state.vertexDecl.ptr())    * 0x165667B19E3779F9ull)
 +        ^ (reinterpret_cast<uint64_t>(m_state.textures[1])         * 0x27D4EB2F165667C5ull);
-+      g_batchProbe.note(sig, tex);
++      uint64_t full = sig;
++      {
++        // fold in the world transform -- if this collapses as well, draws sharing state also
++        // share their transform and can be concatenated without any instancing work.
++        const auto& wm = m_state.transforms[GetTransformIndex(D3DTS_WORLD)];
++        const float* f = reinterpret_cast<const float*>(&wm);
++        for (int i = 0; i < 16; i++) {
++          uint32_t bits; std::memcpy(&bits, &f[i], sizeof(bits));
++          full = full * 0x100000001B3ull ^ bits;
++        }
++        // and the fixed-function render states the shader reads
++        for (auto rs : { D3DRS_ALPHABLENDENABLE, D3DRS_SRCBLEND, D3DRS_DESTBLEND,
++                         D3DRS_ALPHATESTENABLE, D3DRS_ALPHAREF, D3DRS_CULLMODE,
++                         D3DRS_ZWRITEENABLE, D3DRS_ZFUNC, D3DRS_FOGENABLE })
++          full = full * 0x100000001B3ull ^ uint64_t(m_state.renderStates[rs]);
++      }
++      g_batchProbe.note(sig, tex, full);
 +    }
 +
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -3892,8 +3973,13 @@ namespace dxvk {
+@@ -3892,8 +4040,13 @@ namespace dxvk {
      DxvkDeviceFeatures enabled = {};
  
      // Geometry shaders are used for some meta ops
@@ -544,7 +611,7 @@ index 734a7a0..71d4472 100644
      enabled.extRobustness2.robustBufferAccess2 = supported.extRobustness2.robustBufferAccess2;
  
      enabled.extMemoryPriority.memoryPriority = supported.extMemoryPriority.memoryPriority;
-@@ -3921,7 +4007,10 @@ namespace dxvk {
+@@ -3921,7 +4074,10 @@ namespace dxvk {
      enabled.core.features.sampleRateShading = VK_TRUE;
      enabled.core.features.samplerAnisotropy = supported.core.features.samplerAnisotropy;
      enabled.core.features.shaderClipDistance = VK_TRUE;
