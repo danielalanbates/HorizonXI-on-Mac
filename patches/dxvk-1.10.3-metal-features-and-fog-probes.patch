@@ -402,10 +402,133 @@ index 32645d2..f729b8f 100644
  
  namespace dxvk {
 diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
-index 734a7a0..93f2053 100644
+index 734a7a0..71d4472 100644
 --- a/src/d3d9/d3d9_device.cpp
 +++ b/src/d3d9/d3d9_device.cpp
-@@ -3892,8 +3892,13 @@ namespace dxvk {
+@@ -30,6 +30,45 @@
+ #pragma fenv_access (on)
+ #endif
+ 
++#include <set>
++#include <cstdio>
++#include <cstdlib>
++
++namespace {
++  // Batching-headroom probe (DXVK_BATCH_PROBE=1). FFXI submits thousands of tiny draws per
++  // frame and the stack is bound by draw submission cost, not by the GPU. The question that
++  // decides whether an instancing/merging layer is worth building is: how many of those draws
++  // actually share pipeline state and textures? If N draws collapse into a handful of state
++  // groups, merging them is a large win. If nearly every draw is its own group, it is not.
++  struct BatchProbe {
++    uint64_t draws = 0;
++    std::set<uint64_t> groups;         // distinct (shaders, textures, decl) signatures
++    std::set<uint64_t> texGroups;      // distinct texture-0 bindings alone
++    uint64_t frames = 0;
++    FILE* out = nullptr;
++    bool enabled = std::getenv("DXVK_BATCH_PROBE") != nullptr;
++    void note(uint64_t sig, uint64_t tex) {
++      if (!enabled) return;
++      draws++; groups.insert(sig); texGroups.insert(tex);
++    }
++    void frame() {
++      if (!enabled) return;
++      frames++;
++      if (draws == 0) return;
++      if (!out) out = fopen("/tmp/dxvk-batch-probe.log", "w");
++      if (out && (frames % 30) == 0) {
++        fprintf(out, "frame %llu draws %llu stategroups %zu texgroups %zu  merge_ratio %.1fx\n",
++                (unsigned long long)frames, (unsigned long long)draws,
++                groups.size(), texGroups.size(),
++                groups.empty() ? 0.0 : double(draws) / double(groups.size()));
++        fflush(out);
++      }
++      draws = 0; groups.clear(); texGroups.clear();
++    }
++  };
++  static BatchProbe g_batchProbe;
++}
++
+ namespace dxvk {
+ 
+   D3D9DeviceEx::D3D9DeviceEx(
+@@ -376,6 +415,8 @@ namespace dxvk {
+     const RECT*    pDestRect,
+           HWND     hDestWindowOverride,
+     const RGNDATA* pDirtyRegion) {
++    g_batchProbe.frame();
++
+     return PresentEx(
+       pSourceRect,
+       pDestRect,
+@@ -2397,6 +2438,16 @@ namespace dxvk {
+           D3DPRIMITIVETYPE PrimitiveType,
+           UINT             StartVertex,
+           UINT             PrimitiveCount) {
++    if (g_batchProbe.enabled) {
++      uint64_t tex = reinterpret_cast<uint64_t>(m_state.textures[0]);
++      uint64_t sig = tex
++        ^ (reinterpret_cast<uint64_t>(m_state.vertexShader.ptr())  * 0x9E3779B97F4A7C15ull)
++        ^ (reinterpret_cast<uint64_t>(m_state.pixelShader.ptr())   * 0xC2B2AE3D27D4EB4Full)
++        ^ (reinterpret_cast<uint64_t>(m_state.vertexDecl.ptr())    * 0x165667B19E3779F9ull)
++        ^ (reinterpret_cast<uint64_t>(m_state.textures[1])         * 0x27D4EB2F165667C5ull);
++      g_batchProbe.note(sig, tex);
++    }
++
+     D3D9DeviceLock lock = LockDevice();
+ 
+     if (unlikely(m_state.vertexDecl == nullptr))
+@@ -2433,6 +2484,16 @@ namespace dxvk {
+           UINT             NumVertices,
+           UINT             StartIndex,
+           UINT             PrimitiveCount) {
++    if (g_batchProbe.enabled) {
++      uint64_t tex = reinterpret_cast<uint64_t>(m_state.textures[0]);
++      uint64_t sig = tex
++        ^ (reinterpret_cast<uint64_t>(m_state.vertexShader.ptr())  * 0x9E3779B97F4A7C15ull)
++        ^ (reinterpret_cast<uint64_t>(m_state.pixelShader.ptr())   * 0xC2B2AE3D27D4EB4Full)
++        ^ (reinterpret_cast<uint64_t>(m_state.vertexDecl.ptr())    * 0x165667B19E3779F9ull)
++        ^ (reinterpret_cast<uint64_t>(m_state.textures[1])         * 0x27D4EB2F165667C5ull);
++      g_batchProbe.note(sig, tex);
++    }
++
+     D3D9DeviceLock lock = LockDevice();
+ 
+     if (unlikely(m_state.vertexDecl == nullptr))
+@@ -2469,6 +2530,16 @@ namespace dxvk {
+           UINT             PrimitiveCount,
+     const void*            pVertexStreamZeroData,
+           UINT             VertexStreamZeroStride) {
++    if (g_batchProbe.enabled) {
++      uint64_t tex = reinterpret_cast<uint64_t>(m_state.textures[0]);
++      uint64_t sig = tex
++        ^ (reinterpret_cast<uint64_t>(m_state.vertexShader.ptr())  * 0x9E3779B97F4A7C15ull)
++        ^ (reinterpret_cast<uint64_t>(m_state.pixelShader.ptr())   * 0xC2B2AE3D27D4EB4Full)
++        ^ (reinterpret_cast<uint64_t>(m_state.vertexDecl.ptr())    * 0x165667B19E3779F9ull)
++        ^ (reinterpret_cast<uint64_t>(m_state.textures[1])         * 0x27D4EB2F165667C5ull);
++      g_batchProbe.note(sig, tex);
++    }
++
+     D3D9DeviceLock lock = LockDevice();
+ 
+     if (unlikely(m_state.vertexDecl == nullptr))
+@@ -2522,6 +2593,16 @@ namespace dxvk {
+           D3DFORMAT        IndexDataFormat,
+     const void*            pVertexStreamZeroData,
+           UINT             VertexStreamZeroStride) {
++    if (g_batchProbe.enabled) {
++      uint64_t tex = reinterpret_cast<uint64_t>(m_state.textures[0]);
++      uint64_t sig = tex
++        ^ (reinterpret_cast<uint64_t>(m_state.vertexShader.ptr())  * 0x9E3779B97F4A7C15ull)
++        ^ (reinterpret_cast<uint64_t>(m_state.pixelShader.ptr())   * 0xC2B2AE3D27D4EB4Full)
++        ^ (reinterpret_cast<uint64_t>(m_state.vertexDecl.ptr())    * 0x165667B19E3779F9ull)
++        ^ (reinterpret_cast<uint64_t>(m_state.textures[1])         * 0x27D4EB2F165667C5ull);
++      g_batchProbe.note(sig, tex);
++    }
++
+     D3D9DeviceLock lock = LockDevice();
+ 
+     if (unlikely(m_state.vertexDecl == nullptr))
+@@ -3892,8 +3973,13 @@ namespace dxvk {
      DxvkDeviceFeatures enabled = {};
  
      // Geometry shaders are used for some meta ops
@@ -421,7 +544,7 @@ index 734a7a0..93f2053 100644
      enabled.extRobustness2.robustBufferAccess2 = supported.extRobustness2.robustBufferAccess2;
  
      enabled.extMemoryPriority.memoryPriority = supported.extMemoryPriority.memoryPriority;
-@@ -3921,7 +3926,10 @@ namespace dxvk {
+@@ -3921,7 +4007,10 @@ namespace dxvk {
      enabled.core.features.sampleRateShading = VK_TRUE;
      enabled.core.features.samplerAnisotropy = supported.core.features.samplerAnisotropy;
      enabled.core.features.shaderClipDistance = VK_TRUE;
