@@ -126,6 +126,45 @@ decision above: Whisky/Kegworks engines are both **arm64 and redistributable**, 
 or B in the table would likely deliver the frame-rate win and the legal clearance in one
 move.
 
+### ...but Rosetta is unavoidable for THIS game, and here is why
+
+Checked the PE headers:
+
+```
+FFXiMain.dll        -> x86 32-bit
+horizon-loader.exe  -> x86 32-bit
+```
+
+FFXI is **32-bit x86 Windows code**. On Apple Silicon there is no way to execute that
+natively. An arm64 wine can host 64-bit Windows apps, but a 32-bit x86 win32 process still
+needs an x86 emulator, and on macOS the only practical mechanism is running the whole wine
+process as x86_64 under Rosetta -- exactly what happens today. CrossOver's arm64 support has
+the same limit: it applies to 64-bit Windows titles; 32-bit ones still go through x86_64
+wine.
+
+So the Rosetta tax is **structural for FFXI on Apple Silicon**, not an artefact of an old
+wrapper. An arm64 wrapper would still not run this game natively. That closes the route.
+
+The one thing it would still buy is running MoltenVK and DXVK natively while only the game
+code is emulated -- but no redistributable macOS wine does that for a 32-bit guest today.
+Treat it as research, not a plan.
+
+### Renderers already in the wrapper, and why none of them shortcut this
+
+The wrapper ships several: `d3dmetal`, `apple_gptk`, `dxmt`, `d9vk`, `dxvk`, `cnc-ddraw`.
+Checked what each actually provides:
+
+| renderer | DLLs provided | usable for FFXI? |
+|---|---|---|
+| d3dmetal / apple_gptk | d3d11, d3d12, dxgi | **no** -- no d3d9 |
+| dxmt | d3d10core, d3d11, dxgi | **no** -- no d3d9 |
+| d9vk | d3d9 | yes, but it is DXVK's D3D9 predecessor: same Vulkan -> MoltenVK chain, older |
+| dxvk | d3d10core, d3d11 (+ our patched d3d9) | current path |
+
+Apple's Game Porting Toolkit would be the short chain (D3D straight to Metal, no Vulkan, no
+MoltenVK) but **it does not implement D3D9**, so it cannot take this game. There is no
+shortcut renderer available.
+
 Order of work suggested:
 
 1. Stand up an arm64 wine wrapper with a fresh prefix.
