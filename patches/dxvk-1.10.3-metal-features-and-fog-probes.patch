@@ -402,10 +402,10 @@ index 32645d2..f729b8f 100644
  
  namespace dxvk {
 diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
-index 734a7a0..4d18840 100644
+index 734a7a0..c031685 100644
 --- a/src/d3d9/d3d9_device.cpp
 +++ b/src/d3d9/d3d9_device.cpp
-@@ -30,6 +30,53 @@
+@@ -30,6 +30,74 @@
  #pragma fenv_access (on)
  #endif
  
@@ -427,13 +427,31 @@ index 734a7a0..4d18840 100644
 +    std::set<uint64_t> fullGroups;     // signature + world transform + FF render states
 +    std::set<uint64_t> meshGroups;     // signature + the actual mesh (vertex+index buffer)
 +    uint64_t instanceable = 0;         // draws that repeat a mesh already seen this frame
++    uint64_t lastMesh = 0;             // previous draw's mesh+state, for run detection
++    uint64_t runMerges = 0;            // draws that continue the immediately preceding run
++    uint64_t opaqueRunMerges = 0;      // same, but only where alpha blending is off
++    bool     lastBlend = false;
++    uint64_t blendEnabled = 0;         // draws with ALPHABLENDENABLE set
++    uint64_t blendIsOpaque = 0;        // ...of those, ones whose factors are ONE/ZERO
++    uint64_t effOpaqueRun = 0;         // consecutive repeats that are *effectively* opaque
 +    uint64_t frames = 0;
 +    FILE* out = nullptr;
 +    bool enabled = std::getenv("DXVK_BATCH_PROBE") != nullptr;
-+    void note(uint64_t sig, uint64_t tex, uint64_t full, uint64_t mesh) {
++    void note(uint64_t sig, uint64_t tex, uint64_t full, uint64_t mesh, bool blend, bool opaqueFactors) {
 +      if (!enabled) return;
 +      draws++; groups.insert(sig); texGroups.insert(tex); fullGroups.insert(full);
 +      if (!meshGroups.insert(mesh).second) instanceable++;   // this mesh+state seen before
++      // A *consecutive* repeat is what a simple batcher can capture without reordering draws.
++      if (blend) { blendEnabled++; if (opaqueFactors) blendIsOpaque++; }
++      // "Effectively opaque" = blending off, or on but with ONE/ZERO factors, which writes the
++      // source colour straight out. Those are order-independent and safe to reorder/batch.
++      const bool effOpaque = !blend || opaqueFactors;
++      if (draws > 1 && mesh == lastMesh) {
++        runMerges++;
++        if (!blend && !lastBlend) opaqueRunMerges++;
++        if (effOpaque) effOpaqueRun++;
++      }
++      lastMesh = mesh; lastBlend = blend;
 +    }
 +    void frame() {
 +      if (!enabled) return;
@@ -441,16 +459,19 @@ index 734a7a0..4d18840 100644
 +      if (draws == 0) return;
 +      if (!out) out = fopen("/tmp/dxvk-batch-probe.log", "w");
 +      if (out && (frames % 30) == 0) {
-+        fprintf(out, "frame %llu draws %llu stategroups %zu texgroups %zu fullgroups %zu meshgroups %zu instanceable %llu  merge_ratio %.1fx  trivial_merge %.1fx  instancing_ratio %.1fx\n",
++        fprintf(out, "frame %llu draws %llu stategroups %zu texgroups %zu fullgroups %zu meshgroups %zu instanceable %llu runmerges %llu opaquerun %llu blend %llu blendopaque %llu effopaquerun %llu  merge_ratio %.1fx  trivial_merge %.1fx  instancing_ratio %.1fx\n",
 +                (unsigned long long)frames, (unsigned long long)draws,
 +                groups.size(), texGroups.size(), fullGroups.size(), meshGroups.size(),
 +                (unsigned long long)instanceable,
++                (unsigned long long)runMerges, (unsigned long long)opaqueRunMerges,
++                (unsigned long long)blendEnabled, (unsigned long long)blendIsOpaque,
++                (unsigned long long)effOpaqueRun,
 +                groups.empty() ? 0.0 : double(draws) / double(groups.size()),
 +                fullGroups.empty() ? 0.0 : double(draws) / double(fullGroups.size()),
 +                meshGroups.empty() ? 0.0 : double(draws) / double(meshGroups.size()));
 +        fflush(out);
 +      }
-+      draws = 0; instanceable = 0; groups.clear(); texGroups.clear(); fullGroups.clear(); meshGroups.clear();
++      draws = 0; instanceable = 0; runMerges = 0; opaqueRunMerges = 0; blendEnabled = 0; blendIsOpaque = 0; effOpaqueRun = 0; lastMesh = 0; groups.clear(); texGroups.clear(); fullGroups.clear(); meshGroups.clear();
 +    }
 +  };
 +  static BatchProbe g_batchProbe;
@@ -459,7 +480,7 @@ index 734a7a0..4d18840 100644
  namespace dxvk {
  
    D3D9DeviceEx::D3D9DeviceEx(
-@@ -376,6 +423,8 @@ namespace dxvk {
+@@ -376,6 +444,8 @@ namespace dxvk {
      const RECT*    pDestRect,
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion) {
@@ -468,7 +489,7 @@ index 734a7a0..4d18840 100644
      return PresentEx(
        pSourceRect,
        pDestRect,
-@@ -2397,6 +2446,36 @@ namespace dxvk {
+@@ -2397,6 +2467,39 @@ namespace dxvk {
            D3DPRIMITIVETYPE PrimitiveType,
            UINT             StartVertex,
            UINT             PrimitiveCount) {
@@ -499,13 +520,16 @@ index 734a7a0..4d18840 100644
 +      uint64_t mesh = sig
 +        ^ (reinterpret_cast<uint64_t>(m_state.vertexBuffers[0].vertexBuffer.ptr()) * 0x9E3779B97F4A7C15ull)
 +        ^ (reinterpret_cast<uint64_t>(m_state.indices.ptr())                       * 0xC2B2AE3D27D4EB4Full);
-+      g_batchProbe.note(sig, tex, full, mesh);
++      g_batchProbe.note(sig, tex, full, mesh,
++        m_state.renderStates[D3DRS_ALPHABLENDENABLE] != 0,
++        m_state.renderStates[D3DRS_SRCBLEND] == D3DBLEND_ONE &&
++        m_state.renderStates[D3DRS_DESTBLEND] == D3DBLEND_ZERO);
 +    }
 +
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2433,6 +2512,36 @@ namespace dxvk {
+@@ -2433,6 +2536,39 @@ namespace dxvk {
            UINT             NumVertices,
            UINT             StartIndex,
            UINT             PrimitiveCount) {
@@ -536,13 +560,16 @@ index 734a7a0..4d18840 100644
 +      uint64_t mesh = sig
 +        ^ (reinterpret_cast<uint64_t>(m_state.vertexBuffers[0].vertexBuffer.ptr()) * 0x9E3779B97F4A7C15ull)
 +        ^ (reinterpret_cast<uint64_t>(m_state.indices.ptr())                       * 0xC2B2AE3D27D4EB4Full);
-+      g_batchProbe.note(sig, tex, full, mesh);
++      g_batchProbe.note(sig, tex, full, mesh,
++        m_state.renderStates[D3DRS_ALPHABLENDENABLE] != 0,
++        m_state.renderStates[D3DRS_SRCBLEND] == D3DBLEND_ONE &&
++        m_state.renderStates[D3DRS_DESTBLEND] == D3DBLEND_ZERO);
 +    }
 +
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2469,6 +2578,36 @@ namespace dxvk {
+@@ -2469,6 +2605,39 @@ namespace dxvk {
            UINT             PrimitiveCount,
      const void*            pVertexStreamZeroData,
            UINT             VertexStreamZeroStride) {
@@ -573,13 +600,16 @@ index 734a7a0..4d18840 100644
 +      uint64_t mesh = sig
 +        ^ (reinterpret_cast<uint64_t>(m_state.vertexBuffers[0].vertexBuffer.ptr()) * 0x9E3779B97F4A7C15ull)
 +        ^ (reinterpret_cast<uint64_t>(m_state.indices.ptr())                       * 0xC2B2AE3D27D4EB4Full);
-+      g_batchProbe.note(sig, tex, full, mesh);
++      g_batchProbe.note(sig, tex, full, mesh,
++        m_state.renderStates[D3DRS_ALPHABLENDENABLE] != 0,
++        m_state.renderStates[D3DRS_SRCBLEND] == D3DBLEND_ONE &&
++        m_state.renderStates[D3DRS_DESTBLEND] == D3DBLEND_ZERO);
 +    }
 +
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2522,6 +2661,36 @@ namespace dxvk {
+@@ -2522,6 +2691,39 @@ namespace dxvk {
            D3DFORMAT        IndexDataFormat,
      const void*            pVertexStreamZeroData,
            UINT             VertexStreamZeroStride) {
@@ -610,13 +640,16 @@ index 734a7a0..4d18840 100644
 +      uint64_t mesh = sig
 +        ^ (reinterpret_cast<uint64_t>(m_state.vertexBuffers[0].vertexBuffer.ptr()) * 0x9E3779B97F4A7C15ull)
 +        ^ (reinterpret_cast<uint64_t>(m_state.indices.ptr())                       * 0xC2B2AE3D27D4EB4Full);
-+      g_batchProbe.note(sig, tex, full, mesh);
++      g_batchProbe.note(sig, tex, full, mesh,
++        m_state.renderStates[D3DRS_ALPHABLENDENABLE] != 0,
++        m_state.renderStates[D3DRS_SRCBLEND] == D3DBLEND_ONE &&
++        m_state.renderStates[D3DRS_DESTBLEND] == D3DBLEND_ZERO);
 +    }
 +
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -3892,8 +4061,13 @@ namespace dxvk {
+@@ -3892,8 +4094,13 @@ namespace dxvk {
      DxvkDeviceFeatures enabled = {};
  
      // Geometry shaders are used for some meta ops
@@ -632,7 +665,7 @@ index 734a7a0..4d18840 100644
      enabled.extRobustness2.robustBufferAccess2 = supported.extRobustness2.robustBufferAccess2;
  
      enabled.extMemoryPriority.memoryPriority = supported.extMemoryPriority.memoryPriority;
-@@ -3921,7 +4095,10 @@ namespace dxvk {
+@@ -3921,7 +4128,10 @@ namespace dxvk {
      enabled.core.features.sampleRateShading = VK_TRUE;
      enabled.core.features.samplerAnisotropy = supported.core.features.samplerAnisotropy;
      enabled.core.features.shaderClipDistance = VK_TRUE;
