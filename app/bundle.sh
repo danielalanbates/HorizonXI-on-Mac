@@ -53,7 +53,14 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# Ad-hoc signature. Do NOT pass --timestamp here: it hangs on this network.
-codesign --force --deep -s - "$APP" >/dev/null 2>&1 || true
+# Signature. Ad-hoc by default; set HXI_SIGN_ID to a Developer ID hash for a release build
+# that can be notarised. Use the certificate *hash*, not its name -- there are two identical
+# "Developer ID Application: Daniel Bates" certs in the login keychain and codesign rejects
+# the name as ambiguous. Do NOT pass --timestamp here: it hangs on this network.
+if [[ -n "${HXI_SIGN_ID:-}" ]]; then
+  codesign --force --deep --options runtime -s "$HXI_SIGN_ID" "$APP"
+else
+  codesign --force --deep -s - "$APP" >/dev/null 2>&1 || true
+fi
 
 echo "built $APP"
