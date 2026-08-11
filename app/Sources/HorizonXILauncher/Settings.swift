@@ -18,8 +18,9 @@ struct PerfSettings: Codable {
     var largeAddressAware = true
     /// Extra environment, one KEY=VALUE per line, for experiments.
     var extraEnv = ""
-    /// Which renderer pathway to run. Classic OpenGL is the only one that draws the world.
-    var renderer: Renderer = .openGL
+    /// Which renderer pathway to run. Vulkan draws correctly and is 2-3x OpenGL on an M1,
+    /// so it is the default; Classic is the fallback.
+    var renderer: Renderer = .vulkan
 
     static let key = "perf.settings"
 

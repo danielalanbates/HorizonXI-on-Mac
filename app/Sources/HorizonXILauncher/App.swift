@@ -252,9 +252,9 @@ struct ContentView: View {
             row("Wine prefix", selected?.prefixName ?? (scanning ? "scanning…" : "not found"))
             row("Client", selected == nil ? (scanning ? "scanning…" : "not found") : "Ashita · \(store.selected?.bootProfile ?? "")")
 
-            Text("Frame rates measured on this Mac: OpenGL 3 fps in a zone, Vulkan 20 fps "
-                 + "untextured, DXVK 29 fps with the world still black. Classic is the only "
-                 + "pathway you can actually play on today.")
+            Text("Measured in a zone on this Mac: Vulkan 8-10 fps on the GPU with the picture "
+                 + "correct, against Classic's 3. FFXI caps at 30, so there is still headroom "
+                 + "to find — see docs/PATHWAYS.md.")
                 .font(.caption2).foregroundStyle(Vana.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }

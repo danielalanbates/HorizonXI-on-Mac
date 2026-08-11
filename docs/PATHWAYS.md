@@ -92,7 +92,29 @@ Worth another ~30%: MoltenVK 1.4.2 in place of the bundled 1.2.10, plus
 `MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1`, `MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS=1` and
 `MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0`. (1.4.2 is fine for wined3d; only DXVK 1.10.3 rejects it.)
 
-### Still short of the 30 fps target
+### Still short of the 30 fps target — and now we know why
+
+MoltenVK's own profiler (`MVK_CONFIG_PERFORMANCE_TRACKING=1`) on this pathway, in a zone:
+
+| activity | avg per frame |
+| --- | --- |
+| **Encode VkCommandBuffer to MTLCommandBuffer** | **35.4 ms** |
+| Retrieve a CAMetalDrawable | 32.0 ms |
+| Present swapchains on GPU | 32.2 ms |
+| vkQueueSubmit() encoding | 0.009 ms |
+| **Frame interval** | **69.7 ms (14 fps)** |
+
+Command-buffer *encoding alone* is longer than the entire 33 ms budget for 30 fps. That is CPU
+time inside MoltenVK translating wined3d's commands into Metal, at roughly 1,100 draw calls a
+frame.
+
+Crucially, **DXVK sustains 29 fps at the same draw-call count on the same MoltenVK**. So this is
+not a MoltenVK ceiling — it is wined3d's Vulkan backend issuing far more state and descriptor
+churn per draw than DXVK does. Optimising it means changing wined3d, not settings.
+
+Things that do **not** help, all measured:
+- 640x360 with 512px background textures — *slower*, and the GPU stayed at 93%. Not fill rate.
+- `backbuffercount = 2` (the one-image swapchain warning) — no change, ~8-10 fps either way.
 
 FFXI caps at 30 and this pathway does 8–10. The remaining cost is **not** pixels: dropping the
 window to 640x360 and background textures to 512 made it *slower*, not faster, and the GPU sits at
@@ -102,12 +124,8 @@ will not close a 3x gap here.
 
 Two leads worth taking, in order:
 
-1. **DXVK already measures 29 fps** — right at the cap — and now that DXT is understood, its
-   remaining problem is a different one (see Pathway C). It is the shorter route to 30.
-2. `warn:d3d:wined3d_swapchain_vk_init Image count 1 is not supported (2-3)` appears on every run.
-   A one-image swapchain means no pipelining: the CPU waits on the GPU every frame, which is
-   exactly the shape of "both look busy and the frame rate is low". `backbuffercount = 2` in the
-   boot profile is a five-second experiment.
+**DXVK is the only realistic route to 30**, because it already runs at 29. What it needs is its
+black-world bug fixed, not more speed. See Pathway C.
 
 ## Pathway C — D3D8 → d3d8to9 → DXVK 1.10.3 → MoltenVK → Metal  *(new; renders, 29 fps, world black)*
 
@@ -148,7 +166,23 @@ correctly at 29 fps (`docs/img/dxvk-world-black.png`). Sky renders at character 
 and models do not. The shape of the failure — vertex-coloured geometry appears, textured geometry
 does not — points at texture sampling returning black rather than at presentation.
 
-**The lead, and its caveat.** `DXVK_LOG_LEVEL=debug` produces exactly one repeated complaint, and
+**`d3d8to9` is not the culprit — ruled out 2026-08-10.** d8vk 1.0 (AlpyneDreams/d8vk) is a
+completely independent D3D8 implementation built on the same DXVK 1.10 core, with no d3d8to9 and
+no separate d3d9.dll in the chain. It behaves *identically*: 29 fps at the menu, black world
+in-zone. Whatever is wrong lives in DXVK's own D3D9/Vulkan core or in how it lands textures on
+MoltenVK, not in the D3D8 translation layer.
+
+`d3d9.forceSamplerTypeSpecConstants = True` — DXVK's documented workaround for games that sample
+black — makes no difference either.
+
+**Current best hypothesis: compressed-texture uploads.** The failure now has a sibling to compare
+against. On the Vulkan pathway, missing DXT support rendered world surfaces **white**; on DXVK
+they render **black**, while the uncompressed UI and fonts are perfect on both. DXVK definitely
+*accepts* BC formats — it logs no format complaints at all — so the suspicion is that the block
+data never lands correctly in the image on MoltenVK. Worth doing next: dump a known DXT texture
+back out of DXVK, or force a non-compressed texture path, and compare.
+
+**A second lead, and its caveat.** `DXVK_LOG_LEVEL=debug` produces exactly one repeated complaint, and
 it repeats a lot — **1126 times** by character select:
 
 ```

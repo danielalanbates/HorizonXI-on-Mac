@@ -10,11 +10,13 @@ enum Renderer: String, Codable, CaseIterable, Identifiable {
     /// put a complete, textured frame of the game world on screen.
     case openGL
 
-    /// D3D8 -> wined3d -> Vulkan -> MoltenVK -> Metal. 4x the frame rate of OpenGL and a quarter
-    /// of the CPU, but wined3d's Vulkan backend rejects every BC/DXT texture format
-    /// ("Unsupported format WINED3DFMT_DXT1".."DXT5"), so models and terrain render as untextured
-    /// grey. Fonts and UI are fine because they are uncompressed. Not playable; kept because it
-    /// is one wine bug away from being the best option here.
+    /// D3D8 -> wined3d -> Vulkan -> MoltenVK -> Metal. The fastest pathway that draws the game
+    /// correctly: 8-10 fps in a zone against OpenGL's 3.2, on the GPU.
+    ///
+    /// It used to render every model and terrain surface as untextured grey, because wined3d's
+    /// Vulkan format table lists the D3D10-era names (WINED3DFMT_BC1_UNORM...) but not the D3D8
+    /// FourCC aliases (WINED3DFMT_DXT1...), which are different enum values — and a D3D8 game
+    /// asks for the latter. `patchDXTFormats` adds them back.
     case vulkan
 
     /// D3D8 -> d3d8to9 -> DXVK 1.10.3 -> MoltenVK -> Metal. Menus, character select, the sky and
@@ -27,27 +29,30 @@ enum Renderer: String, Codable, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .openGL: return "Classic (OpenGL)"
-        case .vulkan: return "Vulkan — experimental"
-        case .metal:  return "Metal / DXVK — experimental"
+        case .vulkan: return "Vulkan (recommended)"
+        case .metal:  return "Metal / DXVK — debug only"
         }
     }
 
     var blurb: String {
         switch self {
         case .openGL:
-            return "Everything draws correctly. Slow: about 3 fps in a zone on an M1, "
-                 + "because every D3D8 call is translated on one CPU thread."
+            return "Everything draws correctly, on the CPU. Slow: about 3 fps in a zone on an "
+                 + "M1. Use it if Vulkan misbehaves."
         case .vulkan:
-            return "About 4x faster than Classic, but compressed textures are unsupported, "
-                 + "so characters and terrain appear untextured. Look only, do not play."
+            return "Recommended. Draws correctly and runs on the GPU — 8-10 fps in a zone on an "
+                 + "M1, two to three times Classic. Still short of FFXI's 30 fps cap."
         case .metal:
-            return "~29 fps and half the CPU. Menus and character select render correctly; "
-                 + "the 3D world is still black once you are in a zone."
+            return "~29 fps, but the 3D world is black once you are in a zone. Menus and "
+                 + "character select render. For debugging only."
         }
     }
 
-    /// Only OpenGL is honest to present as playable.
-    var playable: Bool { self == .openGL }
+    /// Both of these draw the game correctly. Metal/DXVK does not, in a zone.
+    var playable: Bool { self != .metal }
+
+    /// Shown as the default and the recommendation.
+    var recommended: Bool { self == .vulkan }
 
     /// Value for HKCU\Software\Wine\Direct3D\renderer. DXVK replaces d3d9 outright, so the
     /// wined3d renderer is irrelevant there and left on gl.
@@ -59,6 +64,12 @@ enum Renderer: String, Codable, CaseIterable, Identifiable {
     /// Extra process environment.
     var environment: [String: String] {
         switch self {
+        case .vulkan:
+            // Measured on an M1: these three together are worth roughly 30% on this pathway.
+            // Argument buffers also avoid the descriptor-binding collision described below.
+            return ["MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS": "1",
+                    "MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS": "1",
+                    "MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS": "0"]
         case .metal:
             // The single fix that turned DXVK from a black window into a rendering one.
             // Without argument buffers, MoltenVK's SPIRV-Cross assigns render_state_t and
@@ -103,6 +114,11 @@ enum RendererSetup {
             installDXVK(install, log: log)
         } else {
             removeDXVK(install, log: log)
+        }
+        if renderer == .vulkan {
+            patchDXTFormats(install, log: log)
+            // wined3d's Vulkan renderer needs a MoltenVK that is not the ancient bundled one.
+            linkMoltenVK(install, toCX: true)
         }
         stopWineserver(install)
         log("renderer: \(renderer.title)")
@@ -190,6 +206,73 @@ enum RendererSetup {
         guard fm.fileExists(atPath: target.path) else { return }
         try? fm.removeItem(at: link)
         try? fm.createSymbolicLink(at: link, withDestinationURL: target)
+    }
+
+    // MARK: - The DXT fix
+
+    /// Add DXT1-5 to wined3d's Vulkan format table.
+    ///
+    /// The table is an array of {u32 wined3d_format_id, u32 VkFormat, u32 fixup_ptr} in the PE's
+    /// read-only data. Upstream's fix is five extra rows; we cannot grow a static array in a
+    /// shipped binary, so we rewrite five rows that a 2002 D3D8 game can never ask for — the
+    /// BC4/BC5/BC6H/BC7 entries — to carry the DXT ids instead. Same size, no relocation, and the
+    /// original is kept beside it as wined3d.dll.orig.
+    private static func patchDXTFormats(_ i: Install, log: (String) -> Void) {
+        let dll = i.sharedSupport
+            .appendingPathComponent("wine/lib/wine/i386-windows/wined3d.dll")
+        guard var data = try? Data(contentsOf: dll) else { return }
+
+        func u32(_ o: Int) -> UInt32 {
+            data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: o, as: UInt32.self) }
+        }
+        func put(_ o: Int, _ v: UInt32) {
+            withUnsafeBytes(of: v.littleEndian) { src in
+                data.replaceSubrange(o..<(o + 4), with: src)
+            }
+        }
+        func fourCC(_ s: String) -> UInt32 {
+            var v: UInt32 = 0
+            for (n, c) in s.utf8.enumerated() { v |= UInt32(c) << (8 * n) }
+            return v
+        }
+
+        // Anchor on the VkFormat column: BC1_RGBA_UNORM(133) ... BC7_SRGB(146) at a 12-byte stride.
+        var base = -1
+        var o = 0
+        while o + 12 * 14 + 8 < data.count {
+            if u32(o) == 133, (0..<14).allSatisfy({ u32(o + 12 * $0) == 133 + UInt32($0) }) {
+                base = o - 4
+                break
+            }
+            o += 4
+        }
+        guard base >= 0 else { log("renderer: wined3d format table not found; leaving it alone"); return }
+
+        // donor VkFormat -> (new wined3d id, new VkFormat).  135 = BC2_UNORM, 137 = BC3_UNORM.
+        let plan: [(UInt32, UInt32, UInt32)] = [
+            (139, fourCC("DXT1"), 133), (140, fourCC("DXT2"), 135), (143, fourCC("DXT3"), 135),
+            (144, fourCC("DXT4"), 137), (145, fourCC("DXT5"), 137),
+        ]
+        var patched = 0
+        for (donor, newID, newVk) in plan {
+            for k in 0..<14 {
+                let row = base + 12 * k
+                if u32(row + 4) == donor, u32(row + 8) == 0 {
+                    put(row, newID); put(row + 4, newVk); patched += 1
+                    break
+                }
+            }
+        }
+        guard patched == plan.count else {
+            log("renderer: DXT rows already applied, or the table is not the expected shape")
+            return
+        }
+        let backup = dll.appendingPathExtension("orig")
+        if !FileManager.default.fileExists(atPath: backup.path) {
+            try? FileManager.default.copyItem(at: dll, to: backup)
+        }
+        try? data.write(to: dll)
+        log("renderer: taught wined3d's Vulkan backend about DXT1-5")
     }
 
     private static func replace(_ src: URL, at dst: URL) {
