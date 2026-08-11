@@ -1,11 +1,15 @@
 # Licensing
 
-## This project's own code — Apache License 2.0
+## This project's own code — MIT
 
-The launcher (`app/`), the scripts (`scripts/`) and the documentation are Apache 2.0.
-Apache rather than MIT for one reason: it carries an explicit patent grant, which matters for
-a graphics translation project that other people may build on. If you would rather have the
-shortest possible licence, MIT is a drop-in swap — nothing here depends on Apache specifically.
+The launcher (`app/`), the scripts (`scripts/`) and the documentation are MIT.
+
+Chosen deliberately for contribution: MIT is the shortest, most familiar and lowest-friction
+licence for anyone who wants to fork this, patch it, or ship something built on it, and it is
+compatible with essentially everything downstream — including GPL projects that may want to
+pull these fixes in. Apache 2.0 was the alternative and carries an explicit patent grant,
+which is genuinely useful for a graphics translation project; it was passed over because the
+extra ceremony works against "anyone can pick this up", which is the goal here.
 
 ## Components we do NOT own, and the terms that actually govern them
 
@@ -22,7 +26,7 @@ people's work, and neither can anyone else who republishes it.
 | FFXI game data | Square Enix, all rights reserved | **no** — never |
 
 Our DXVK patches in `patches/` are derivative works of DXVK and are therefore **zlib**, not
-Apache. That is deliberate: it is also what upstream DXVK requires for contributions, so those
+MIT. That is deliberate: it is also what upstream DXVK requires for contributions, so those
 fixes can be submitted without a relicensing problem.
 
 ## On "it's on GitHub with an open licence, so it's safe"
