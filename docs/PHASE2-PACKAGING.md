@@ -97,3 +97,38 @@ Routes investigated and closed:
   immediate-mode fixed-function engine.
 - **MoltenVK prefill modes / draw-distance reduction** — no meaningful change; in a hub the
   draw calls come from other players' models, not world geometry.
+
+## The biggest untried lever: the renderer runs under Rosetta
+
+Measured 2026-08-11:
+
+```
+wine           -> Mach-O 64-bit x86_64
+wineserver     -> Mach-O 64-bit x86_64
+libMoltenVK    -> x86_64
+```
+
+**Every binary in the hot path is x86_64-only, so on an M1 the whole stack runs translated
+through Rosetta 2.** That includes MoltenVK — the component the profiler measured spending
+35.4 ms per frame encoding command buffers. That encoding is emulated x86 code, not native
+ARM.
+
+This reframes the CPU ceiling. We are not only paying API translation
+(D3D8 -> d3d8to9 -> D3D9 -> DXVK -> Vulkan -> MoltenVK -> Metal); we are paying **CPU
+instruction-set emulation on top of it**, on the exact code that is saturating the CPU.
+
+The fix is an **arm64 wine wrapper**: run wine, DXVK and MoltenVK natively on ARM, and let
+only the 32-bit x86 game code be emulated (wow64). That is what CrossOver 23+, Whisky and
+Kegworks do. Nothing about the current wrapper takes advantage of it — it predates that work.
+
+This is the most promising remaining route to 30 fps, and it converges with the licensing
+decision above: Whisky/Kegworks engines are both **arm64 and redistributable**, so option A
+or B in the table would likely deliver the frame-rate win and the legal clearance in one
+move.
+
+Order of work suggested:
+
+1. Stand up an arm64 wine wrapper with a fresh prefix.
+2. Install the patched DXVK d3d9.dll and an **arm64** MoltenVK into it.
+3. Re-measure the crowded-hub scene. If the draws/second ceiling moves materially above
+   ~20k, this is the answer and phase 2 should be built on that wrapper.
