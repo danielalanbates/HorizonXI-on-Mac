@@ -3,9 +3,50 @@
 Session of 2026-08-11. Goal: reach FFXI's 30 fps cap **with fixed-function fog working**,
 rather than with fog bypassed as shipped in 2.1.
 
-Status at the end of this session: **not achieved.** The picture is correct and the frame
-rate is 29 fps, but only with fog neutralised. What changed is that the failure is now
-isolated to a single mechanism with direct evidence, instead of being a guess.
+**Status: fog is fixed.** Root cause found and corrected — a one-word typo in DXVK 1.10.3
+that is harmless on desktop Vulkan and fatal on Metal. See §0. The frame-rate goal is
+partly met: 29 fps at menus and light scenes, but 7–9 fps in a crowded city hub, so 30 fps
+is *not* universal. Sections 2–3 below are the diagnostic trail that led to the fix and are
+kept because they document what was ruled out.
+
+---
+
+## 0. Root cause and fix
+
+`src/d3d9/d3d9_fixed_function.cpp`, in `D3D9FFShaderCompiler::compileShader()`:
+
+```cpp
+info.pushConstOffset = m_pushConstOffset;
+info.pushConstSize   = m_pushConstOffset;   // <-- should be m_pushConstSize
+```
+
+For fixed-function **pixel** shaders `setupRenderStateInfo()` sets `m_pushConstOffset = 0`
+and `m_pushConstSize = offsetof(D3D9RenderStateInfo, pointSize)`. The typo therefore makes
+`info.pushConstSize` **zero**, and `DxvkShader::defineResourceSlots()` guards on it:
+
+```cpp
+if (m_info.pushConstSize) {
+  mapping.definePushConstRange(m_info.stage, m_info.pushConstOffset, m_info.pushConstSize);
+}
+```
+
+So `definePushConstRange` is never called for the fragment stage, and the pipeline layout's
+`VkPushConstantRange.stageFlags` never includes `VK_SHADER_STAGE_FRAGMENT_BIT`.
+
+Desktop Vulkan drivers bind push constants to all stages regardless and never notice.
+MoltenVK honours the declared range, so `render_state_t` — fog colour, fog scale, fog end,
+fog density, alpha ref — arrived as **zeroes** in every fixed-function fragment shader.
+With `fog_end = 0`, `clamp((fog_end - depth) * fog_scale, 0, 1)` is 0, so every lit surface
+became `mix(fog_color, colour, 0) == fog_color`, and FFXI's fog colour there is black.
+
+That is the black world, across four sessions. Sky, fonts and the 2D UI never go through
+the FFP fog path, which is exactly why they always looked right.
+
+The fix is `info.pushConstSize = m_pushConstSize;`. Verified: full daylight render with
+correct atmospheric haze at the main menu and in Selbina, fog enabled, no bypass.
+
+This is an upstream DXVK bug worth reporting — it affects any Vulkan driver that respects
+push-constant stage flags strictly.
 
 ---
 

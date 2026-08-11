@@ -460,7 +460,7 @@ index 433a269..1b62f06 100644
  
  namespace dxvk {
 diff --git a/src/d3d9/d3d9_fixed_function.cpp b/src/d3d9/d3d9_fixed_function.cpp
-index 37f6e1a..13bfd05 100644
+index 37f6e1a..9e3d7bc 100644
 --- a/src/d3d9/d3d9_fixed_function.cpp
 +++ b/src/d3d9/d3d9_fixed_function.cpp
 @@ -1,4 +1,6 @@
@@ -507,6 +507,22 @@ index 37f6e1a..13bfd05 100644
        uint32_t lerpedFrog = spvModule.opFMix(vec3Type, fogColor, color3, fogFact3);
  
        fogRetValue = spvModule.opVectorShuffle(vec4Type, lerpedFrog, color, indices.size(), indices.data());
+@@ -718,7 +750,14 @@ namespace dxvk {
+     info.inputMask = m_inputMask;
+     info.outputMask = m_outputMask;
+     info.pushConstOffset = m_pushConstOffset;
+-    info.pushConstSize = m_pushConstOffset;
++    // Was `= m_pushConstOffset`. For fixed-function PIXEL shaders that offset is 0, so the
++    // declared push-constant size came out 0 and DxvkShader::defineResourceSlots skipped
++    // definePushConstRange entirely -- the pipeline layout never listed the fragment stage.
++    // Desktop drivers bind push constants regardless and hid this; MoltenVK honours the
++    // declaration, so render_state_t (fog colour/scale/end/density, alpha ref) arrived as
++    // zeroes in every FFP fragment shader. Fog factor then clamped to 0 and every lit
++    // surface became the fog colour -- the "black world" on Metal.
++    info.pushConstSize = m_pushConstSize;
+ 
+     return new DxvkShader(info, m_module.compile());
+   }
 diff --git a/src/d3d9/d3d9_fixed_function.h b/src/d3d9/d3d9_fixed_function.h
 index 8e312aa..a183ca2 100644
 --- a/src/d3d9/d3d9_fixed_function.h
