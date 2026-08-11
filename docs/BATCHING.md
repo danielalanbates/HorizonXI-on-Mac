@@ -193,3 +193,52 @@ yet, so turning the flag on will render incorrectly (every instance reads
 The delivery path needs no new work: the launcher already installs our `d3d9.dll` into the
 game on every launch, so this reaches every user and every private server automatically once
 the CPU side lands.
+
+## Fourth measurement: the SAFE subset is small, and this is the honest ceiling
+
+Everything above assumed the 90%-instanceable draws could be batched. They cannot, not safely.
+Two further probes settled it.
+
+**Are the repeats consecutive?** (a simple batcher can only merge adjacent draws; anything else
+means reordering)
+
+```
+frame 4530 draws 1843 ... instanceable 1653 runmerges 473 opaquerun 142   instancing_ratio 9.7x
+frame 5040 draws  642 ... instanceable  505 runmerges 324 opaquerun 118   instancing_ratio 4.7x
+```
+
+Only a quarter to a half of repeats are consecutive, and of those only a fraction are opaque.
+
+**Are the "blended" draws actually blending?** Many older engines leave `ALPHABLENDENABLE` on
+while setting `ONE`/`ZERO` factors, which is opaque in effect and safe to reorder. Checked:
+
+```
+blend 306   blendopaque 0   effopaquerun 118
+```
+
+**Zero.** Every blended draw in FFXI uses real alpha factors. There is no free win hiding there.
+
+### What a glitch-free batcher actually delivers
+
+Merging only consecutive, genuinely-opaque runs:
+
+| scene | draws | safely removable | reduction |
+| --- | --- | --- | --- |
+| medium (642 draws) | 642 | 118 | 18% |
+| crowded hub (1843 draws) | 1843 | 142 | 7.7% |
+
+At the measured ceiling (fps x draws is roughly constant), 18% fewer draws moves a ~28 fps
+scene to ~34 fps — it **does** cross 30 for medium scenes. In the crowded hub, 7.7% moves ~10
+fps to ~10.8. It does not.
+
+### The conclusion, stated plainly
+
+- **Safe batching is worth doing** and should get medium scenes over 30 fps.
+- **Safe batching cannot fix crowded hubs.** The 9.7x figure requires reordering
+  alpha-blended draws across the frame, which changes what is drawn and will produce visual
+  artefacts. That was explicitly ruled out.
+- The earlier 31x and 9.9x figures in this document are **upper bounds that are not safely
+  reachable**. They are left above deliberately, with this section as the correction.
+
+Anyone continuing this should implement the opaque-consecutive batcher for the medium-scene
+win and treat crowded hubs as out of reach at this layer.
