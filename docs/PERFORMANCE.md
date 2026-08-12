@@ -13,12 +13,14 @@ scene unless stated otherwise. The instrumentation is in
 
 ## The short version
 
-| where the time goes, character select | share of the frame |
+| where the time goes | share of the frame |
 | --- | --- |
-| FFXI's own code, plus the Ashita and d3d8to9 wrappers | **~80%** |
+| **FFXI's own code** | **~75%+** |
 | DXVK's D3D9 state-setting entry points | ~6% |
 | DXVK's draw submission | ~3% |
 | `Present` — DXVK, MoltenVK, Metal, the GPU handoff | ~12% |
+| d3d8to9 | ~6% (measured separately, on the rules screen) |
+| Ashita's D3D8 proxy | not measurable as a cost — removing it makes the game *slower* |
 
 **Skipping every single draw call — rendering literally nothing — moves character select from
 12.0 fps to 10.7 fps.** It does not get faster. That one number settles the argument: the
@@ -145,9 +147,10 @@ Ranked by measured or expected value:
 3. **Removing a wrapper hop.** 265,000 calls a second cross three proxies. dgVoodoo2 implements
    D3D8 directly on D3D11, which removes d3d8to9 entirely and lets DXMT (native Metal, no Vulkan
    and no MoltenVK) replace two more layers. Measured in `docs/PATHWAYS.md`.
-4. **Filtering redundant state in d3d8to9** — eleven `SetRenderState` per draw is mostly the same
-   values being set again. Filtering at the layer closest to the game saves the downstream
-   crossings. Requires building d3d8to9, which this session did not do.
+4. ~~**Filtering redundant state in d3d8to9**~~ — d3d8to9 was subsequently built from source and
+   instrumented: it is **6% of the frame**, so filtering inside it cannot pay. Recipe in
+   `docs/D3D8TO9-BUILD.md`; one unverified observation there is that the mingw build measured
+   ~15% faster than the shipped MSVC one, which is worth a proper A/B.
 
 What will *not* move it: batching draws, instancing, MoltenVK tuning, render-pass merging,
 different Vulkan settings. Those were the previous plan and they are all inside the 20%.
