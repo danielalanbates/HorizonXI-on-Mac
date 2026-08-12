@@ -6,8 +6,8 @@ route to 30 fps. **That model was wrong**, and the measurements below say why. R
 acting on anything in the older documents.
 
 Everything here is measured on an M1 MacBook Pro (8 GB), macOS 26.5.2, at the character-select
-scene unless stated otherwise. The instrumentation is in
-`patches/dxvk-1.10.3-instrumentation.patch` and the harness is `scripts/bench.py`.
+scene unless stated otherwise. The instrumentation is in `patches/dxvk-1.10.3-horizonxi.patch`
+(and `patches/d3d8to9_probe.hpp` for the layer above); the harness is `scripts/harness/bench.py`.
 
 ---
 
@@ -74,9 +74,11 @@ SetTexture               15,850      SetTextureStageState 10,255
 ```
 
 **~265,000 D3D9 calls per second — about 12,000 per frame, of which only ~560 are draws.**
-FFXI issues roughly eleven `SetRenderState` calls per draw. Every one of them crosses
-FFXI → Ashita's D3D8 proxy → d3d8to9 → DXVK, and every crossing is a translated indirect call
-under Rosetta. Only ~0.22 µs of the per-call cost is inside DXVK; the rest is above it.
+FFXI issues roughly eleven `SetRenderState` calls per draw. Every one crosses FFXI → Ashita's
+D3D8 proxy → d3d8to9 → DXVK. Only ~0.22 µs of the per-call cost is inside DXVK — but the two
+layers above it were subsequently measured too, and they are not the answer either: d3d8to9 is
+6% of the frame, and removing Ashita entirely makes the game *slower*. The volume is real; the
+cost of carrying it is in the client.
 
 **4. Removing the renderer changes nothing.** `DXVK_SKIP_DRAWS=1` at character select:
 **10.7 fps**, versus 12.0 fps with the renderer doing its full job.
@@ -116,10 +118,11 @@ draw call would gain about what `DXVK_SKIP_DRAWS` gains, which is nothing. The
 **Render-pass churn is not the problem either.** FFXI spills DXVK's render pass ~59 times per
 frame, 88% of those from `updateFramebuffer`, and the cause is real: the game detaches and
 reattaches the depth-stencil ~24,000 times per run as it toggles `ZENABLE`/`ZWRITEENABLE`
-between world geometry and UI. Keeping the depth attachment bound (`DXVK_KEEP_DEPTH`, on by
-default in our build) is the correct fix and it does remove framebuffer changes — but at ~700
-render passes per second the whole phenomenon is worth under 2% of a frame. It was a red
-herring, found and priced out.
+between world geometry and UI. Keeping the depth attachment bound (`DXVK_KEEP_DEPTH=1`) is the
+correct fix and it does remove those framebuffer changes — but at ~700 render passes per second
+the whole phenomenon is worth under 2% of a frame, and keeping the attachment bound adds depth
+load/store work that made the measured frame rate slightly *worse* (11.6 vs 12.9 fps). It is off
+by default. A red herring, found and priced out.
 
 **The Ashita overlay addons were never running.** `HANDOFF.md` §4 called disabling them "the
 most promising thing left". They cannot be disabled because they never load: Ashita.dll in this
