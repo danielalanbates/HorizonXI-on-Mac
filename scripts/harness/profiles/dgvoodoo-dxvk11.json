@@ -1,0 +1,17 @@
+{
+ "addons": "full",
+ "env": {
+  "DXVK_FPS_LOG": null,
+  "DXVK_CONFIG_FILE": null
+ },
+ "dlls": {
+  "d3d8.dll": "/Users/daniel/Games/hxi-workspace/vendor/dgvoodoo/MS/x86/D3D8.dll"
+ },
+ "wine_reg": {
+  "HKCU\\Software\\Wine\\DllOverrides\\d3d8": "native",
+  "HKCU\\Software\\Wine\\DllOverrides\\d3d11": "builtin",
+  "HKCU\\Software\\Wine\\DllOverrides\\dxgi": "builtin",
+  "HKCU\\Software\\Wine\\DllOverrides\\d3d10core": "builtin"
+ },
+ "renderer": "dxvk11"
+}

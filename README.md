@@ -3,10 +3,11 @@
 Running **HorizonXI** (Final Fantasy XI private server) natively on Apple Silicon macOS under
 Wine — no virtual machine.
 
-> ## 📣 Open beta — [read the announcement](docs/ANNOUNCEMENT.md)
-> Launcher and install script are ready for testers. It works; it is slow, and the Metal
-> renderer is close but not there yet (see below). Testers wanted, especially on Apple
-> Silicon with more than 8GB and on Intel Macs.
+> ## 📣 Status — playable, correct, and slow
+> The Metal renderer is **correct** — full textures, fog, UI. The frame rate is not: ~24 fps in
+> the menus, **~7.5 fps in the world**. As of 2026-08-11 the reason is measured and it is *not*
+> the renderer — see [Performance](#performance--where-it-actually-stands). Testers welcome,
+> especially on Apple Silicon with more than 8 GB and on Intel Macs.
 
 > ### 2026-08-10 — the launcher, and three renderers measured
 >
@@ -141,38 +142,61 @@ silently broken before, one-click prefix repair, graphics settings, and a live l
 
 ![Main menu](docs/img/main-menu.png)
 
-## Performance — the open problem
+## Performance — where it actually stands
 
-The game runs on wine's builtin D3D8, which goes through OpenGL and is translated on a single CPU
-thread: **148% CPU with the GPU at 6%**. The GPU is starved, not unused.
+Rendering is **correct** on Metal: D3D8 → d3d8to9 → DXVK 1.10.3 → MoltenVK, full textures, fog,
+UI. The frame rate is not there.
 
-Getting onto Metal is *close*. D3D8 → d3d8to9 → DXVK 1.10.3 → MoltenVK now gets all the way to a
-live Vulkan device — three separate blockers solved (the `api-ms-win-crt-*` DLLs wine does not
-ship, a `d3d8.dll` on **Ashita's** search path as well as the game's, and the `moltenvkcx`
-MoltenVK that speaks Vulkan 1.2 rather than the default 1.1). **But it never presents a frame** —
-the window stays black while the GPU does work. That last step, DXVK's swapchain onto a wine
-window on macOS, is unsolved. `HXI_METAL=1 ./scripts/install.sh …` applies the configuration for
-anyone who wants to attack it. DXVK 2.x/3.x cannot work on Apple Silicon at all (Vulkan 1.3 +
-`geometryShader`). Details in [`docs/FINDINGS.md`](docs/FINDINGS.md).
+| scene | fps |
+| --- | --- |
+| rules-of-conduct / title screens | ~24 |
+| character select (~1841 draws) | ~12 |
+| in-world, Mog House (~850 draws) | **~7.5** |
+
+Fewer draws, worse frame rate — which is the first sign that the usual explanations are wrong.
+This session instrumented the whole stack to find out where the time goes, and the answer
+overturned the previous model:
+
+- **Draw calls cost 1.9 µs each, about 3% of a frame.** Discarding *every* draw
+  (`DXVK_SKIP_DRAWS=1`) makes the frame rate go **down**, not up. Draw-call batching, instancing
+  and render-pass merging are all inside a slice of the frame too small to matter.
+- **`Present` costs 0.05 ms.** Everything inside DXVK adds up to a fifth of the frame in the
+  menus and almost nothing in the world.
+- **In the world the client stalls ~120 ms per frame at 13% CPU** — one pause per frame, outside
+  every D3D entry point, doing nothing. That single stall is the whole gap between 7.5 fps and a
+  playable game.
+
+Full measurements and method: [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md). The stall is written
+up as a bug report with a dozen hypotheses already eliminated and the strongest lead identified
+(FFXI's texture path through d3d8to9): [`docs/INWORLD-STALL.md`](docs/INWORLD-STALL.md). It is
+the highest-value thing left in this project by a wide margin.
+
+The instrumentation is reusable: our `d3d9.dll` carries six probes behind environment variables,
+and [`scripts/harness/`](scripts/harness) runs a whole configuration — launch, navigate, sample,
+screenshot, kill — from one command.
 
 ## Known limitations
 
-- Five Ashita plugins fail to load: built against plugin interface 4.15, this Ashita wants 4.16.
-- The `.dmg` is unsigned and un-notarised, so Gatekeeper blocks it on other Macs.
-- Tested on exactly one machine: M1 MacBook Pro, 8GB, macOS 26.5.
+- **~7.5 fps in the world.** Cause identified, not yet fixed. See above.
+- **No Ashita plugin or addon loads.** Ashita.dll here is plugin interface 4.16 and every
+  bundled plugin is 4.15, so the plugin manager rejects all of them — including the `Addons`
+  Lua host, so no Lua addon loads either. Affects gameplay, not just benchmarks.
+- Tested on exactly one machine: M1 MacBook Pro, 8 GB, macOS 26.5.
 
 ## Roadmap
 
 - [x] Login and server connection
 - [x] Ashita injection, POL plugins, DAT overlays, macro import from a Windows install
-- [x] **Game window opens, D3D8 device created, game loads**
 - [x] `install.sh` — bare prefix to running game, no GUI
-- [x] Character select and login — driven end to end from the host
 - [x] `HorizonXI-on-Mac.app` — launcher with preflight, repair, account login
-- [x] `package.sh` — distributable disk image
-- [ ] **Renderer on Metal** — device creation solved; presentation (black window) is not
-- [ ] Bundle Wine + client acquisition for non-technical users (first-run downloader)
-- [ ] Developer ID signature + notarisation
+- [x] `package.sh` — distributable disk image, signed and notarised
+- [x] **Renderer on Metal, rendering correctly** — fog fix + Metal feature relaxations
+- [x] **Find out what actually limits the frame rate** — it is not the renderer
+- [ ] **Fix the in-world stall** — [`docs/INWORLD-STALL.md`](docs/INWORLD-STALL.md)
+- [ ] Bundle the dependencies for non-technical users — unblocked, plan in
+      [`docs/BUNDLING.md`](docs/BUNDLING.md)
+- [ ] Fix the Ashita 4.15/4.16 plugin mismatch
+- [ ] Upstream the two DXVK fixes — [`docs/UPSTREAM.md`](docs/UPSTREAM.md)
 - [ ] Announcement / macOS entry on the HorizonXI wiki — draft in
       [`docs/ANNOUNCEMENT.md`](docs/ANNOUNCEMENT.md)
 

@@ -1,3 +1,8 @@
+> **Partly superseded — read `docs/PERFORMANCE.md` first.**
+> The renderer archaeology here (fog, DXT formats, the Vulkan/OpenGL comparison, the pathway
+> eliminations) is still accurate and still useful. The performance model — a fixed draw-call
+> ceiling, a CPU-bound game, batching as the fix — was overturned by direct measurement.
+
 # FINDINGS — what is actually true
 
 Consolidated from the 2026-08-07 → 2026-08-08 sessions. This is the *state* document: facts,

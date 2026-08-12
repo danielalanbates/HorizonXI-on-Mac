@@ -1,0 +1,4 @@
+{
+  "addons": "full",
+  "dxvk_conf": "d3d9.maxFrameLatency = 1\nd3d9.cachedDynamicBuffers = True\nd3d9.deferSurfaceCreation = False\nd3d9.presentInterval = 0\ndxvk.numCompilerThreads = 4\ndxvk.enableStateCache = True\n"
+}

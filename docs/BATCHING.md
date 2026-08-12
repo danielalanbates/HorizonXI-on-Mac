@@ -1,3 +1,9 @@
+> **Superseded — read `docs/PERFORMANCE.md` first.**
+> This document measured draw-call batching carefully and concluded it was the route to 30 fps.
+> The measurement was right and the conclusion was wrong: draw submission is ~3% of the frame,
+> and discarding *every* draw call makes the frame rate worse, not better. Kept because the
+> instancing analysis is sound and would matter on a stack that is actually draw-bound.
+
 # Draw-call batching — the route to 30 fps, measured
 
 ## The result

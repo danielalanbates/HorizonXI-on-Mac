@@ -24,7 +24,7 @@ chmod +x "$APP/Contents/Resources/"*.sh
 
 # The Metal/DXVK renderer ships inside the app: Renderer.swift resolves these by name out of
 # Bundle.main, so the user never has to fetch a DLL by hand.
-for dll in d3d8to9.dll dxvk-1.10.3-x32-d3d9.dll dxvk-1.10.3-x32-d3d9-nofog.dll; do
+for dll in d3d8to9.dll dxvk-1.10.3-x32-d3d9-horizonxi.dll; do
   [[ -f "$REPO/vendor/$dll" ]] && cp "$REPO/vendor/$dll" "$APP/Contents/Resources/$dll"
 done
 

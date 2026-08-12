@@ -19,14 +19,17 @@ enum Renderer: String, Codable, CaseIterable, Identifiable {
     /// asks for the latter. `patchDXTFormats` adds them back.
     case vulkan
 
-    /// D3D8 -> d3d8to9 -> DXVK 1.10.3 (patched) -> MoltenVK -> Metal. **29 fps in a zone**, at
-    /// FFXI's 30 fps cap, with the world rendering correctly.
+    /// D3D8 -> d3d8to9 -> DXVK 1.10.3 (patched) -> MoltenVK -> Metal. Renders correctly, fog
+    /// included; ~24 fps in the menus and ~7.5 fps in the world.
     ///
-    /// The long-standing black world was fixed-function fog. It is applied to every FFP
-    /// fragment and reads render_state_t, the uniform block MoltenVK mis-binds, so the fog
-    /// factor saturated and every lit surface became the fog colour. Sky and UI skip FFP fog,
-    /// which is why those always looked correct. The bundled d3d9 is built from DXVK 1.10.3
-    /// with fog bypassed (patches/dxvk-1.10.3-ffp-fog.patch). Cost: no distance fog.
+    /// The long-standing black world was fixed-function fog: DXVK declared a zero-sized
+    /// fragment push-constant range, so the fog constants arrived zeroed and every lit surface
+    /// became the fog colour. Sky and UI skip FFP fog, which is why those always looked
+    /// correct. The bundled d3d9 is DXVK 1.10.3 + patches/dxvk-1.10.3-horizonxi.patch, which
+    /// fixes that properly rather than bypassing fog.
+    ///
+    /// The frame rate is *not* limited by this pathway -- see docs/PERFORMANCE.md. Discarding
+    /// every draw call makes it slower, not faster.
     case metal
 
     var id: String { rawValue }
@@ -48,8 +51,8 @@ enum Renderer: String, Codable, CaseIterable, Identifiable {
             return "Draws correctly on the GPU — 8-10 fps in a zone on an M1. The fallback if "
                  + "Metal/DXVK misbehaves on your machine."
         case .metal:
-            return "Recommended. 29 fps in a zone, which is FFXI's 30 fps cap, with the "
-                 + "world drawing correctly. Distance fog is off to get there."
+            return "Recommended. The world draws correctly, fog included. ~24 fps in the "
+                 + "menus, ~7.5 fps in a zone; the limit is the client, not this pathway."
         }
     }
 
@@ -144,7 +147,7 @@ enum RendererSetup {
     private static func installDXVK(_ i: Install, log: (String) -> Void) {
         let fm = FileManager.default
         guard let d3d8to9 = Bundle.main.url(forResource: "d3d8to9", withExtension: "dll"),
-              let dxvk = Bundle.main.url(forResource: "dxvk-1.10.3-x32-d3d9-nofog", withExtension: "dll")
+              let dxvk = Bundle.main.url(forResource: "dxvk-1.10.3-x32-d3d9-horizonxi", withExtension: "dll")
         else { log("renderer: bundled DXVK not found — staying on Classic"); return }
 
         backupBuiltins(i)

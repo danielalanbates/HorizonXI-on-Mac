@@ -12,3 +12,7 @@ sweep-out/
 # harness output
 scripts/shots/
 *.vkbak
+
+# benchmark harness output (screenshots, per-run JSON, wine logs)
+scripts/harness/results/
+scripts/harness/shots/

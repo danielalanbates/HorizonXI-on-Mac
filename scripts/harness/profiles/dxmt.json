@@ -1,0 +1,19 @@
+{
+  "addons": "full",
+  "renderer": "dxmt",
+  "env": {
+    "FFXI_FPS_DIVISOR": "1",
+    "DXVK_FPS_LOG": null,
+    "DXVK_CONFIG_FILE": null
+  },
+  "dlls": {
+    "d3d8.dll": "~/Games/hxi-workspace/vendor/dgvoodoo/MS/x86/D3D8.dll",
+    "d3d9.dll": null
+  },
+  "wine_reg": {
+    "HKCU\\Software\\Wine\\DllOverrides\\d3d8": "native",
+    "HKCU\\Software\\Wine\\DllOverrides\\d3d9": "builtin",
+    "HKCU\\Software\\Wine\\DllOverrides\\d3d11": "builtin",
+    "HKCU\\Software\\Wine\\DllOverrides\\dxgi": "builtin"
+  }
+}

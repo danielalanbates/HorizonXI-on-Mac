@@ -1,0 +1,9 @@
+{
+ "addons": "full",
+ "env": {
+  "FFXI_FPS_DIVISOR": "1"
+ },
+ "registry": {
+  "0011": "0"
+ }
+}

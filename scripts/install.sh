@@ -108,7 +108,7 @@ done
 #      reports Vulkan 1.2 and works. DXVK 2.x/3.x cannot be used at all -- they require Vulkan 1.3
 #      and geometryShader, which Metal has no equivalent for.
 # ---------------------------------------------------------------------------
-if [[ -n "${HXI_METAL:-}" && -f "${0:h}/../vendor/d3d8to9.dll" && -f "${0:h}/../vendor/dxvk-1.10.3-x32-d3d9.dll" ]]; then
+if [[ -n "${HXI_METAL:-}" && -f "${0:h}/../vendor/d3d8to9.dll" && -f "${0:h}/../vendor/dxvk-1.10.3-x32-d3d9-horizonxi.dll" ]]; then
   info "installing the Metal renderer (DXVK 1.10.3 + d3d8to9)"
   SYSWOW="$WINEPREFIX/drive_c/windows/syswow64"
   mkdir -p "$WINEPREFIX/drive_c/dll-backup"
@@ -131,7 +131,7 @@ if [[ -n "${HXI_METAL:-}" && -f "${0:h}/../vendor/d3d8to9.dll" && -f "${0:h}/../
            "$GAME_DIR/SquareEnix/PlayOnlineViewer" "$GAME_DIR/SquareEnix/FINAL FANTASY XI"; do
     [[ -d "$d" ]] || continue
     cp "${0:h}/../vendor/d3d8to9.dll" "$d/d3d8.dll"
-    cp "${0:h}/../vendor/dxvk-1.10.3-x32-d3d9.dll" "$d/d3d9.dll"
+    cp "${0:h}/../vendor/dxvk-1.10.3-x32-d3d9-horizonxi.dll" "$d/d3d9.dll"
   done
 
   for REG in "$REG32" reg; do

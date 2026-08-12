@@ -252,9 +252,9 @@ struct ContentView: View {
             row("Wine prefix", selected?.prefixName ?? (scanning ? "scanning…" : "not found"))
             row("Client", selected == nil ? (scanning ? "scanning…" : "not found") : "Ashita · \(store.selected?.bootProfile ?? "")")
 
-            Text("Measured in a zone on this Mac: Metal/DXVK 29 fps with the world drawing "
-                 + "correctly, against Classic OpenGL's 3.2. FFXI's cap is 30. Distance fog is "
-                 + "off on Metal — see docs/PATHWAYS.md.")
+            Text("Measured on this Mac with Metal/DXVK: rendering is correct, fog included. "
+                 + "About 24 fps in the menus and 7.5 fps in the world. The limit is not the "
+                 + "renderer — see docs/PERFORMANCE.md.")
                 .font(.caption2).foregroundStyle(Vana.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
