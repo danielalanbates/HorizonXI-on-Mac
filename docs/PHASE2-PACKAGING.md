@@ -1,3 +1,12 @@
+> **Updated 2026-08-11 — the blocker described below is gone.** This document was written
+> assuming the wine wrapper could not be redistributed because it was CrossOver-derived. It is
+> not: the engine in use is `wine-10.0 (Sikarugir)`, LGPL, with stock Khronos MoltenVK. Read
+> **`docs/BUNDLING.md`** for the current plan; the packaging mechanics below are still accurate.
+>
+> Shipping an open beta is still gated on frame rate, which is Daniel's own sequencing:
+> "when we find a solution, that is when we need to move to phase 2". In the world it is 7.5 fps
+> and the cause is identified but unfixed (`docs/INWORLD-STALL.md`).
+
 # Phase 2 — open beta packaging
 
 ## What ships today

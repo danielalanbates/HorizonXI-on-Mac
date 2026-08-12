@@ -23,11 +23,11 @@ HERE="${0:A:h}"
 REPO="${HERE:h}"
 OUT="${1:-$REPO/dist}"
 STAGE="$(mktemp -d)"
+# Build first, then read the version -- otherwise the DMG is named after the previous build.
+"$REPO/app/bundle.sh" >/dev/null
 VERSION="$(/usr/bin/plutil -extract CFBundleShortVersionString raw \
     "$REPO/app/build/HorizonXI-on-Mac.app/Contents/Info.plist" 2>/dev/null || echo 1.0)"
 DMG="$OUT/HorizonXI-on-Mac-$VERSION.dmg"
-
-"$REPO/app/bundle.sh" >/dev/null
 
 mkdir -p "$OUT"
 cp -R "$REPO/app/build/HorizonXI-on-Mac.app" "$STAGE/"
