@@ -100,3 +100,40 @@ err:d3d:validate_state_table State STATE_RENDER(WINED3D_RS_COLORKEYENABLE) shoul
   AMBIENTMATERIALSOURCE, DIFFUSEMATERIALSOURCE, EMISSIVEMATERIALSOURCE,
   SPECULARMATERIALSOURCE, LOCALVIEWER
 ```
+
+---
+
+## 3. DXVK — the two fixes in our patch, and whether they are worth filing
+
+Both live in `patches/dxvk-1.10.3-horizonxi.patch`. Assessed 2026-08-11; the honest answer is
+that neither is a good upstream PR, for different reasons.
+
+### 3a. Zero-sized fragment push-constant range for fixed-function pixel shaders
+
+`src/d3d9/d3d9_fixed_function.cpp` assigned `info.pushConstSize = m_pushConstOffset`. For
+fixed-function *pixel* shaders that offset is 0, so `DxvkShader::defineResourceSlots` skipped
+`definePushConstRange` and the pipeline layout never listed `VK_SHADER_STAGE_FRAGMENT_BIT`.
+Desktop drivers bind push constants regardless; MoltenVK honours the declaration, so
+`render_state_t` — fog colour, scale, end, density, alpha ref — arrived zeroed. `fog_end == 0`
+clamps the fog factor to 0 and every lit surface renders in the fog colour, which FFXI sets to
+black. Sky, fonts and UI skip FFP fog, which is exactly why they always looked correct.
+
+**Do not file.** This is already correct in DXVK 2.x (`info.pushConstSize =
+sizeof(D3D9RenderStateInfo)`), which independently confirms the diagnosis. 1.10.3 is an EOL
+branch and a PR against it would be closed. It is documented here because anyone else pinned to
+1.10.3 for MoltenVK reasons will hit it, and because the symptom — a black world with a correct
+sky — is very hard to attribute without knowing this.
+
+### 3b. D3D9 demanding Vulkan features Metal does not have
+
+`src/dxvk/dxvk_adapter.cpp` required `geometryShader`, `robustBufferAccess` and
+`shaderCullDistance` unconditionally for D3D9. Metal has none of the three, and D3D9 needs none
+of them. Making them conditional is what let DXVK 1.10.3 run on **MoltenVK 1.4.1** instead of
+only on 1.2.10 — the one version that falsely claimed to support them.
+
+**Probably not fileable either.** Upstream DXVK does not target Metal or MoltenVK, so "relax a
+requirement because one non-target driver lacks it" is not a change they have a reason to take,
+and on 1.10.3 it has the EOL problem as well. The right home for it is a MoltenVK-oriented DXVK
+fork, or MoltenVK itself growing honest emulation of the features.
+
+Filing either remains Daniel's call — nothing has been submitted.
