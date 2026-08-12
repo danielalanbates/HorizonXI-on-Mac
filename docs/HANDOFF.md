@@ -128,6 +128,12 @@ fixed.
 - **`/shutdown` sometimes needs a second attempt.** `inworld.py` retries; check `logged_out` in
   its result and log out by hand if it is false. A character left online is the one real risk in
   this harness.
+- **Never rewrite `user.reg`/`system.reg` by parsing and re-emitting them.** It cost an hour
+  here: the `DllOverrides` section stopped being readable, wine silently substituted its builtin
+  d3d8, DXVK stopped loading, and the game still launched and rendered — so the only symptom was
+  that every measurement came back empty. Check with `WINEDEBUG=+module`: a healthy prefix logs
+  `get_load_order_value got standard key n for L"*d3d8"`, a broken one logs
+  `get_load_order got hardcoded default`. Snapshot both hives first.
 - **The character-select background is a valid oracle** — full textured landscape on a working
   build, black silhouette under a correct sky on a broken one. No login needed.
 - Launch time is 30–31 s to window: ~14 s wine/Ashita, ~16 s FFXI+DXVK init.

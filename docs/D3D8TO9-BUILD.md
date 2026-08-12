@@ -47,12 +47,17 @@ The probe is a single header, `source/d3d8to9_probe.hpp`, plus one `D3D8TO9_TIME
 at the top of each method body — added mechanically. It is not upstreamed and is not in this
 repo's `vendor/`; the shipped `vendor/d3d8to9.dll` is still the stock MSVC build.
 
-## An unverified observation worth re-testing
+## An observation that did not survive
 
 The mingw build measured **27.48 fps** on the rules screen against **23.78 fps** for the shipped
-MSVC build. That would be a ~15% win for free, but it is **one run each, not a controlled A/B** —
-the attempt to run the A/B properly failed when the client stopped reaching the D3D device after
-a long session of repeated launches. Re-run it before believing it:
+MSVC build, which looked like a free ~15% win. It is not: a later run of the *MSVC* build on the
+same scene measured **26.97 fps**. That scene varies between roughly 23.8 and 27.5 run to run —
+most likely with how warm DXVK's pipeline state cache is — and the apparent difference was
+entirely inside that spread.
+
+Recorded because it is exactly the kind of single-run number this project has been burned by
+before. If it is ever worth revisiting, alternate the two builds three times each in one sitting
+and compare medians:
 
 ```sh
 for i in 1 2 3; do
@@ -63,5 +68,17 @@ for i in 1 2 3; do
 done
 ```
 
-If it holds up, the likely cause is compiler/CRT differences on a layer that is called ~265,000
-times a second, and shipping the mingw build becomes an easy win.
+## A warning about the prefix registry
+
+Do not rewrite `user.reg` or `system.reg` by parsing and re-emitting them. Doing that here
+produced a file wine could no longer read the `DllOverrides` section out of, so `*d3d8` stopped
+being `native`, wine silently substituted its own builtin d3d8, and DXVK stopped loading
+entirely — while the game still launched and rendered, so nothing looked broken except that
+every measurement came back empty. The symptom in `WINEDEBUG=+module` is:
+
+```
+get_load_order got hardcoded default for L"C:\HorizonXI\bootloader\d3d8.dll"
+```
+
+A working prefix says `get_load_order_value got standard key n for L"*d3d8"` instead. Snapshot
+both hives before touching them, and prefer `wine reg add` despite it being slow.
