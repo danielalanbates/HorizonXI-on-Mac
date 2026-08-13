@@ -4,7 +4,7 @@ import AppKit
 @main
 struct HorizonXILauncherApp: App {
     var body: some Scene {
-        WindowGroup("HorizonXI on Mac") {
+        WindowGroup("FFXI on Mac") {
             ContentView()
                 .frame(minWidth: 940, minHeight: 600)
                 .preferredColorScheme(.dark)
@@ -54,6 +54,9 @@ struct ContentView: View {
     @StateObject private var runner = Runner()
 
     @StateObject private var store = ServerStore()
+    @StateObject private var local = LocalServer()
+    @State private var worldHover = false
+    @State private var forceSetup = false
     @State private var newServer = false
     @State private var newName = ""
     @State private var newHost = ""
@@ -79,6 +82,10 @@ struct ContentView: View {
         }
         .onAppear {
             if remember, !user.isEmpty { pass = Credentials.password(for: user) }
+            if store.selected?.local == true { local.refresh() }
+        }
+        .onChange(of: store.selectedID) { _ in
+            if store.selected?.local == true { local.refresh() }
         }
         // Discovery walks /Volumes, and an external drive can make that take tens of seconds.
         // Doing it on the main thread means the window never appears at all — which looked
@@ -109,7 +116,7 @@ struct ContentView: View {
             }
             .padding(.horizontal, 34).padding(.top, 34).padding(.bottom, 20)
 
-            serverPicker
+            localServerCard
             rendererBanner
             notesCard
             Spacer()
@@ -123,11 +130,26 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// One dropdown for every server. HorizonXI is pinned to the top; the rest are ordered by
-    /// community size, which is metadata the user never has to see or maintain.
+    /// One dropdown for every server, kept next to the account fields since choosing a world and
+    /// typing the account that logs into it are one decision, not two. HorizonXI is pinned to the
+    /// top; the rest are ordered by community size, which is metadata the user never has to see
+    /// or maintain. Sized for the 372pt sidebar column rather than the wide hero pane.
     private var serverPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("WORLD").font(.caption2).tracking(2.5).foregroundStyle(Vana.gold)
+            HStack {
+                Text("WORLD").font(.caption).tracking(2.5).foregroundStyle(Vana.gold)
+                Spacer()
+                if store.selected?.verified == true {
+                    Label("verified", systemImage: "checkmark.seal.fill")
+                        .labelStyle(.iconOnly).font(.caption2)
+                        .foregroundStyle(Vana.crystal)
+                        .help("This project logs into this server successfully.")
+                } else {
+                    Image(systemName: "questionmark.circle").font(.caption2)
+                        .foregroundStyle(Vana.muted)
+                        .help("Untested here — set the login host before playing.")
+                }
+            }
 
             Menu {
                 ForEach(store.ordered) { s in
@@ -141,64 +163,68 @@ struct ContentView: View {
                 Divider()
                 Button("Add a server…") { newServer = true }
             } label: {
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Image(systemName: "diamond.fill")
-                        .font(.system(size: 11))
+                        .font(.system(size: 10))
                         .foregroundStyle(Vana.crystal)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(store.selected?.name ?? "Choose a world")
-                            .font(.system(size: 15, weight: .semibold, design: .serif))
+                            .font(.system(size: 14, weight: .semibold, design: .serif))
                             .foregroundStyle(Vana.text)
+                            .lineLimit(1)
                         if let era = store.selected?.era, !era.isEmpty {
-                            Text(era).font(.caption2).foregroundStyle(Vana.muted)
+                            Text(era).font(.caption2).foregroundStyle(Vana.muted).lineLimit(1)
                         }
                     }
-                    Spacer()
-                    if store.selected?.verified == true {
-                        Label("verified", systemImage: "checkmark.seal.fill")
-                            .labelStyle(.iconOnly)
-                            .foregroundStyle(Vana.crystal)
-                            .help("This project logs into this server successfully.")
-                    } else {
-                        Image(systemName: "questionmark.circle")
-                            .foregroundStyle(Vana.muted)
-                            .help("Untested here — set the login host before playing.")
-                    }
+                    Spacer(minLength: 4)
+                    // A filled capsule reads as a control at a glance, the way a native pop-up
+                    // button's chrome does; the plain chevron this replaced was easy to mistake
+                    // for a static label instead of something to click.
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 10)).foregroundStyle(Vana.muted)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.black.opacity(0.85))
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(worldHover ? Vana.crystal : Vana.gold))
                 }
-                .padding(.horizontal, 14).padding(.vertical, 10)
-                .frame(width: 430, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.32)))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Vana.crystalDim.opacity(0.7)))
+                .padding(.horizontal, 10).padding(.vertical, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 8)
+                    .fill(worldHover ? Color.white.opacity(0.10) : Color.black.opacity(0.32)))
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .stroke(worldHover ? Vana.crystal : Vana.crystalDim.opacity(0.7),
+                            lineWidth: worldHover ? 1.5 : 1))
                 .contentShape(Rectangle())
+                .onHover { hovering in
+                    worldHover = hovering
+                    if hovering { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() }
+                }
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .fixedSize()
 
             if let s = store.selected, !s.verified {
-                HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 5) {
                     TextField("login host", text: Binding(
                         get: { s.host }, set: { var c = s; c.host = $0; store.update(c) }))
-                        .textFieldStyle(.roundedBorder).font(.caption)
-                    TextField("boot profile .ini", text: Binding(
-                        get: { s.bootProfile }, set: { var c = s; c.bootProfile = $0; store.update(c) }))
-                        .textFieldStyle(.roundedBorder).font(.caption).frame(width: 150)
-                    if !Server.builtins.contains(where: { $0.name == s.name }) {
-                        Button(role: .destructive) { store.remove(s) } label: {
-                            Image(systemName: "trash")
-                        }.buttonStyle(.borderless)
+                        .textFieldStyle(.roundedBorder).font(.caption2)
+                    HStack(spacing: 6) {
+                        TextField("boot profile .ini", text: Binding(
+                            get: { s.bootProfile }, set: { var c = s; c.bootProfile = $0; store.update(c) }))
+                            .textFieldStyle(.roundedBorder).font(.caption2)
+                        if !Server.builtins.contains(where: { $0.name == s.name }) {
+                            Button(role: .destructive) { store.remove(s) } label: {
+                                Image(systemName: "trash")
+                            }.buttonStyle(.borderless)
+                        }
                     }
+                    Text(s.host.isEmpty
+                         ? "No login host set for \(s.name) — add it before playing."
+                         : "\(s.host) — untested by this project.")
+                        .font(.caption2).foregroundStyle(Vana.ember)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(maxWidth: 430)
-                Text(s.host.isEmpty
-                     ? "No login host set for \(s.name) — add it before playing."
-                     : "\(s.host) — untested by this project.")
-                    .font(.caption2).foregroundStyle(Vana.ember)
             }
         }
-        .padding(.horizontal, 34)
         .sheet(isPresented: $newServer) { addServerSheet }
     }
 
@@ -219,6 +245,100 @@ struct ContentView: View {
             }
         }
         .padding(20).frame(width: 360)
+    }
+
+    /// Shown only for the local world. Selecting it means building an FFXI server on this Mac, so
+    /// this says what that will cost and what is left to do before Play can work.
+    @ViewBuilder private var localServerCard: some View {
+        if store.selected?.local == true {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Label("Your own server", systemImage: "internaldrive")
+                        .font(.system(size: 12, weight: .semibold, design: .serif))
+                        .foregroundStyle(Vana.gold)
+                    Spacer()
+                    if local.busy {
+                        ProgressView().controlSize(.small)
+                        Text(local.activity).font(.caption2).foregroundStyle(Vana.muted)
+                    }
+                }
+
+                if let s = local.status {
+                    // Disk first: it is the one thing the user has to fix outside this app, and
+                    // finding out 20 minutes into a build is far worse than finding out here.
+                    // Once the server is built the space warning is about the *next* build, not
+                    // this one, so state the number without dressing it as a problem.
+                    HStack(spacing: 6) {
+                        Image(systemName: (s.spaceOK || s.ready)
+                              ? "checkmark.circle" : "exclamationmark.triangle.fill")
+                            .foregroundStyle((s.spaceOK || s.ready) ? Vana.crystal : Vana.ember)
+                        Text(s.ready
+                             ? String(format: "%.1f GB free on this disk", s.freeGB)
+                             : String(format: "%.1f GB free · about %.0f GB needed",
+                                      s.freeGB, s.needGB))
+                            .font(.caption)
+                            .foregroundStyle((s.spaceOK || s.ready) ? Vana.text : Vana.ember)
+                    }
+
+                    if !s.spaceOK && !s.ready {
+                        Text(s.belowFloor
+                             ? "Not enough room to install a server. It needs roughly \(Int(s.needGB)) GB — "
+                               + "about 5 GB of source, 3 GB of build output, and headroom for the "
+                               + "database and the compiler. Free up space, then set up."
+                             : "Below the recommended \(Int(s.needGB)) GB but above the "
+                               + "\(Int(s.floorGB)) GB minimum. Setup will run, and may run tight.")
+                            .font(.caption2).foregroundStyle(Vana.ember)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if s.ready {
+                        row("Server", s.running
+                            ? "running · \(s.up.count) of 4 processes"
+                            : "built and ready — Play will start it")
+                    } else {
+                        row("Still to do", s.todo)
+                        Text("Setting up downloads Homebrew packages and the LandSandBoat source, "
+                             + "imports the game database and compiles the server. Budget half an "
+                             + "hour or more the first time; it can be re-run if it stops.")
+                            .font(.caption2).foregroundStyle(Vana.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    row("Location", s.root)
+
+                    HStack(spacing: 8) {
+                        if !s.ready {
+                            Button(s.source ? "Continue setup" : "Set up server") {
+                                local.setup(force: s.belowFloor && forceSetup,
+                                            log: { runner.appendLine($0) })
+                            }
+                            .disabled(local.busy || (s.belowFloor && !forceSetup))
+                            if s.belowFloor {
+                                Toggle("Set up anyway", isOn: $forceSetup)
+                                    .toggleStyle(.checkbox).font(.caption2)
+                                    .foregroundStyle(Vana.muted)
+                            }
+                        }
+                        if s.ready {
+                            Button(s.running ? "Stop server" : "Start server") {
+                                if s.running { local.stop(log: { runner.appendLine($0) }) }
+                                else { local.start(log: { runner.appendLine($0) }) }
+                            }
+                            .disabled(local.busy)
+                        }
+                        Button("Refresh") { local.refresh() }.disabled(local.busy)
+                    }
+                    .padding(.top, 2)
+                } else {
+                    Text("checking what is installed…")
+                        .font(.caption2).foregroundStyle(Vana.muted)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: 500, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.25)))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Vana.stroke))
+            .padding(.horizontal, 34).padding(.top, 14)
+        }
     }
 
     /// Say plainly when the chosen renderer is not one you can actually play on.
@@ -313,6 +433,10 @@ struct ContentView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 14) {
+            serverPicker
+
+            Rectangle().fill(Vana.stroke).frame(height: 1)
+
             HStack {
                 Text("ACCOUNT").font(.caption).tracking(2.5).foregroundStyle(Vana.gold)
                 Spacer()
@@ -449,6 +573,35 @@ struct ContentView: View {
         let server = store.selected ?? Server.builtins[0]
         guard !server.host.isEmpty else {
             notice = "\(server.name) has no login host set."
+            return
+        }
+
+        // The local world has to be running before the client can reach it. Start it here rather
+        // than making the user press two buttons in the right order — but never build from Play,
+        // because a first build is a half-hour job the user should be choosing deliberately.
+        if server.local {
+            guard let s = local.status, s.ready else {
+                notice = local.status == nil
+                    ? "Still checking the local server."
+                    : "The local server is not set up yet — press “Set up server”."
+                return
+            }
+            if !s.running {
+                local.start(log: { runner.appendLine($0) }) { ok in
+                    if ok { launchClient(i, server: server) }
+                    else { notice = "The local server did not start — see the log." }
+                }
+                return
+            }
+        }
+        launchClient(i, server: server)
+    }
+
+    private func launchClient(_ i: Install, server: Server) {
+        // A world the install has no boot profile for — the local one, on every machine — needs
+        // that file to exist before anything can be written into it.
+        if !Credentials.ensureProfile(server.bootProfile, in: i) {
+            notice = "Could not create config/boot/\(server.bootProfile)."
             return
         }
         if !user.isEmpty, !pass.isEmpty {

@@ -55,6 +55,31 @@ enum Credentials {
 
     // MARK: - Ashita boot profile
 
+    /// Make sure `config/boot/<profile>` exists, seeding it from a profile that already works.
+    ///
+    /// A boot profile is mostly graphics and input settings that have nothing to do with which
+    /// server it points at, so copying the configured one and letting `apply` rewrite the single
+    /// `command` line gives a new world the same working setup rather than Ashita's bare example.
+    /// Needed for the local server, whose profile no HorizonXI install ships.
+    @discardableResult
+    static func ensureProfile(_ profile: String, in install: Install) -> Bool {
+        let fm = FileManager.default
+        let dir = install.gameDir.appendingPathComponent("config/boot")
+        let target = dir.appendingPathComponent(profile)
+        if fm.fileExists(atPath: target.path) { return true }
+
+        for seed in ["horizonxi.ini", "example-privateserver.ini", "example.ini"] {
+            let src = dir.appendingPathComponent(seed)
+            guard fm.fileExists(atPath: src.path),
+                  let text = try? String(contentsOf: src, encoding: .utf8) else { continue }
+            guard (try? text.write(to: target, atomically: true, encoding: .utf8)) != nil
+            else { continue }
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+            return true
+        }
+        return false
+    }
+
     /// Rewrite the `command = ...` line of the Ashita boot profile with these credentials.
     /// Returns false if the profile is missing or unwritable.
     @discardableResult

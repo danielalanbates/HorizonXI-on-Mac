@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "max.json plus screen resolution pinned to 4K (3840x2160, registry 0001/0002). The 30fps",
+    "target is specifically 'at 4K at max settings' -- this is the profile that actually tests",
+    "that claim instead of the windowed-default resolution every other profile here runs at."
+  ],
+  "addons": "full",
+  "registry": {
+    "0000": 6,
+    "0001": 3840,
+    "0002": 2160,
+    "0003": 4096,
+    "0004": 4096,
+    "0011": 2,
+    "0018": 2,
+    "0019": 1,
+    "0021": 1,
+    "0029": 20,
+    "0007": 1,
+    "0035": 1
+  }
+}

@@ -11,7 +11,9 @@ struct PerfSettings: Codable {
     /// them; leaving them on costs frames.
     var silenceWineDebug = true
     /// Metal HUD overlay — used to actually measure the frame rate rather than guess at it.
-    var metalHUD = false
+    /// On by default: the whole point of testing against the local server is measuring fps,
+    /// not guessing at it from how smooth it looks.
+    var metalHUD = true
     /// Keep the game off macOS App Nap / timer coalescing when it loses focus.
     var disableAppNap = true
     /// Large address aware heap hint for the 32-bit client.

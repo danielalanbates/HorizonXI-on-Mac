@@ -11,7 +11,7 @@
 
 ## What ships today
 
-`scripts/package.sh` builds `HorizonXI-on-Mac-<version>.dmg`. As of 2.2 it is **signed with
+`scripts/package.sh` builds `FFXI-on-Mac-<version>.dmg`. As of 2.2 it is **signed with
 the Developer ID, notarised by Apple and stapled**, so a non-technical user can download it,
 double-click, and drag to Applications with no Gatekeeper warning and no terminal.
 
@@ -20,7 +20,7 @@ Verified: `spctl -a -t open --context context:primary-signature -v` →
 
 Inside:
 
-- `HorizonXI-on-Mac.app` — the launcher. Has the standard account section: **username,
+- `FFXI-on-Mac.app` — the launcher. Has the standard account section: **username,
   password, and "Remember me"**. The password goes to the macOS Keychain
   (`Credentials.swift`, service `org.batesai.horizonxi-on-mac`) and is written into Ashita's
   boot profile only at launch time, `chmod 600`. It is never stored in a plist or the repo.

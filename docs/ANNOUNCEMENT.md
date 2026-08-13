@@ -15,7 +15,7 @@ Every other FFXI-on-a-non-Windows-machine project — `Windower/Lumoria`, MattyG
 
 ## What you get
 
-- **`HorizonXI-on-Mac.app`** — a launcher with account login, a preflight check for every part of
+- **`FFXI-on-Mac.app`** — a launcher with account login, a preflight check for every part of
   the setup that can silently break, one-click prefix repair, graphics settings and a live log.
   Your password goes in the macOS Keychain, never into a config file this project ships.
 - **`scripts/install.sh`** — bare Wine prefix to running game, no GUI needed.

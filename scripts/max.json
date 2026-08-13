@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "Every FFXI graphics setting at its maximum. The 30 fps target is only meaningful at max",
+    "settings -- the game is from 2002 and should not need anything turned down to run well.",
+    "The stock config is close but not actually maxed: background resolution ships at 2048",
+    "(4096 is the top), sound channels at the lowest 12, and mip mapping unset.",
+    "Values decoded from the [ffxi.registry] documentation in the Ashita ini."
+  ],
+  "addons": "full",
+  "registry": {
+    "0000": 6,
+    "0003": 4096,
+    "0004": 4096,
+    "0011": 2,
+    "0018": 2,
+    "0019": 1,
+    "0021": 1,
+    "0029": 20,
+    "0007": 1,
+    "0035": 1
+  }
+}

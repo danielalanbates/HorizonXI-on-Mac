@@ -1,0 +1,79 @@
+diff --git a/rosetta_loader/src/main.cpp b/rosetta_loader/src/main.cpp
+index 86199e6..6ecab2f 100644
+--- a/rosetta_loader/src/main.cpp
++++ b/rosetta_loader/src/main.cpp
+@@ -971,6 +971,18 @@ int main(int argc, char* argv[]) try {
+         cooperative = true;
+         ++argi;
+     }
++    // --attach <pid>: hook a process that is ALREADY running instead of launching one.
++    //
++    // Needed whenever the process doing the x87 work is not the one we can launch. Under wine
++    // that is the common case: the game is started by a launcher (Ashita) and runs in a child
++    // process, so wrapping the launcher patches the wrong process and changes nothing. The
++    // target must have been started with ROSETTA_DISABLE_AOT=1 in its environment, or Rosetta
++    // never calls translate_insn and there is nothing to hook.
++    pid_t attachPid = 0;
++    if (argi + 1 < argc && std::string_view(argv[argi]) == "--attach") {
++        attachPid = static_cast<pid_t>(atoi(argv[argi + 1]));
++        argi += 2;
++    }
+     // Sampling profiler options; X87_SAMPLE and friends override these below.
+     sidecar::SamplerConfig samplerCfg;
+     while (argi < argc) {
+@@ -1003,7 +1015,7 @@ int main(int argc, char* argv[]) try {
+         ++argi;
+     }
+ 
+-    if (argi >= argc) {
++    if (argi >= argc && attachPid == 0) {
+         std::fprintf(stderr, "%s: missing <program> argument (try --help)\n", argv[0]);
+         return 2;
+     }
+@@ -1042,13 +1054,25 @@ int main(int argc, char* argv[]) try {
+         setenv(X87_COOP_ENV, coopName.c_str(), 1);
+     }
+ 
++    if (attachPid != 0) {
++        parentPid = attachPid;
++        if (!dbg.attach(attachPid)) {
++            fprintf(stdout, "Failed to attach to pid %d (needs the debugger entitlement or root)\n",
++                    attachPid);
++            return 1;
++        }
++        printf("[rosettax87] attached to running pid %d\n", attachPid);
++        fflush(stdout);
++        needsInitBarrier = false;  // already past Rosetta init, exactly like cooperative
++    }
++
+     int syncPipe[2];
+-    if (pipe(syncPipe) == -1) {
++    if (attachPid == 0 && pipe(syncPipe) == -1) {
+         fprintf(stdout, "pipe: %s\n", strerror(errno));
+         return 1;
+     }
+ 
+-    pid_t child = fork();
++    pid_t child = attachPid != 0 ? 0 : fork();
+ 
+     if (child == -1) {
+         fprintf(stdout, "fork: %s\n", strerror(errno));
+@@ -1071,7 +1095,9 @@ int main(int argc, char* argv[]) try {
+ 
+     // CHILD: double-fork so the sidecar reparents to launchd. (In default mode
+     // this also breaks the ptrace PID cycle that crashes Terminal's
+-    // process-tree walker.)
++    // process-tree walker.) Attach mode has no child to wait on and serves from
++    // this process directly.
++    if (attachPid == 0) {
+     close(syncPipe[0]);
+     pid_t intermediatePid = getpid();  // valid in C; G inherits via fork copy
+     pid_t grandchild = fork();
+@@ -1153,6 +1179,7 @@ int main(int argc, char* argv[]) try {
+         }
+         VERBOSE_LOG("Attached successfully\n");
+     }
++    }  // end launch-only attach setup
+ 
+     // Code ranges the M2 install patched, for the tracee to i-cache-invalidate
+     // (cooperative mode only — see x87_coop_reply_t). Populated during M2.

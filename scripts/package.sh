@@ -4,7 +4,7 @@
 #   ./scripts/package.sh [output-dir]
 #
 # What ships in the .dmg:
-#   HorizonXI-on-Mac.app   the launcher (preflight, repair, account, play, renderer)
+#   FFXI-on-Mac.app   the launcher (preflight, repair, account, play, renderer)
 #                          — the DXVK + d3d8to9 DLLs ride inside it, so the Metal
 #                            renderer needs no separate download
 #   START HERE.md          the non-technical setup guide
@@ -26,17 +26,17 @@ STAGE="$(mktemp -d)"
 # Build first, then read the version -- otherwise the DMG is named after the previous build.
 "$REPO/app/bundle.sh" >/dev/null
 VERSION="$(/usr/bin/plutil -extract CFBundleShortVersionString raw \
-    "$REPO/app/build/HorizonXI-on-Mac.app/Contents/Info.plist" 2>/dev/null || echo 1.0)"
-DMG="$OUT/HorizonXI-on-Mac-$VERSION.dmg"
+    "$REPO/app/build/FFXI-on-Mac.app/Contents/Info.plist" 2>/dev/null || echo 1.0)"
+DMG="$OUT/FFXI-on-Mac-$VERSION.dmg"
 
 mkdir -p "$OUT"
-cp -R "$REPO/app/build/HorizonXI-on-Mac.app" "$STAGE/"
+cp -R "$REPO/app/build/FFXI-on-Mac.app" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 cp "$REPO/README.md"     "$STAGE/README.md"
 cp "$REPO/docs/SETUP.md" "$STAGE/START HERE.md"
 
 rm -f "$DMG"
-hdiutil create -quiet -volname "HorizonXI on Mac" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+hdiutil create -quiet -volname "FFXI on Mac" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 rm -rf "$STAGE"
 
 echo "built $DMG"
@@ -45,9 +45,9 @@ echo "To ship it, sign and notarise — an unsigned build is blocked on every ot
 echo
 echo "  # do this OUTSIDE iCloud. iCloud attaches extended attributes and codesign refuses"
 echo "  # with 'resource fork, Finder information, or similar detritus not allowed'."
-echo "  ditto --norsrc --noextattr --noacl <app> /tmp/pkg/HorizonXI-on-Mac.app"
+echo "  ditto --norsrc --noextattr --noacl <app> /tmp/pkg/FFXI-on-Mac.app"
 echo "  codesign --force --deep --options runtime --timestamp \\"
-echo "      -s 'Developer ID Application: ...' /tmp/pkg/HorizonXI-on-Mac.app"
+echo "      -s 'Developer ID Application: ...' /tmp/pkg/FFXI-on-Mac.app"
 echo "  # ^ pass the certificate SHA-1, not the name, if two Developer ID certs are installed"
 echo "  hdiutil create ... && codesign --force --timestamp -s '...' <dmg>"
 echo "  xcrun notarytool submit <dmg> --keychain-profile batesai-notary --wait"

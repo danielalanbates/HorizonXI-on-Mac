@@ -67,7 +67,7 @@ the user for CrossOver, and rather than shipping a wine that is 5× slower.
 
 ## What the package should contain
 
-- `HorizonXI-on-Mac.app` — the launcher, with the account fields it already has
+- `FFXI-on-Mac.app` — the launcher, with the account fields it already has
 - our `d3d9.dll` (patched DXVK) and `d3d8to9.dll`, inside the bundle
 - a first-run step that downloads and verifies a pinned Sikarugir engine
 - a first-run step that points at, or runs, HorizonXI's own client installer for the game data

@@ -7,6 +7,21 @@ freely redistributable; neither is modified.
 | --- | --- | --- | --- |
 | `d3d8to9.dll` | [crosire/d3d8to9](https://github.com/crosire/d3d8to9) | v1.15.1 | BSD 3-Clause |
 | `dxvk-1.10.3-x32-d3d9.dll` | [doitsujin/dxvk](https://github.com/doitsujin/dxvk) `x32/d3d9.dll` | v1.10.3 | zlib |
+| `x87sidecar_entitled` | [athei/x87sidecar](https://github.com/athei/x87sidecar) `rosetta_loader` | built 2026-08-12 | MIT |
+
+## x87sidecar_entitled
+
+Patches Rosetta 2's x87 emulation with a native ARM64 JIT — FFXI's 32-bit client runs its
+floating-point math through x87, which Rosetta emulates at roughly 1% of native speed (see
+`docs/X87-WALL.md`); this is the fix, worth 11.3→28.5 fps in-world at max settings. Built from
+source with one local patch, `../patches/x87sidecar-attach-pid.patch`, adding an `--attach <pid>`
+mode: without it the sidecar can only patch a process it launches itself, but Ashita runs the
+actual game in a child process (`horizon-loader.exe`) that a launch-time wrap never reaches.
+
+Built with the `get-task-allow` and `com.apple.security.cs.debugger` entitlements
+(`x87sidecar-entitlements.plist`) required to attach to another process at all. `bundle.sh`
+re-signs it individually with that plist *after* the app's own deep-sign, which otherwise
+overwrites it with the app's entitlements (none) and silently breaks attaching.
 
 **Why these exact versions.** DXVK 2.x and 3.x require Vulkan 1.3 and the `geometryShader`
 feature. Metal has no geometry shaders, so MoltenVK can never expose one and those releases can

@@ -7,7 +7,7 @@ missing at any moment.
 
 | Piece | Where it comes from | Roughly |
 | --- | --- | --- |
-| **HorizonXI on Mac** (this launcher) | the `.dmg` on the releases page | 5 MB |
+| **FFXI on Mac** (this launcher) | the `.dmg` on the releases page | 5 MB |
 | **A Wine wrapper** | see below | ~1 GB |
 | **The HorizonXI game client** | HorizonXI's own installer | ~27 GB |
 
@@ -24,7 +24,7 @@ they should not be.
 
 ## Steps
 
-1. **Install the launcher.** Open the `.dmg`, drag *HorizonXI on Mac* to Applications, and open
+1. **Install the launcher.** Open the `.dmg`, drag *FFXI on Mac* to Applications, and open
    it. The download is signed with a Developer ID and notarised by Apple, so it opens with no
    warning and no right-click trick.
 2. **Point it at your wrapper.** The launcher looks in `/Applications`, `~/Applications` and every
@@ -54,3 +54,32 @@ The **World** dropdown lists the FFXI private servers this project knows about, 
 Only HorizonXI is verified here — its login host is the one that has actually been tested. For any
 other server, fill in the login host from that server's own installer; the field appears under the
 dropdown as soon as you pick an unverified world.
+
+## Running your own server
+
+Picking **Local server** in that dropdown means not logging into anyone else's world: the launcher
+builds [LandSandBoat](https://github.com/LandSandBoat/server) on this Mac and the client connects
+to `127.0.0.1`. You still need the FFXI client itself — a server is not a game.
+
+Press **Set up server** and the launcher will, in order: install Apple's command line tools and
+Homebrew if they are missing, `brew install` LandSandBoat's dependencies (cmake, luajit, zeromq,
+openssl, mariadb, pkgconf), clone the source, create the database and import the schema, and
+compile the four server processes. Budget half an hour or more the first time. Every step is
+skipped if it is already done, so if it stops you press the button again rather than starting over.
+
+**Disk space.** It needs about 12 GB — roughly 5 GB of source and git history, 3 GB of build
+output, and headroom for the database and the compiler's temporaries. The launcher shows what is
+free before you start and refuses to begin a build below 9 GB, because running the disk to zero
+half way through a compile is a worse failure than not starting one.
+
+After setup, **Play** starts the server if it is not already up, then launches the client. The
+first login with a new account name creates that account.
+
+Everything lives in `~/Games/lsb`, and all of it is the shell script
+[`scripts/lsb-server.sh`](../scripts/lsb-server.sh) — run `./lsb-server.sh status|setup|start|stop`
+by hand if you would rather watch it work in a terminal.
+
+Two things this changes about the client, both only in your local copy: the server accepts the
+xiloader version that ships with the HorizonXI client rather than the newer one LandSandBoat
+expects, and the client-version lock is turned off. Both are needed for a client built for one
+server to talk to another, and neither is something you would do to a server other people use.

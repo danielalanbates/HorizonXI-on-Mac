@@ -1,7 +1,7 @@
-# HorizonXI on Mac
+# FFXI on Mac
 
-Running **HorizonXI** (Final Fantasy XI private server) natively on Apple Silicon macOS under
-Wine — no virtual machine.
+Running Final Fantasy XI private servers — **HorizonXI**, CatsEyeXI, Eden, and others — natively
+on Apple Silicon macOS under Wine, no virtual machine.
 
 > ## 📣 Status — playable, correct, and slow
 > The Metal renderer is **correct** — full textures, fog, UI. The frame rate is not: ~24 fps in
@@ -131,13 +131,13 @@ Windows install) · `dgVoodoo2` and the `winefix` addon, which the Linux guides 
 
 ## The launcher
 
-`HorizonXI-on-Mac.app` — account login (password in the Keychain, written into Ashita's boot
+`FFXI-on-Mac.app` — account login (password in the Keychain, written into Ashita's boot
 profile at launch and never into this repo), a preflight check for every precondition that has
 silently broken before, one-click prefix repair, graphics settings, and a live log.
 
 ```sh
 ./app/bundle.sh          # build the .app (no Xcode needed — Command Line Tools only)
-./scripts/package.sh     # build dist/HorizonXI-on-Mac-<version>.dmg
+./scripts/package.sh     # build dist/FFXI-on-Mac-<version>.dmg
 ```
 
 ![Main menu](docs/img/main-menu.png)
@@ -188,7 +188,7 @@ screenshot, kill — from one command.
 - [x] Login and server connection
 - [x] Ashita injection, POL plugins, DAT overlays, macro import from a Windows install
 - [x] `install.sh` — bare prefix to running game, no GUI
-- [x] `HorizonXI-on-Mac.app` — launcher with preflight, repair, account login
+- [x] `FFXI-on-Mac.app` — launcher with preflight, repair, account login, world picker
 - [x] `package.sh` — distributable disk image, signed and notarised
 - [x] **Renderer on Metal, rendering correctly** — fog fix + Metal feature relaxations
 - [x] **Find out what actually limits the frame rate** — it is not the renderer

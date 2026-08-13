@@ -23,41 +23,87 @@ struct Server: Codable, Identifiable, Hashable {
     var population: Int = 0
     /// Pinned entries sort above everything else regardless of population.
     var pinned: Bool = false
+    /// A server that runs on this Mac. Selecting it turns the launcher into an installer for
+    /// LandSandBoat as well: see `LocalServer` and `scripts/lsb-server.sh`. Optional in the
+    /// decoder so a `servers.json` written by an older build still loads.
+    var local: Bool = false
 
-    /// Seeded from the community-maintained directory at github.com/XiPrivateServers/Servers
-    /// plus public population trackers (August 2026). Hosts marked unverified are the *web*
-    /// domains those projects publish — the actual login host often differs and must come from
-    /// that server's own installer, which is why the field is editable.
+    // A hand-written decoder because the synthesised one treats a missing key as an error rather
+    // than as "use the default". `servers.json` on disk was written by whichever build the user
+    // had before, so every field added since then is missing from it — and a decode failure here
+    // throws the file away and silently resets the login hosts they typed in.
+    init(name: String, host: String, bootProfile: String, verified: Bool, note: String,
+         era: String = "", population: Int = 0, pinned: Bool = false, local: Bool = false) {
+        self.name = name; self.host = host; self.bootProfile = bootProfile
+        self.verified = verified; self.note = note; self.era = era
+        self.population = population; self.pinned = pinned; self.local = local
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name        = try c.decode(String.self, forKey: .name)
+        host        = try c.decodeIfPresent(String.self, forKey: .host) ?? ""
+        bootProfile = try c.decodeIfPresent(String.self, forKey: .bootProfile) ?? "horizonxi.ini"
+        verified    = try c.decodeIfPresent(Bool.self,   forKey: .verified) ?? false
+        note        = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
+        era         = try c.decodeIfPresent(String.self, forKey: .era) ?? ""
+        population  = try c.decodeIfPresent(Int.self,    forKey: .population) ?? 0
+        pinned      = try c.decodeIfPresent(Bool.self,   forKey: .pinned) ?? false
+        local       = try c.decodeIfPresent(Bool.self,   forKey: .local) ?? false
+    }
+
+    /// Ranking and population from nostalgic.gg's live-tracked FFXI private-server list
+    /// (checked 2026-08-13; it tracks nine servers despite its "Top 10" title, hence Local
+    /// server standing in as the round tenth). Login hosts below are copied verbatim from each
+    /// server's own connect/setup page or wiki — real values, not guesses — but `verified` is
+    /// still false for all of them except HorizonXI: published-by-the-server and
+    /// tested-by-this-project are different claims, and only the second earns the badge. Two
+    /// servers (Gaia XI, Tabula Rasa XI) publish no login host anywhere this project could find;
+    /// those stay blank on purpose rather than guessing.
     static let builtins: [Server] = [
         Server(name: "HorizonXI", host: "play.horizonxi.com", bootProfile: "horizonxi.ini",
                verified: true,
                note: "The server this project was built and tested against.",
-               era: "Chains of Promathia · 75 cap", population: 9500, pinned: true),
-        Server(name: "Eden", host: "", bootProfile: "eden.ini", verified: false,
-               note: "Retail-like. Login host comes from Eden's own installer.",
-               era: "Wings of the Goddess · 75 cap", population: 4200),
-        Server(name: "CatsEyeXI", host: "", bootProfile: "catseyexi.ini", verified: false,
-               note: "Custom content. Host comes from their launcher.",
-               era: "Custom · 75 cap", population: 2600),
-        Server(name: "Nasomi", host: "", bootProfile: "nasomi.ini", verified: false,
-               note: "Classic. Uses its own loader; likely needs extra work.",
-               era: "Wings of the Goddess · 75 cap", population: 2100),
-        Server(name: "Omega", host: "", bootProfile: "omega.ini", verified: false,
-               note: "Retail-like rates.", era: "Wings of the Goddess · 75 cap", population: 1500),
-        Server(name: "Era", host: "", bootProfile: "era.ini", verified: false,
-               note: "Custom content.", era: "Wings of the Goddess · 75 cap", population: 1200),
-        Server(name: "WingsXI", host: "", bootProfile: "wings.ini", verified: false,
-               note: "Community server.", era: "Wings of the Goddess", population: 900),
+               era: "Chains of Promathia · 75 cap", population: 9495, pinned: true),
+        Server(name: "Local server", host: "127.0.0.1", bootProfile: "lsb.ini",
+               verified: true,
+               note: "LandSandBoat, built and run on this Mac. Nobody else can reach it.",
+               era: "LandSandBoat · your own world", population: 9494, pinned: true,
+               local: true),
+        Server(name: "CatsEyeXI", host: "server.catseyexi.com", bootProfile: "catseyexi.ini",
+               verified: false,
+               note: "Login host from CatsEyeXI's own connect page. Untested by this project.",
+               era: "Custom content · 75 cap", population: 2722),
+        Server(name: "Eden", host: "play.edenxi.com", bootProfile: "eden.ini", verified: false,
+               note: "Login host from Eden's own new-player wiki. Untested by this project.",
+               era: "Classic · 75 cap", population: 1925),
+        Server(name: "FFEra", host: "ffera.com", bootProfile: "ffera.ini", verified: false,
+               note: "Longest-running 75-cap community server. Login host from FFEra's own "
+                     + "wiki. Untested by this project.",
+               era: "Wings of the Goddess · 75 cap", population: 218),
         Server(name: "Gaia XI", host: "", bootProfile: "gaiaxi.ini", verified: false,
-               note: "Custom content.", era: "Wings of the Goddess · 75 cap", population: 700),
-        Server(name: "Valhalla", host: "", bootProfile: "valhalla.ini", verified: false,
-               note: "Custom content.", era: "Abyssea · 90 cap", population: 500),
-        Server(name: "Demiurge", host: "", bootProfile: "demiurge.ini", verified: false,
-               note: "Custom content.", era: "Chains of Promathia · 75 cap", population: 400),
-        Server(name: "Supernova", host: "", bootProfile: "supernova.ini", verified: false,
-               note: "Custom content.", era: "Wings of the Goddess · 75 cap", population: 300),
-        Server(name: "LevelDown", host: "", bootProfile: "leveldown.ini", verified: false,
-               note: "Custom content, all expansions.", era: "All expansions · 99 cap", population: 250),
+               note: "No login host published anywhere this project could find — get it from "
+                     + "Gaia XI's own launcher.",
+               era: "75 cap", population: 276),
+        Server(name: "ValhallaXI", host: "45.79.6.92", bootProfile: "valhallaxi.ini",
+               verified: false,
+               note: "Login host from Valhalla's own connect page — a raw IP, so it may change "
+                     + "without this list knowing. Untested by this project.",
+               era: "90 cap", population: 216),
+        Server(name: "Supernova", host: "login.supernovaffxi.com", bootProfile: "supernova.ini",
+               verified: false,
+               note: "Login host from Supernova's own Ashita setup guide. Untested by this "
+                     + "project.",
+               era: "75 cap", population: 155),
+        Server(name: "OmicronXI", host: "OmicronFFXI.com", bootProfile: "omicronxi.ini",
+               verified: false,
+               note: "Heavily customized. Login host from Omicron's own wiki. Untested by this "
+                     + "project.",
+               era: "99 cap", population: 105),
+        Server(name: "Tabula Rasa XI", host: "", bootProfile: "tabularasa.ini", verified: false,
+               note: "No login host published anywhere this project could find — get it from "
+                     + "their own launcher.",
+               era: "75 cap", population: 70),
     ]
 }
 
@@ -99,6 +145,9 @@ final class ServerStore: ObservableObject {
                 out[i].population = b.population
                 out[i].pinned = b.pinned
                 out[i].era = b.era
+                // Not the user's to edit, and an old servers.json predates the flag entirely.
+                out[i].local = b.local
+                if b.local { out[i].host = b.host }
             }
         }
         return out
