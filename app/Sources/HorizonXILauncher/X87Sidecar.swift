@@ -65,6 +65,13 @@ enum X87Sidecar {
             await log("!! x87sidecar: horizon-loader.exe never appeared, gave up after 40s")
             return nil
         }
+        // Ashita-cli.exe is still writing into this same process's memory for a moment after
+        // the pid first appears -- attaching immediately races its injection and intermittently
+        // corrupts it ("wine client error: write: Bad file descriptor", "Injection failed!").
+        // Ashita's own injection is quick; giving it a few seconds' head start avoids the race
+        // without meaningfully delaying the JIT (Rosetta has not finished cold-JITing the first
+        // blocks in this window anyway).
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
         let p = Process()
         p.executableURL = bin
         p.arguments = ["--attach", String(pid)]

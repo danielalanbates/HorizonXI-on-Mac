@@ -16,6 +16,13 @@ struct PerfSettings: Codable {
     var metalHUD = true
     /// Keep the game off macOS App Nap / timer coalescing when it loses focus.
     var disableAppNap = true
+    /// FFXI limits itself to 60/n fps, n=2 by default (30 fps) -- but under wine the limiter
+    /// overshoots and the client spends more than the 33.3ms budget per frame even while only
+    /// ~52% busy. Our d3d9.dll patches the divisor at start-up (see docs/PERFORMANCE.md);
+    /// FFXI_FPS_DIVISOR=1 measured 28.5 -> 30.3 fps median in-world with x87sidecar already on.
+    /// It does not help scenes that are genuinely compute-bound below the cap, only the
+    /// self-throttling -- but it never hurts, so it is on by default.
+    var fpsDivisorOne = true
     /// Large address aware heap hint for the 32-bit client.
     var largeAddressAware = true
     /// Extra environment, one KEY=VALUE per line, for experiments.
@@ -56,6 +63,9 @@ struct PerfSettings: Codable {
         env["MVK_CONFIG_FAST_MATH_ENABLED"] = "1"
         env["MVK_CONFIG_USE_COMMAND_POOLING"] = "1"
         if metalHUD { env["MTL_HUD_ENABLED"] = "1" }
+        // Only our patched d3d9.dll reads this; harmless (silently ignored) on the other
+        // renderer pathways.
+        if fpsDivisorOne { env["FFXI_FPS_DIVISOR"] = "1" }
         if disableAppNap { env["LSAppNapIsDisabled"] = "1" }
         if largeAddressAware { env["WINE_LARGE_ADDRESS_AWARE"] = "1" }
         for (k, v) in renderer.environment { env[k] = v }

@@ -175,6 +175,11 @@ def main():
                     for pid, _, comm in [line.strip().partition(" ")]
                     if "horizon-loader" in comm.lower()]
             if pids:
+                # Ashita-cli.exe is still writing into this same process's memory for a moment
+                # after the pid first appears -- attaching immediately races its injection and
+                # intermittently corrupts it ("wine client error: write: Bad file descriptor",
+                # "Injection failed!"). Give it a few seconds' head start.
+                time.sleep(3)
                 alog = open(f"{b.RESULTS}/{args.tag}.sidecar.log", "wb")
                 subprocess.Popen([attach, "--attach", str(pids[0])],
                                  stdout=alog, stderr=subprocess.STDOUT,
