@@ -81,8 +81,18 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            if remember, !user.isEmpty { pass = Credentials.password(for: user) }
             if store.selected?.local == true { local.refresh() }
+            // SecItemCopyMatching can block on a macOS keychain-access prompt -- every rebuild
+            // re-signs the app (a new ad-hoc signature until this ships with a stable Developer
+            // ID), which invalidates the keychain ACL and re-triggers that prompt. Reading it
+            // synchronously here, inside onAppear, blocked the main thread before the window
+            // could even be presented, which looked exactly like the app hanging on launch.
+            guard remember, !user.isEmpty else { return }
+            let account = user
+            Task.detached(priority: .userInitiated) {
+                let found = Credentials.password(for: account)
+                await MainActor.run { pass = found }
+            }
         }
         .onChange(of: store.selectedID) { _ in
             if store.selected?.local == true { local.refresh() }
@@ -445,8 +455,11 @@ struct ContentView: View {
                     .help("Rescan for installs")
             }
 
-            field("Account name", text: $user, secure: false)
-            field("Password", text: $pass, secure: true)
+            // The local server auto-creates its own account on first login (see LocalServer.swift)
+            // -- there is no real account to type here, so the fields are disabled rather than
+            // left editable and silently ignored.
+            field("Account name", text: $user, secure: false, disabled: store.selected?.local == true)
+            field("Password", text: $pass, secure: true, disabled: store.selected?.local == true)
             Toggle("Remember me", isOn: $remember)
                 .toggleStyle(.checkbox).font(.caption).foregroundStyle(Vana.muted)
                 .help("Stored in the macOS Keychain, never in a file in this project.")
@@ -525,17 +538,20 @@ struct ContentView: View {
         }
     }
 
-    private func field(_ title: String, text: Binding<String>, secure: Bool) -> some View {
+    private func field(_ title: String, text: Binding<String>, secure: Bool,
+                       disabled: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title.uppercased()).font(.caption2).tracking(1.5).foregroundStyle(Vana.muted)
             Group {
                 if secure { SecureField("", text: text) } else { TextField("", text: text) }
             }
             .textFieldStyle(.plain)
+            .disabled(disabled)
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.40)))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Vana.crystalDim.opacity(0.5)))
-            .foregroundStyle(Vana.text)
+            .foregroundStyle(disabled ? Vana.muted : Vana.text)
+            .opacity(disabled ? 0.5 : 1)
         }
     }
 

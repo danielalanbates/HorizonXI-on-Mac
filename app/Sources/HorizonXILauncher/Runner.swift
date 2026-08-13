@@ -60,6 +60,7 @@ final class Runner: ObservableObject {
         // to be written before the process starts — and after any wineserver holding the old copy
         // of the registry has exited.
         RendererSetup.apply(perf.renderer, to: install) { [weak self] in self?.appendLine($0) }
+        Self.cleanStaleWineSockets()
         Credentials.applyIniOverrides(perf.renderer.iniOverrides, to: install, profile: profile)
         // The local server is the one everything else here is a test against (see
         // docs/X87-WALL.md and scripts/max4k.json, which this mirrors) -- 4K, every graphics
@@ -86,6 +87,23 @@ final class Runner: ObservableObject {
         Task { [weak self] in
             let p = await X87Sidecar.attachWhenReady { [weak self] in self?.appendLine($0) }
             self?.x87Proc = p
+        }
+    }
+
+    /// `RendererSetup.apply` just did `wineserver -k` and waited for it to actually exit, so any
+    /// `server-*` socket directory left under `/tmp/.wine-<uid>/` at this point belongs to a
+    /// wineserver that is no longer running -- not necessarily this launch's, since the same
+    /// crash or force-kill that orphans one can orphan others. A stale socket there makes the
+    /// *next* launch's injection intermittently corrupt itself ("wine client error: write: Bad
+    /// file descriptor", "Injection failed!") without ever touching wine's own cleanup path,
+    /// because Ashita-cli connects to whatever socket file it finds rather than starting fresh.
+    /// This app is the only wine user on the machine, so clearing all of them here is safe.
+    private static func cleanStaleWineSockets() {
+        let dir = URL(fileURLWithPath: "/tmp/.wine-\(getuid())")
+        guard let kids = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+        else { return }
+        for kid in kids where kid.lastPathComponent.hasPrefix("server-") {
+            try? FileManager.default.removeItem(at: kid)
         }
     }
 
