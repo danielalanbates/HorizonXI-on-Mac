@@ -12,13 +12,73 @@ struct AddonSuite {
         var name: String
         var isPlugin: Bool
         var enabled: Bool
+        /// What the addon says about itself. Read out of its own Lua header rather than written
+        /// here, so it cannot drift from what is installed and is never this project's guess at
+        /// what somebody else's addon does.
+        var desc: String = ""
+        var author: String = ""
+        var version: String = ""
         var id: String { (isPlugin ? "p:" : "a:") + name.lowercased() }
+
+        /// "1.25 · Thorny", or whichever half exists.
+        var byline: String {
+            [version, author].filter { !$0.isEmpty }.joined(separator: " · ")
+        }
+    }
+
+    /// Ashita addons open with a block of `addon.name = '...'` assignments. Pull them out of the
+    /// first few KB; anything past that is code, and reading whole files for a tooltip is waste.
+    static func metadata(ofLuaAt url: URL) -> (desc: String, author: String, version: String) {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return ("", "", "") }
+        defer { try? handle.close() }
+        let head = (try? handle.read(upToCount: 4096)) ?? Data()
+        guard let text = String(data: head, encoding: .utf8)
+                ?? String(data: head, encoding: .isoLatin1) else { return ("", "", "") }
+
+        func field(_ names: [String]) -> String {
+            for line in TextFile.lines(of: text) {
+                let t = line.trimmingCharacters(in: .whitespaces)
+                guard t.hasPrefix("addon.") else { continue }
+                for n in names where t.lowercased().hasPrefix("addon.\(n)") {
+                    guard let eq = t.firstIndex(of: "=") else { continue }
+                    var v = String(t[t.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+                    // strip one layer of quotes, and a trailing comment or semicolon
+                    if let q = v.first, q == "'" || q == "\"" {
+                        v.removeFirst()
+                        if let end = v.firstIndex(of: q) { v = String(v[v.startIndex..<end]) }
+                    }
+                    // Lua line-continuation inside a quoted string leaves a dangling backslash.
+                    while v.hasSuffix("\\") { v.removeLast() }
+                    let cleaned = v.trimmingCharacters(in: .whitespaces)
+                    if !cleaned.isEmpty { return cleaned }
+                }
+            }
+            return ""
+        }
+        return (field(["desc", "description"]), field(["author"]), field(["version"]))
     }
 
     static let pluginsStart = "# --HORIZON_PLUGINS_START--"
     static let pluginsStop  = "# --HORIZON_PLUGINS_STOP--"
     static let addonsStart  = "# --HORIZON_ADDONS_START--"
     static let addonsStop   = "# --HORIZON_ADDONS_STOP--"
+
+    /// Plugins are DLLs and carry no readable metadata block, unlike addons, which declare
+    /// theirs in Lua. Three of these are the plugin's own description string, read verbatim out
+    /// of the binary; the rest are this project's one-line summaries, written only where the
+    /// plugin's job is unambiguous. Anything not listed shows no description rather than a guess.
+    static let pluginDescriptions: [String: String] = [
+        // read out of the binaries themselves
+        "deeps":      "Damage meters for Ashita v4.",
+        "thirdparty": "Enables third-party program usage with Ashita.",
+        "screenshot": "Saves screenshots of the game.",
+        // written here; each states only what the plugin is for
+        "addons":     "Runs Lua addons. Every addon below needs this one loaded.",
+        "minimap":    "Draws a minimap of the current zone.",
+        "nameplate":  "Controls the name plates drawn above characters and monsters.",
+        "packetflow": "Server-side packet handling required by some private servers.",
+        "sequencer":  "Plays and manages animation sequences.",
+    ]
 
     static func scriptURL(_ i: Install) -> URL {
         i.gameDir.appendingPathComponent("scripts/default.txt")
@@ -42,7 +102,8 @@ struct AddonSuite {
                 let name = k.deletingPathExtension().lastPathComponent
                 if name.lowercased() == "winefix" { continue }
                 out.append(Item(name: name, isPlugin: true,
-                                enabled: onPlugins.contains(name.lowercased())))
+                                enabled: onPlugins.contains(name.lowercased()),
+                                desc: pluginDescriptions[name.lowercased()] ?? ""))
             }
         }
         // Addons are directories containing <name>.lua.
@@ -55,8 +116,10 @@ struct AddonSuite {
                 let name = k.lastPathComponent
                 guard fm.fileExists(atPath: k.appendingPathComponent("\(name).lua").path)
                 else { continue }
+                let meta = metadata(ofLuaAt: k.appendingPathComponent("\(name).lua"))
                 out.append(Item(name: name, isPlugin: false,
-                                enabled: onAddons.contains(name.lowercased())))
+                                enabled: onAddons.contains(name.lowercased()),
+                                desc: meta.desc, author: meta.author, version: meta.version))
             }
         }
         return out.sorted { ($0.isPlugin ? 0 : 1, $0.name.lowercased())

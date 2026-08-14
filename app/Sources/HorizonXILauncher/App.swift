@@ -336,6 +336,25 @@ struct ContentView: View {
         }
     }
 
+    /// One addon, with what it says about itself underneath. The description comes out of the
+    /// addon's own Lua header (see `AddonSuite.metadata`), so it always matches what is installed.
+    @ViewBuilder
+    private func addonRow(_ item: Binding<AddonSuite.Item>) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Toggle(item.wrappedValue.name, isOn: item.enabled)
+            let detail = item.wrappedValue.desc
+            let byline = item.wrappedValue.byline
+            if !detail.isEmpty || !byline.isEmpty {
+                Text(detail.isEmpty ? byline
+                                    : (byline.isEmpty ? detail : "\(detail)  ·  \(byline)"))
+                    .font(.caption2).foregroundStyle(Vana.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 2)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
     /// Ashita's plugins and Lua addons, the same set HorizonXI's own launcher manages.
     private var addonsSheet: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -356,14 +375,14 @@ struct ContentView: View {
                     ForEach($addonItems.filter {
                         $0.wrappedValue.isPlugin && addonPolicy.allows($0.wrappedValue.name)
                     }) { $item in
-                        Toggle(item.name, isOn: $item.enabled)
+                        addonRow($item)
                     }
                 }
                 Section("Addons") {
                     ForEach($addonItems.filter {
                         !$0.wrappedValue.isPlugin && addonPolicy.allows($0.wrappedValue.name)
                     }) { $item in
-                        Toggle(item.name, isOn: $item.enabled)
+                        addonRow($item)
                     }
                 }
             }
