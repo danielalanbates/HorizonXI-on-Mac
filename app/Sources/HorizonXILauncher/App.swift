@@ -815,6 +815,10 @@ struct ContentView: View {
             notice = "Could not create config/boot/\(server.bootProfile)."
             return
         }
+        // The client was installed by HorizonXI and carries their logo in its own data. On any
+        // other world, show the stock title screen instead. See Branding.swift.
+        Branding.apply(stockBranding: Branding.wantsStockBranding(server), to: i)
+
         if !user.isEmpty, !pass.isEmpty {
             if !Credentials.apply(user: user, password: pass, to: i,
                                   profile: server.bootProfile, server: server.host) {

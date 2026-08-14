@@ -1,75 +1,84 @@
-# Where the HorizonXI branding comes from
+# The HorizonXI branding, and how to get the stock title screen back
 
-Written 2026-08-14, because the obvious answer is wrong and someone will otherwise try it twice.
+Rewritten 2026-08-14. **Solved.** An earlier version of this file recorded a diagnosis that was
+partly wrong; the wrong parts are kept below, because two of them are traps worth not falling into
+twice.
 
-Daniel plays the local **LandSandBoat** server through this install, and the client still shows the
-HorizonXI logo on the login screen and HorizonXI's wording in the menus. It should show the stock
-Square Enix ones — LSB ships no branding of its own, so "the LandSandBoat version" *is* stock.
+Daniel plays his own **LandSandBoat** world through this install, and the client still showed the
+HorizonXI logo on the title screen. It should show the stock Square Enix one — LSB ships no
+branding of its own, so "the LandSandBoat look" *is* stock.
 
-## What it is not
+| before | after |
+| --- | --- |
+| ![HorizonXI branding on the title screen](img/title-before.png) | ![stock FFXI branding](img/title-after.png) |
 
-The install has an XIPivot DAT-overlay stack, configured in
-`config/pivot/pivot.ini`, and two of the four overlays are HorizonXI's:
+## Where it lives
 
-    [overlays]
-    0=horizonmusic          <- HorizonXI's music replacements (1.3 GB with the rest)
-    1=horizonoverrides      <- 29 DAT files
-    2=remapster             <- third-party UI mod, not server branding
-    3=xiview                <- third-party UI mod, not server branding
+One texture: entry **`menu/titlwin`** in **`ROM/119/50.dat`**, 1024×1024, DXT3.
 
-Disabling the two HorizonXI overlays is the obvious fix, and it does not work. Tested: rewrote
-`pivot.ini` to load only `remapster` and `xiview`, launched, and confirmed from Ashita's log that
-the change took effect —
+![the HorizonXI titlwin texture](img/titlwin-horizonxi.png)
 
-    pivot | addOverlay: 'remapster'
-    pivot | addOverlay: 'xiview'
+Note what else is in that texture. The top ~296 rows are **not branding** — they are the shared
+menu wordlist (`OK`, `はい`, `いいえ`, `戻る`, `キャンセル`, `新規作成`, `コンフィグ` …) and the
+copyright line. Replacing the whole texture, which is the obvious move, deletes the words the
+menus are drawn from. `brandpatch.py` only rewrites rows below that line.
 
-— and the login screen still shows the HORIZON XI logo, unchanged.
+## What did not work, so nobody repeats it
 
-## What it is
+- **Dropping HorizonXI's XIPivot overlays.** `pivot.ini` was rewritten to load only `remapster`
+  and `xiview`, and Ashita's log confirms only those two loaded. The logo was still on screen. The
+  branding is in the base client data HorizonXI's installer wrote, not layered on top of it.
+- **Assuming it is `menu/xilogo`.** There are two copies of that entry (`ROM/0/2.DAT` and
+  `ROM/118/112.DAT`) and **both are the untouched stock logo**. They are the source of the
+  replacement, not the problem.
+- **Timing it from XIPivot's `fopen` log.** `debug_log=true` does log every DAT the client opens,
+  but the client opens all of them in a single burst at startup, seconds before it draws anything.
+  Nothing in the timing separates the title screen from anything else.
+- **Elimination by blanking candidate DATs.** An all-zero DAT of the right length hangs the client
+  before it renders, so "the logo disappeared" and "the game did not start" are the same
+  observation. That probe is archived at `archive/brandprobe.py` rather than deleted, because the
+  overlay-staging and pivot.ini-restore parts of it are sound and reusable.
+- **`ROM/0/4–7.dat`.** An earlier session named these as the menu and title resources because they
+  are lowercase among uppercase siblings and post-date the base install. They *are* modified, but
+  they contain no image entries at all. Modified is not the same as relevant.
 
-The branding is baked into the base client DATs that HorizonXI's own installer wrote, under
-`SquareEnix/FINAL FANTASY XI/ROM*`. The overlay mechanism is layered *on top of* an already-branded
-client, so removing the overlay reveals more branding rather than less.
+## What did work
 
-File dates *do* narrow it down, which is the useful part of this note. The bulk of the tree —
-50,260 DATs — carries one timestamp, 2023-08-15, the client build HorizonXI started from.
-**1,973 DATs under `ROM/` are newer than that**, and those are the ones HorizonXI wrote:
+1. `scripts/datimg.py` scans a DAT for the image-entry signature documented in
+   [XiyanFlowC/FFXIDat](https://github.com/XiyanFlowC/FFXIDat) (`docs/FILE_FORMATS.md`,
+   `FFXIDat/Image.h`) and can decode and export the entries it finds. One gotcha: the DXT fourCC
+   is stored **byte-reversed** — `3TXD` on disk means DXT3 — and without that every decode
+   silently produces nothing.
+2. Restrict to the 2,801 DATs whose mtime post-dates the 2023-08-15 base install (1,608 from
+   HorizonXI's 2023-09-27 install, 1,192 from their 2026-08-08 update), and dump every image in a
+   menu-ish group. `menu/titlwin` is the only branded image in the whole set.
 
-    128 each in ROM/376 .. ROM/382     a whole added content block
-     ~80 each in ROM/17,18,22,24       and neighbours
-       5 in ROM/0, 17 in ROM/1, 9 in ROM/2
+## The fix
 
-`ROM/0` holds the menu and title resources, and its five modified files stand out further:
+`scripts/brandpatch.py` builds an XIPivot overlay called `stockbrand` containing one patched copy
+of `ROM/119/50.dat`:
 
-    ROM/0/4.dat   ROM/0/5.dat   ROM/0/6.dat   ROM/0/7.dat   ROM/0/12.DAT
+- rows below 296 cleared to transparent;
+- the client's own stock `menu/xilogo` artwork composited into the exact bounding box the
+  HorizonXI artwork occupied — measured from the texture, not guessed;
+- re-encoded to DXT3 at **identical byte length**, so the entry's declared `textureSize` still
+  matches.
 
-Four of the five are **lowercase `.dat` among uppercase `.DAT` siblings** — the signature of files
-replaced by hand rather than by the game's own patcher. `ROM/0/12.DAT` is a menu DAT that the
-`xiview` overlay also overrides, which is consistent.
+Nothing under `SquareEnix/` is written to. The whole change is one line in `pivot.ini`, and
+`stockbrand` must be listed **first** — XIPivot resolves overlays in order and `horizonoverrides`
+would otherwise win.
 
-That is where to look for the login logo first. It is a strong lead, not a confirmed answer: no
-one has opened these files yet.
+The launcher does this automatically: `Branding.swift` enables the overlay for every server except
+HorizonXI, on the reasoning that playing on HorizonXI showing HorizonXI's branding is correct.
 
-## What would actually replace it
+    ./scripts/brandpatch.py --preview /tmp/preview.png     # look before committing
+    ./scripts/brandpatch.py --out-overlay stockbrand       # write the overlay
 
-XIPivot works — `xiview`'s overrides are visibly being applied in the same log — so the mechanism
-for replacing a DAT is already installed and proven. What is missing is the replacement file:
+## One quirk, which is pre-existing
 
-1. Identify which DAT holds the login logo and the branded menu strings. Nothing in this repo
-   knows that yet; it is a search through the ROM tree by content, not by name.
-2. Supply a stock version of it. **This project has no stock DATs** — the only client on this
-   machine is HorizonXI's — and game data is Square Enix's and is never redistributed here, so it
-   has to come from the user's own untouched retail install, or the texture has to be authored.
-3. Drop it into `polplugins/DATs/<name>/ROM/.../n.DAT` and add `<name>` to `pivot.ini`.
-
-Step 2 is the real blocker, and it is a question for Daniel rather than a thing to solve quietly:
-either point at a stock install to copy from, or accept an authored replacement image.
-
-## If it is done, do it per profile
-
-`pivot.ini` is global, one file for the whole install, while the branding should differ between
-the HorizonXI profile (branded, as that server intends) and the local LSB profile (stock). The
-launcher already rewrites `[ffxi.registry]` per boot profile before launching, from
-`Graphics.swift`; the same shape works here — write `pivot.ini` at launch based on which world is
-selected. Nothing in the launcher does this yet.
+At 1440 px wide the game draws this texture with its left ~175 pixels off the left edge of the
+window. **HorizonXI's own logo was clipped by it too** — look closely at the before screenshot and
+it reads "ORIZON XI", with the H cut in half. So placing the replacement exactly where theirs sat
+reproduces the defect faithfully; `brandpatch.py` nudges it 130 px right instead, which is why the
+after screenshot shows the whole logo. Whether the clip exists at true 4K fullscreen has not been
+tested — the verification runs were windowed.
