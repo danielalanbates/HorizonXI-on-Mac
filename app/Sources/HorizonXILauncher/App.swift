@@ -87,14 +87,16 @@ struct ContentView: View {
         }
         .onAppear {
             if store.selected?.local == true { local.refresh() }
-            // SecItemCopyMatching can block on a macOS keychain-access prompt -- every rebuild
-            // re-signs the app (a new ad-hoc signature until this ships with a stable Developer
-            // ID), which invalidates the keychain ACL and re-triggers that prompt. Reading it
-            // synchronously here, inside onAppear, blocked the main thread before the window
-            // could even be presented, which looked exactly like the app hanging on launch.
+            // Off the main actor out of habit from when this was a Keychain read that could
+            // block on a system prompt (see Credentials.swift for why it no longer is).
             guard remember, !user.isEmpty else { return }
             let account = user
+            let install = selected
+            let profile = store.selected?.bootProfile ?? "horizonxi.ini"
             Task.detached(priority: .userInitiated) {
+                if let i = install {
+                    Credentials.adoptPasswordFromProfile(user: account, install: i, profile: profile)
+                }
                 let found = Credentials.password(for: account)
                 await MainActor.run { pass = found }
             }

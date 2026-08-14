@@ -16,41 +16,71 @@ enum Credentials {
         set { UserDefaults.standard.set(newValue, forKey: "account.remember") }
     }
 
-    // MARK: - Keychain
+    // MARK: - Stored password
+    //
+    // This used to live in the login Keychain, which prompted for the Keychain password on
+    // startup after every single rebuild: the ACL is bound to the signing identity, and each
+    // build gets a fresh ad-hoc signature. That prompt is also the only thing the Keychain was
+    // buying here, because Ashita cannot take a password any other way than as cleartext on the
+    // boot loader's command line -- the launcher writes it into `config/boot/<profile>.ini`
+    // (mode 600) on every launch, so the secret is already on disk in the clear either way.
+    // Storing it in the app's own support directory at mode 600 is the same exposure with no
+    // prompt. If this ever ships with a stable Developer ID, the Keychain becomes worth it
+    // again; until then it is a prompt for nothing.
+
+    private static var storeURL: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("HorizonXI-on-Mac", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("accounts.json")
+    }
+
+    private static func load() -> [String: String] {
+        guard let d = try? Data(contentsOf: storeURL),
+              let m = try? JSONDecoder().decode([String: String].self, from: d) else { return [:] }
+        return m
+    }
+
+    private static func store(_ m: [String: String]) {
+        guard let d = try? JSONEncoder().encode(m) else { return }
+        try? d.write(to: storeURL, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600],
+                                               ofItemAtPath: storeURL.path)
+    }
 
     static func savePassword(_ password: String, for user: String) {
-        deletePassword(for: user)
-        guard !password.isEmpty else { return }
-        let q: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: user,
-            kSecValueData as String: Data(password.utf8),
-        ]
-        SecItemAdd(q as CFDictionary, nil)
+        var m = load()
+        if password.isEmpty { m.removeValue(forKey: user) } else { m[user] = password }
+        store(m)
     }
 
     static func password(for user: String) -> String {
-        let q: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: user,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var out: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess,
-              let d = out as? Data else { return "" }
-        return String(data: d, encoding: .utf8) ?? ""
+        if let p = load()[user], !p.isEmpty { return p }
+        return ""
     }
 
     static func deletePassword(for user: String) {
-        let q: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: user,
-        ]
-        SecItemDelete(q as CFDictionary)
+        var m = load()
+        m.removeValue(forKey: user)
+        store(m)
+    }
+
+    /// One-time pickup of a password that is already sitting in a boot profile, so moving off the
+    /// Keychain does not silently present an empty password box to someone who never typed it
+    /// into this build. Reads only `--pass` from the live `command` line.
+    static func adoptPasswordFromProfile(user: String, install: Install, profile: String) {
+        guard password(for: user).isEmpty else { return }
+        let url = install.gameDir.appendingPathComponent("config/boot/\(profile)")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+        for raw in text.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.hasPrefix(";"), line.hasPrefix("command"),
+                  let r = line.range(of: "--pass ") else { continue }
+            let rest = line[r.upperBound...].trimmingCharacters(in: .whitespaces)
+            let pass = rest.split(separator: " ").first.map(String.init) ?? ""
+            if !pass.isEmpty { savePassword(pass, for: user) }
+            return
+        }
     }
 
     // MARK: - Ashita boot profile
