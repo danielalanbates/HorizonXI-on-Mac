@@ -28,19 +28,95 @@ def type_command(text):
     b.press(RETURN, after=1.5)                 # send
 
 
-def shutdown():
+def shutdown(tag=None):
     """FFXI's own /shutdown command. Retried, because a missed keystroke leaves a character
     logged in on the server."""
-    for attempt in range(3):
-        if not b.focus_game() and not b.focus_game(hide_others=True):
-            time.sleep(2)
-            continue
-        b.press(ESC, after=1.0)                # close any open menu first
+    for attempt in range(5):
+        # Focus is attempted but not required: a failed focus check used to `continue` and
+        # burn every attempt without ever sending the command, which is how runs ended with
+        # the character still standing in town.
+        b.ensure_focus()
+        if tag:
+            b.shot(tag, 30 + attempt)          # what the client looked like before typing
+        # No ESC here: in FFXI, Escape *opens* the main menu in-world rather than closing
+        # anything, and the Return that follows then picks a menu entry instead of opening
+        # the chat line. That is why earlier runs left the character logged in.
         type_command("/shutdown")
-        time.sleep(12)
-        if b.game_window() is None:
-            return True
+        if tag:
+            b.shot(tag, 20 + attempt)          # proof the command actually landed
+        # FFXI counts down 30 s before it actually disconnects ("Executing shutdown in 30
+        # seconds..."). Waiting only 20 s declared failure on a shutdown that was working, and
+        # the retry then typed /shutdown again and restarted the countdown -- so runs reported
+        # `logged_out: false` for characters that did log out fine. Poll past the countdown.
+        for _ in range(45):
+            time.sleep(1)
+            if b.game_window() is None:
+                return True
     return b.game_window() is None
+
+
+def game_pids():
+    # The client's processes report a Windows command line ("C:\HorizonXI\pol.exe"), so match
+    # on that rather than on a unix executable name.
+    out = subprocess.run(["ps", "-Ao", "pid=,comm="], capture_output=True, text=True).stdout
+    pids = []
+    for line in out.splitlines():
+        pid, _, comm = line.strip().partition(" ")
+        # Only the wine-hosted client processes, whose comm is a Windows path. Matching on
+        # "HorizonXI" alone also picks up wineserver, which lives under ~/Games/HorizonXI.
+        # The client lives inside horizon-loader.exe -- it loads FFXiMain into itself, so
+        # there is no pol.exe/FFXi process to find. Ashita-cli exits once it has injected.
+        low = comm.lower()
+        if "horizon-loader" in low or "ashita" in low or "pol.exe" in low:
+            pids.append((int(pid), low))
+    # horizon-loader FIRST: it is the process that actually loads FFXiMain and runs the frame
+    # loop. Ashita-cli is only the injector and usually has the lower pid, so taking pids[0]
+    # blindly attaches the profiler/sidecar to a process that does no rendering -- which is
+    # exactly how an earlier "the sidecar does not help" result got measured.
+    pids.sort(key=lambda t: (0 if "horizon-loader" in t[1] else 1, t[0]))
+    return [p for p, _ in pids]
+
+
+def client_comms():
+    """Lowercased `comm` of every client-side process, for spotting the injector."""
+    out = subprocess.run(["ps", "-Ao", "comm="], capture_output=True, text=True).stdout
+    return [c.strip().lower() for c in out.splitlines()
+            if "horizon-loader" in c.lower() or "ashita" in c.lower()]
+
+
+def loader_pid_is_ready(pid):
+    """True only for horizon-loader.exe -- the process that loads FFXiMain and renders."""
+    out = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)],
+                         capture_output=True, text=True).stdout.lower()
+    return "horizon-loader" in out
+
+
+def thread_times():
+    """{(pid, index): seconds of CPU} for every thread of the client, from `ps -M`."""
+    acc = {}
+    for pid in game_pids():
+        out = subprocess.run(["ps", "-M", "-p", str(pid)], capture_output=True, text=True).stdout
+        n = 0
+        for line in out.splitlines()[1:]:
+            # `ps -M` prints both STIME and UTIME as m:ss.ss. Taking the first match reads
+            # system time only, which made a thread burning a full core look idle -- the
+            # user-time column is the last one, so sum both and report the total.
+            times = [t for t in line.split()
+                     if ":" in t and t.replace(":", "").replace(".", "").isdigit()]
+            if times:
+                total = 0.0
+                for t in times[:2]:
+                    m, _, s = t.partition(":")
+                    total += int(m) * 60 + float(s)
+                acc[(pid, n)] = total
+                n += 1
+    return acc
+
+
+def thread_delta(a, b_):
+    d = sorted(((k, round(b_[k] - a.get(k, 0.0), 2)) for k in b_), key=lambda x: -x[1])
+    return dict(total=round(sum(v for _, v in d), 2),
+                top=[dict(pid=k[0], thread=k[1], cpu_s=v) for k, v in d[:6]])
 
 
 def main():
@@ -51,6 +127,12 @@ def main():
     ap.add_argument("--character", type=int, default=0, help="rows to move down at character select")
     ap.add_argument("--sample", type=int, default=45)
     ap.add_argument("--zone-wait", type=int, default=45)
+    ap.add_argument("--boot-wait", type=int, default=300,
+                    help="seconds to wait for the first rendered frame")
+    ap.add_argument("--boot", default="horizonxi.ini",
+                    help="Ashita boot profile under config/boot (e.g. lsb.ini for the local server)")
+    ap.add_argument("--no-ashita", action="store_true",
+                    help="launch the bootloader directly, so a wrapper attaches to the game itself")
     args = ap.parse_args()
 
     profile = json.load(open(args.profile)) if args.profile else {}
@@ -62,7 +144,7 @@ def main():
     os.makedirs(b.RESULTS, exist_ok=True)
     b.kill_all()
     b.write_default_txt(profile["addons"])
-    b.apply_registry(profile.get("registry", {}))
+    b.apply_registry(profile.get("registry", {}), args.boot)
     dxvk_conf = profile.get("dxvk_conf")
     if dxvk_conf is None:
         shutil.copyfile(f"{b.BASE}/dxvk.conf.orig", f"{b.GAME}/dxvk.conf")
@@ -80,10 +162,69 @@ def main():
 
     log = open(f"{b.RESULTS}/{args.tag}.wine.log", "wb")
     t0 = time.time()
-    subprocess.Popen([b.WINE, r"C:\HorizonXI\Ashita-cli.exe", "horizonxi.ini"],
+    # X87_WRAP launches wine underneath x87sidecar, which patches Rosetta's x87 handlers.
+    # x87 measured ~85x slower than native through this wine and is the whole reason the
+    # client is CPU bound, so this is the one lever that touches the actual cost.
+    if args.no_ashita:
+        # Launch the bootloader directly. This matters for x87sidecar: it patches the process
+        # it launches, and under Ashita the game actually runs in a *child* (horizon-loader),
+        # which stays unpatched -- wrapping the Ashita launch measured no change at all.
+        # Credentials come from the boot profile this run selected -- reading horizonxi.ini
+        # unconditionally sent local-server runs at the live server instead.
+        argv = b.loader_argv(args.boot)
+    else:
+        argv = [b.WINE, r"C:\HorizonXI\Ashita-cli.exe", args.boot]
+    wrap = env.pop("X87_WRAP", "")
+    if wrap:
+        argv = wrap.split() + argv
+    subprocess.Popen(argv,
                      cwd=b.GAME, env=env, stdout=log, stderr=subprocess.STDOUT,
                      stdin=subprocess.DEVNULL, start_new_session=True)
-    time.sleep(38)
+
+    # X87_ATTACH=<x87sidecar binary>: hook the game process once it exists.
+    #
+    # Ashita runs the client in a child (horizon-loader.exe), so launching wine underneath the
+    # sidecar patches the wrong process -- measured, and it changed nothing. Attaching directly
+    # is the way in. Done early, before the client starts rendering in earnest: Rosetta
+    # translates each block once and keeps it, so anything translated before the hook lands
+    # keeps running stock code.
+    attach = env.get("X87_ATTACH", "")
+    if attach:
+        for _ in range(120):
+            time.sleep(1)
+            # Wait for horizon-loader specifically. Ashita-cli appears first and exits after
+            # injecting, so "any client pid" resolves to the wrong process early on.
+            pids = [p for p in game_pids() if loader_pid_is_ready(p)]
+            # ...and wait for Ashita-cli to be *gone*. Both the injector and the sidecar write
+            # into horizon-loader's address space; attaching while Ashita is still injecting
+            # raced it and produced "Failed to write to the remote memory for installation /
+            # Injection failed", after which the client never rendered a frame. Ashita-cli
+            # exits as soon as it has injected, so its absence is the ready signal.
+            injecting = any("ashita" in c for c in client_comms())
+            if pids and not injecting:
+                alog = open(f"{b.RESULTS}/{args.tag}.sidecar.log", "wb")
+                extra = env.get("X87_ATTACH_ARGS", "").split()
+                subprocess.Popen([attach, "--attach", str(pids[0])] + extra,
+                                 stdout=alog, stderr=subprocess.STDOUT,
+                                 stdin=subprocess.DEVNULL, start_new_session=True)
+                print(f"  x87sidecar attaching to pid {pids[0]}", flush=True)
+                break
+        else:
+            print("  WARNING: no game process appeared to attach to", file=sys.stderr)
+
+    # Wait for the client to actually start rendering rather than sleeping a fixed 38 s.
+    # With ROSETTA_DISABLE_AOT=1 (which x87sidecar requires) every block JITs cold, and at max
+    # settings start-up ran well past the fixed wait -- the harness then drove a black screen
+    # and reported nothing. Poll the frame log instead, and only fall through on timeout.
+    boot_deadline = time.time() + args.boot_wait
+    while time.time() < boot_deadline:
+        time.sleep(3)
+        if b.read_fps_csv(b.FPSCSV):
+            print(f"  rendering after {round(time.time() - t0)}s", flush=True)
+            time.sleep(6)          # let the first scene settle
+            break
+    else:
+        print(f"  WARNING: no frames after {args.boot_wait}s", file=sys.stderr)
 
     shots = []
 
@@ -93,7 +234,7 @@ def main():
             shots.append(dict(path=os.path.basename(p), t=round(time.time() - t0),
                               stage=stage, **b.score(p)))
 
-    b.focus_game() or b.focus_game(hide_others=True)
+    b.ensure_focus()
     snap("boot", 0)
 
     # rules-of-conduct dialog, then the title screen, until the scene gets heavy
@@ -104,7 +245,7 @@ def main():
         rows = b.read_fps_csv(b.FPSCSV)[-3:]
         if rows and min(r["draws"] for r in rows) > 1200:
             break
-        b.focus_game() or b.focus_game(hide_others=True)
+        b.ensure_focus()
 
     for _ in range(args.character):
         b.press(DOWN, after=0.6)
@@ -118,11 +259,19 @@ def main():
     snap("zonedin", 8)
 
     mark = len(b.read_fps_csv(b.FPSCSV))
+    # Per-thread CPU time across the sample window. Percentages from `top` were ambiguous
+    # (13% of a core while stalling 120 ms/frame); accumulated TIME is not. If the busiest
+    # thread burns most of the wall clock it is computing; if it burns a fraction, it waits.
+    open(f"{b.RESULTS}/{args.tag}.ps.txt", "w").write(
+        subprocess.run(["ps", "-Ao", "pid,comm"], capture_output=True, text=True).stdout)
+    threads0 = thread_times()
     time.sleep(args.sample)
+    threads1 = thread_times()
+    cpu = thread_delta(threads0, threads1)
     snap("sample", 9)
     rows = b.read_fps_csv(b.FPSCSV)[mark:]
 
-    logged_out = shutdown()
+    logged_out = shutdown(args.tag)
     snap("after-shutdown", 10)
     if not logged_out:
         print("WARNING: /shutdown did not close the client; character may still be online",
@@ -130,7 +279,7 @@ def main():
 
     fps = [r["fps"] for r in rows]
     res = dict(tag=args.tag, env=profile.get("env", {}), scene="in-world",
-               samples=len(fps), logged_out=logged_out,
+               samples=len(fps), logged_out=logged_out, cpu=cpu, window_s=args.sample,
                fps_median=round(statistics.median(fps), 2) if fps else None,
                fps_mean=round(statistics.mean(fps), 2) if fps else None,
                fps_min=round(min(fps), 2) if fps else None,
@@ -142,7 +291,7 @@ def main():
     if os.path.exists(b.FPSCSV):
         shutil.copyfile(b.FPSCSV, f"{b.RESULTS}/{args.tag}.fps.csv")
     print("RESULT " + json.dumps({k: res[k] for k in
-          ("tag", "fps_median", "fps_min", "fps_max", "draws", "samples", "logged_out")}))
+          ("tag", "fps_median", "fps_min", "fps_max", "draws", "samples", "logged_out", "cpu")}))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,137 @@
+diff --git a/src/dxvk/dxvk_context.cpp b/src/dxvk/dxvk_context.cpp
+index 6d30088..1cb3822 100644
+--- a/src/dxvk/dxvk_context.cpp
++++ b/src/dxvk/dxvk_context.cpp
+@@ -1,4 +1,9 @@
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
+ #include <cstring>
++#include <map>
++#include <string>
+ #include <vector>
+ #include <utility>
+ 
+@@ -6,7 +11,49 @@
+ #include "dxvk_context.h"
+ 
+ namespace dxvk {
+-  
++
++  // Render-pass-break histogram (DXVK_PASS_PROBE=<path>).
++  //
++  // On Metal every render pass is a separate MTLRenderCommandEncoder, so a frame that spills
++  // its render pass 60 times pays for 60 encoders. This records which DxvkContext operation
++  // forced each break, so the expensive ones can be found rather than guessed at.
++  class DxvkPassProbe {
++  public:
++    static DxvkPassProbe& get() {
++      static DxvkPassProbe instance;
++      return instance;
++    }
++
++    void spill(const char* why) {
++      if (m_file == nullptr)
++        return;
++      m_counts[why] += 1;
++      m_total += 1;
++      auto now = std::chrono::steady_clock::now();
++      if (std::chrono::duration<double>(now - m_tick).count() < 5.0)
++        return;
++      m_tick = now;
++      std::fprintf(m_file, "--- %llu spills total\n", (unsigned long long) m_total);
++      for (const auto& e : m_counts)
++        std::fprintf(m_file, "%8llu  %s\n", (unsigned long long) e.second, e.first.c_str());
++      std::fflush(m_file);
++    }
++
++  private:
++    DxvkPassProbe() {
++      const char* path = std::getenv("DXVK_PASS_PROBE");
++      if (path != nullptr && *path != '\0')
++        m_file = std::fopen(path, "a");
++      m_tick = std::chrono::steady_clock::now();
++    }
++
++    FILE* m_file = nullptr;
++    uint64_t m_total = 0;
++    std::map<std::string, uint64_t> m_counts;
++    std::chrono::steady_clock::time_point m_tick;
++  };
++
++
+   DxvkContext::DxvkContext(const Rc<DxvkDevice>& device)
+   : m_device      (device),
+     m_common      (&device->m_objects),
+@@ -535,15 +582,43 @@ namespace dxvk {
+     auto srcSlice = srcBuffer->getSliceHandle(srcOffset, numBytes);
+     auto dstSlice = dstBuffer->getSliceHandle(dstOffset, numBytes);
+ 
++    // Schedule partial uploads early too (DXVK_EARLY_BUFFER_COPY=1).
++    //
++    // The discard path above only applies when the copy covers a whole buffer of at most 256 KB.
++    // FFXI's uploads are partial dirty ranges of larger buffers, so it always missed, and every
++    // one of them ended the render pass: this scene spilled 604,924 times in a 40 s run, with
++    // copyBuffer the single largest cause -- more render-pass breaks per frame than draws, which
++    // is why the GPU sits at ~10% while the frame takes 40 ms.
++    //
++    // The copy can be moved to the init command buffer, which runs before the exec buffer in the
++    // same submission, whenever nothing already recorded touches either slice: the barrier set
++    // knows every access recorded so far this submission, so if neither slice is dirty there is
++    // no recorded read or write for the copy to be reordered ahead of. Off by default until it
++    // has been measured against a scene, because getting this wrong shows up as corrupt geometry
++    // rather than as a crash.
++    static const bool earlyCopyEnabled = [] {
++      const char* v = std::getenv("DXVK_EARLY_BUFFER_COPY");
++      return v && *v && *v != '0';
++    }();
++
++    bool earlyCopy = false;
++
+     if (!replaceBuffer) {
+-      this->spillRenderPass(true);
++      bool srcDirty = m_execBarriers.isBufferDirty(srcSlice, DxvkAccess::Read);
++      bool dstDirty = m_execBarriers.isBufferDirty(dstSlice, DxvkAccess::Write)
++                   || m_execBarriers.isBufferDirty(dstSlice, DxvkAccess::Read);
+ 
+-      if (m_execBarriers.isBufferDirty(srcSlice, DxvkAccess::Read)
+-       || m_execBarriers.isBufferDirty(dstSlice, DxvkAccess::Write))
+-        m_execBarriers.recordCommands(m_cmd);
++      earlyCopy = earlyCopyEnabled && srcIsReadOnly && !srcDirty && !dstDirty;
++
++      if (!earlyCopy) {
++        this->spillRenderPass(true);
++
++        if (srcDirty || m_execBarriers.isBufferDirty(dstSlice, DxvkAccess::Write))
++          m_execBarriers.recordCommands(m_cmd);
++      }
+     }
+ 
+-    DxvkCmdBuffer cmdBuffer = replaceBuffer
++    DxvkCmdBuffer cmdBuffer = (replaceBuffer || earlyCopy)
+       ? DxvkCmdBuffer::InitBuffer
+       : DxvkCmdBuffer::ExecBuffer;
+ 
+@@ -555,7 +630,7 @@ namespace dxvk {
+     m_cmd->cmdCopyBuffer(cmdBuffer,
+       srcSlice.handle, dstSlice.handle, 1, &bufferRegion);
+ 
+-    auto& barriers = replaceBuffer
++    auto& barriers = (replaceBuffer || earlyCopy)
+       ? m_initBarriers
+       : m_execBarriers;
+ 
+@@ -3863,10 +3938,12 @@ namespace dxvk {
+   }
+   
+   
+-  void DxvkContext::spillRenderPass(bool suspend) {
++  void DxvkContext::spillRenderPass(bool suspend, const char* why) {
+     if (m_flags.test(DxvkContextFlag::GpRenderPassBound)) {
+       m_flags.clr(DxvkContextFlag::GpRenderPassBound);
+ 
++      DxvkPassProbe::get().spill(why);
++
+       this->pauseTransformFeedback();
+       
+       m_queryManager.endQueries(m_cmd, VK_QUERY_TYPE_OCCLUSION);

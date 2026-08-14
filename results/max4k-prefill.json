@@ -1,0 +1,63 @@
+{
+ "tag": "max4k-prefill",
+ "env": {
+  "ROSETTA_DISABLE_AOT": "1",
+  "X87_ATTACH": "/Users/daniel/Games/hxi-workspace/repo-push/vendor/x87sidecar_entitled",
+  "FFXI_FPS_DIVISOR": "1",
+  "MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS": "1"
+ },
+ "scene": "in-world",
+ "samples": 40,
+ "logged_out": false,
+ "cpu": {
+  "total": 7.36,
+  "top": [
+   {
+    "pid": 60398,
+    "thread": 10,
+    "cpu_s": 19.08
+   },
+   {
+    "pid": 60398,
+    "thread": 2,
+    "cpu_s": 3.61
+   },
+   {
+    "pid": 60398,
+    "thread": 34,
+    "cpu_s": 2.6
+   },
+   {
+    "pid": 60398,
+    "thread": 8,
+    "cpu_s": 2.5
+   },
+   {
+    "pid": 60398,
+    "thread": 33,
+    "cpu_s": 1.01
+   },
+   {
+    "pid": 60398,
+    "thread": 23,
+    "cpu_s": 0.71
+   }
+  ]
+ },
+ "window_s": 40,
+ "fps_median": 58.0,
+ "fps_mean": 57.94,
+ "fps_min": 56.83,
+ "fps_max": 58.5,
+ "draws": 380.0,
+ "passes": 4.0,
+ "shots": [
+  {
+   "path": "max4k-prefill-00.png",
+   "t": 27,
+   "stage": "boot",
+   "lit": 0.9997,
+   "colors": 89
+  }
+ ]
+}
