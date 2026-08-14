@@ -88,4 +88,11 @@ if [[ -f "$X87SC" ]]; then
   fi
 fi
 
+# Re-register with Launch Services. Replacing a bundle in place leaves the Dock and Finder
+# showing the icon they cached for that path -- after a rebuild the app came up with the generic
+# executable icon even though AppIcon.icns was present and complete.
+touch "$APP"
+LSREG=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+[[ -x "$LSREG" ]] && "$LSREG" -f "$APP" >/dev/null 2>&1 || true
+
 echo "built $APP"

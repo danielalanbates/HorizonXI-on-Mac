@@ -58,6 +58,11 @@ struct Install: Identifiable, Hashable {
         var roots: [URL] = [
             URL(fileURLWithPath: "/Applications"),
             fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications"),
+            // Wrapper apps are large, so people keep them with their games rather than in
+            // /Applications. Missing this one is why the launcher was running the copy on an
+            // external drive while an identical install sat on the internal SSD.
+            fm.homeDirectoryForCurrentUser.appendingPathComponent("Games"),
+            fm.homeDirectoryForCurrentUser.appendingPathComponent("Downloads"),
         ]
         if let vols = try? fm.contentsOfDirectory(at: URL(fileURLWithPath: "/Volumes"),
                                                   includingPropertiesForKeys: nil) {
@@ -86,7 +91,12 @@ struct Install: Identifiable, Hashable {
         // which puts the plain `prefixNN` prefixes ahead of suffixed experiments.
         return found.sorted { a, b in
             let sa = score(a), sb = score(b)
-            return sa == sb ? a.prefixName < b.prefixName : sa > sb
+            if sa != sb { return sa > sb }
+            // An install on an external volume works right up until the drive is unplugged, and
+            // it reads slower besides. Prefer an equally-good one on the internal disk.
+            let ea = a.wrapper.path.hasPrefix("/Volumes/"), eb = b.wrapper.path.hasPrefix("/Volumes/")
+            if ea != eb { return !ea }
+            return a.prefixName < b.prefixName
         }
     }
 
