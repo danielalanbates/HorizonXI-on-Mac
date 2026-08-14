@@ -8,7 +8,11 @@ the same spot in Southern San d'Oria, 40-second samples, with x87sidecar attache
 
 ## The number
 
-**The 30 fps target is met.** 4K, every FFXI graphics setting at maximum:
+**The 30 fps target is NOT met, and the entry below claiming it was is retracted.** The 46.8 fps
+figure came from a change that breaks the game: see "Why the fast number is not real". The honest
+number at 4K max is **~24 fps**.
+
+4K, every FFXI graphics setting at maximum:
 
 | configuration | fps median | draws/frame |
 | --- | --- | --- |
@@ -21,11 +25,42 @@ the same spot in Southern San d'Oria, 40-second samples, with x87sidecar attache
 | **`D3D9_RT_READBACK_NOWAIT=32`, run B** | **42.93** | 1876 |
 
 Baseline varies by 6 fps between runs — in-game time of day and how many other characters are
-standing in the square both move it — so the fix is quoted against both ends of that range. It is
-roughly a **2× improvement** and it is reproducible.
+standing in the square both move it.
 
-It is on by default in the launcher (Settings → *Fast lens flares*), so the shipped `.app` runs at
-these speeds.
+**The flag is off by default.** It doubles the frame rate and breaks the game.
+
+## Why the fast number is not real
+
+Daniel found it in about a minute of play: NPCs blink in and out of existence roughly once a
+second. `blinkprobe.py` takes a burst of frames 0.25 s apart in a static scene and diffs
+consecutive ones:
+
+| build | median | p90 | max | spikes (>3× median) |
+| --- | --- | --- | --- | --- |
+| `D3D9_RT_READBACK_NOWAIT=32` | 0.023 | 0.493 | 0.512 | **17 of 39** |
+| unmodified | 0.021 | 0.023 | 0.026 | 0 of 39 |
+
+The cause is exactly what "skip the wait" means: the GPU is still writing the buffer the game
+then reads, so the visibility test gets a half-written answer and the thing it controls is culled
+at random.
+
+**The read-back is not a lens flare.** It decides whether *entities render at all*. A second
+attempt (`ReadbackShadow` in `d3d9_device.cpp`) kept a CPU copy of the last completed read-back
+and served that instead of the in-flight buffer, which does remove the flicker — by removing the
+NPCs. Standing in the same spot in Southern San d'Oria:
+
+- unmodified, 24.4 fps: Shard of Sunlight, Varchet and ellouine all present and stable
+- shadow read-back, 53.8 fps: **the plaza is empty**, no flicker because nothing is drawn
+
+A stale or zeroed visibility result reads as "not visible", so every entity it governs
+disappears. Feeding the game anything other than the true, completed read-back breaks it. The
+shadow code is left in place behind the same off-by-default flag, because the measurement is
+worth keeping, but it is not a fix and must not be shipped on.
+
+**What would actually work** is making the wait cheap rather than skipping it: the 26 ms is spent
+waiting for a whole frame of queued GPU work to drain before the copy lands. Issuing the
+read-back copy at the top of the frame, or on its own queue, would let it complete before the
+game asks — exact, not approximate. That is the next thing to try.
 
 ## What the cost actually was
 
@@ -50,12 +85,8 @@ sample is that same `16×16, pool 0, usage 0x1, format 21` surface, no other sha
 
 `D3D9_RT_READBACK_NOWAIT=<max edge in px>` skips **only the wait**, and only for
 `D3DPOOL_DEFAULT` render targets no larger than that edge. The copy is still issued, so the
-surface still gets refreshed; the game reads the *previous* frame's visibility factor instead of
-this frame's. For a number driving how bright a lens flare is, one frame of lag is not observable.
-With it on, all three stall counters read exactly `0.00`.
-
-This is a semantic change to D3D9 behaviour, which is why it is bounded to small surfaces and
-exposed as a toggle rather than made unconditional in DXVK.
+surface still gets refreshed. With it on, all three stall counters read exactly `0.00` — and the
+game breaks, for the reasons above. It stays as a measurement tool, not a setting to turn on.
 
 ## Dead ends, so they are not retried
 
@@ -67,7 +98,8 @@ exposed as a toggle rather than made unconditional in DXVK.
 - **Disabling vsync** — +0.6 fps. Noise.
 
 The pattern across all four: this frame was never limited by renderer work, so removing renderer
-work never helped. It was limited by one blocking read-back.
+work never helped. It is limited by one blocking read-back — which is real, and load-bearing, and
+cannot simply be skipped.
 
 ## Harness notes
 

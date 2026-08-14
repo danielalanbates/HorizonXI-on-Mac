@@ -32,9 +32,18 @@ struct PerfSettings: Codable {
     /// locks, doing nothing. Skipping only the *wait* (the copy is still issued, so the surface
     /// keeps being refreshed) took the same scene from 18.6/24.9 fps to 42.9/46.8 fps.
     ///
-    /// The cost of that is one frame of latency on a lens flare's brightness, which is not
-    /// observable in motion. Our patched `d3d9.dll` reads it; other pathways ignore it.
-    var flareReadbackNoWait = true
+    /// **Off by default: it glitches.** The claim that this costs only one frame of latency on a
+    /// flare's brightness was wrong, and Daniel caught it in about a minute of play — NPCs blink
+    /// in and out of existence roughly once a second. Measured with `blinkprobe.py`, which takes
+    /// a burst of frames 0.25 s apart in a static scene and diffs consecutive ones: with this on,
+    /// 17 of 39 frame pairs differ by ~50% of sampled pixels; with it off, 0 of 39, and the
+    /// spread is flat (p90 0.023, max 0.026).
+    ///
+    /// The reason is that skipping the wait hands the game a buffer the GPU has not finished
+    /// writing, so the visibility test reads whatever is in it and the entity is culled at
+    /// random. A correct version reads a *completed* copy from an earlier frame rather than an
+    /// in-flight one; see docs/MAX4K.md.
+    var flareReadbackNoWait = false
     /// Large address aware heap hint for the 32-bit client.
     var largeAddressAware = true
     /// Extra environment, one KEY=VALUE per line, for experiments.
@@ -59,7 +68,7 @@ struct PerfSettings: Codable {
         metalHUD = b(.metalHUD, false)
         disableAppNap = b(.disableAppNap, true)
         fpsDivisorOne = b(.fpsDivisorOne, true)
-        flareReadbackNoWait = b(.flareReadbackNoWait, true)
+        flareReadbackNoWait = b(.flareReadbackNoWait, false)
         largeAddressAware = b(.largeAddressAware, true)
         extraEnv = ((try? c.decodeIfPresent(String.self, forKey: .extraEnv)) ?? nil) ?? ""
         renderer = ((try? c.decodeIfPresent(Renderer.self, forKey: .renderer)) ?? nil) ?? .metal

@@ -496,8 +496,7 @@ struct ContentView: View {
             row("Client", selected == nil ? (scanning ? "scanning…" : "not found") : "Ashita · \(store.selected?.bootProfile ?? "")")
 
             Text("Measured on this Mac with Metal/DXVK: rendering is correct, fog included, "
-                 + "43–47 fps in the world at 4K with every setting at maximum — see "
-                 + "docs/MAX4K.md.")
+                 + "at 4K with every setting at maximum — see docs/MAX4K.md.")
                 .font(.caption2).foregroundStyle(Vana.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -617,10 +616,11 @@ struct ContentView: View {
                     Toggle("Silence wine debug channels", isOn: $perf.silenceWineDebug)
                     Toggle("Keep awake (no App Nap)", isOn: $perf.disableAppNap)
                     Toggle("Large address aware", isOn: $perf.largeAddressAware)
-                    Toggle("Fast lens flares (skip occlusion wait)", isOn: $perf.flareReadbackNoWait)
-                        .help("FFXI stops the whole frame four times to read back a 16×16 lens-flare "
-                              + "visibility test. Skipping the wait roughly doubles the frame rate "
-                              + "and costs one frame of latency on flare brightness.")
+                    Toggle("Fast lens flares (skip occlusion wait) — glitches", isOn: $perf.flareReadbackNoWait)
+                        .help("Roughly doubles the frame rate: FFXI stops the whole frame four "
+                              + "times to read back a 16×16 visibility test. But it hands the game "
+                              + "a buffer the GPU has not finished writing, so NPCs blink in and "
+                              + "out about once a second. Off until that is fixed properly.")
                     Toggle("Show frame rate (Metal HUD)", isOn: $perf.metalHUD)
                     HStack(spacing: 8) {
                         Button("Repair") { if let i = selected { runner.repair(i) } }
