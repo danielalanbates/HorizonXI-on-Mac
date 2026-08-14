@@ -88,6 +88,44 @@ sample is that same `16×16, pool 0, usage 0x1, format 21` surface, no other sha
 surface still gets refreshed. With it on, all three stall counters read exactly `0.00` — and the
 game breaks, for the reasons above. It stays as a measurement tool, not a setting to turn on.
 
+## Scheduling the read-back earlier: no demonstrated gain
+
+Tried 2026-08-14, because the previous entry named it as the thing that would work. It does not,
+or at least it cannot be shown to on this machine.
+
+`D3D9_RT_READBACK_EARLY=<max edge in px>` records the image->buffer copy in `SetRenderTarget`,
+when the game stops drawing to the small surface, instead of at `Lock`. `Flush()` follows it
+(`D3D9_RT_READBACK_EARLY_FLUSH=0` separates the two effects), so the copy is submitted with a
+whole frame left to complete rather than sitting in the batch that Present flushes. Nothing about
+what the game reads changes: the wait still happens and the data is still this frame's, complete.
+
+**Three runs each, same build, flag off vs on:**
+
+| | runs (fps median, 40 s in-world) | median |
+| --- | --- | --- |
+| flag off | 20.52, 27.30, 23.15 | 23.15 |
+| flag on | 25.38, 26.63, 27.26 | 26.63 |
+
+The medians differ by 3.5 fps and **the ranges overlap almost completely** -- the best baseline run
+beats every flagged run. n=3, and the baseline spread alone is 6.8 fps. There is no effect here
+worth claiming. The flag stays off by default and stays in the tree as a measurement, not a fix.
+A first pair of runs looked like +2 fps; that was one run each, and it did not survive repeats.
+
+**The first two attempts at this measured nothing at all,** which is the part worth remembering.
+The early path was gated on "the game has locked this subresource before", which never becomes
+true: instrumentation (`Logger::err` counters on both the lock and the unbind) showed
+`candidate=0` after 6,500 locks of a 16x16 render target. FFXI creates a **fresh** render target
+for each visibility test, so a per-object flag can never be set in time. Gating on the shape
+alone -- `D3DPOOL_DEFAULT`, `D3DUSAGE_RENDERTARGET`, at most 32 px a side -- makes it fire ~8,000
+times a run. Two builds were benchmarked and written up before that was checked. **A frame rate
+that did not move and an optimisation that never ran are indistinguishable from the outside; add
+the counter first.**
+
+With it firing, the block inside `Map` falls from 28.6 ms to 26.7 ms. That is the real result: the
+client is not waiting for the 1 KiB copy, it is waiting for the GPU to finish the draws that
+produce the surface, and no amount of scheduling moves that. Reaching 30 fps needs the visibility
+test to stop serialising the frame, not to be scheduled better.
+
 ## Dead ends, so they are not retried
 
 - **MoltenVK command-buffer prefill** — 22.30 fps against a 24.88 baseline. Worse. (An earlier
