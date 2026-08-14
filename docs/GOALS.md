@@ -11,7 +11,7 @@ announced, until the game is genuinely GPU-rendered.
 
 - [x] Get the game onto a real GPU pathway
 - [x] Measure it (FPS, GPU%, CPU%) and prove it in-world, not just at the menu — `docs/MAX4K.md`
-- [x] Make it *smooth*, not merely GPU-backed — 43–47 fps in-world at 4K max, 2026-08-14
+- [ ] Make it *smooth*, not merely GPU-backed — ~24 fps at 4K max; the one remaining cost is located (`docs/MAX4K.md`)
 
 ## 1. Run as smoothly as possible
 > "Get the game running as smoothly as possible on my Mac. Take no prisoners."

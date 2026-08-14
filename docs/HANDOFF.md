@@ -1,10 +1,11 @@
 # Handoff — read this first
 
-Updated 2026-08-14. **The 30 fps target is met: 43-47 fps in-world at 4K with every setting at
-maximum.** The cost was FFXI blocking on a 16x16 lens-flare occlusion read-back four times a
-frame -- 26 ms of a 40 ms frame spent waiting -- and `D3D9_RT_READBACK_NOWAIT` skips the wait.
-**Read `docs/MAX4K.md` first**; it has the numbers, the probe that found it, and the four dead
-ends that came before it.
+Updated 2026-08-14. **The 30 fps target is not met. In-world at 4K max is ~24 fps.** What *was*
+found is where the time goes: FFXI blocks on a 16x16 render-target read-back four times a frame,
+26 ms of a 40 ms frame, and that read-back decides whether entities render at all. Skipping it
+doubles the frame rate and makes NPCs blink in and out; serving a cached copy instead makes them
+vanish entirely. **Read `docs/MAX4K.md` first** -- it has the numbers, the two probes that found
+it, the retraction, and the six dead ends.
 
 The rest of this file is the 2026-08-11 rewrite, which replaced a wrong renderer-bound model
 with a measured one. Its diagnosis still holds -- the renderer was never the limit -- and its
@@ -21,7 +22,7 @@ working practices are still current. Its fps figures are superseded by MAX4K.md.
 
 | goal | status |
 | --- | --- |
-| **30 fps in gameplay** | **MET, 2026-08-14** — 43–47 fps in-world at 4K max. `docs/MAX4K.md` |
+| **30 fps in gameplay** | **NOT MET** — ~24 fps at 4K max. Cause located precisely, not yet fixed. `docs/MAX4K.md` |
 | Understand *why* it is not 30 fps | **DONE, and it is not what we thought.** `docs/PERFORMANCE.md` |
 | Fog / correct rendering | DONE (previous session), still correct |
 | Launcher with login + password | DONE — Keychain-backed, `app/Sources/HorizonXILauncher/Credentials.swift` |
@@ -105,23 +106,23 @@ churn, the Ashita overlay addons, FFXI's graphics settings, and the CrossOver li
 
 ## 4. Where to pick this up
 
-1. **Phase 2 packaging** on the `docs/BUNDLING.md` plan: first-run download of a pinned
-   Sikarugir engine, our DLLs inside the app, game data from HorizonXI's own installer. This is
-   the top item now that the frame rate goal is met.
-2. **The launcher's first-run Downloads prompt.** It still asks for access to the Downloads
+1. **Make the read-back wait cheap instead of skipping it.** The 26 ms is spent waiting for a
+   whole frame of queued GPU work to drain before the copy lands. Issue the copy at the top of
+   the frame, or on a dedicated queue, so it has completed by the time the game locks it. That is
+   exact rather than approximate, and it is the whole remaining gap to 45+ fps.
+2. **Phase 2 packaging** on the `docs/BUNDLING.md` plan: first-run download of a pinned
+   Sikarugir engine, our DLLs inside the app, game data from HorizonXI's own installer.
+3. **The launcher's first-run Downloads prompt.** It still asks for access to the Downloads
    folder before the user has pressed anything, and three attempts did not find what is asking.
    For a package aimed at non-technical users this matters more than it sounds. See the comment
    on `Install.tccGatedNames`.
-3. **Upstream the DXVK fixes** (`docs/UPSTREAM.md`). They are correct, small, and affect every
+4. **Upstream the DXVK fixes** (`docs/UPSTREAM.md`). They are correct, small, and affect every
    D3D9 game on Metal. The read-back one is a semantic change and belongs upstream as an option,
    not as a default.
-4. **Whether the read-back wait can be removed rather than skipped.** Skipping costs one frame of
-   latency on flare brightness. Issuing the copy a frame ahead, or satisfying the read from the
-   previous frame's buffer explicitly, would be exact rather than approximate.
 
-The honest line for beta notes: rendering is correct and the world runs at 43–47 fps at 4K with
-every setting at maximum, on an M1 with 8 GB. Say that the lens-flare visibility test is read one
-frame late, because it is.
+Do not promise 30 fps in beta notes. The honest line is: rendering is correct, the world runs at
+~24 fps at 4K with every setting at maximum on an M1 with 8 GB, and the single thing standing
+between that and roughly double is a read-back the game blocks on four times a frame.
 
 ---
 
