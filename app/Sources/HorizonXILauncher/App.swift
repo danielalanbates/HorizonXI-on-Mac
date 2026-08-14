@@ -495,9 +495,9 @@ struct ContentView: View {
             row("Wine prefix", selected?.prefixName ?? (scanning ? "scanning…" : "not found"))
             row("Client", selected == nil ? (scanning ? "scanning…" : "not found") : "Ashita · \(store.selected?.bootProfile ?? "")")
 
-            Text("Measured on this Mac with Metal/DXVK: rendering is correct, fog included. "
-                 + "About 24 fps in the menus and 7.5 fps in the world. The limit is not the "
-                 + "renderer — see docs/PERFORMANCE.md.")
+            Text("Measured on this Mac with Metal/DXVK: rendering is correct, fog included, "
+                 + "43–47 fps in the world at 4K with every setting at maximum — see "
+                 + "docs/MAX4K.md.")
                 .font(.caption2).foregroundStyle(Vana.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -566,6 +566,10 @@ struct ContentView: View {
                 Button { refresh() } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless).foregroundStyle(Vana.muted)
                     .help("Rescan for installs")
+                Button { chooseInstall() } label: { Image(systemName: "folder") }
+                    .buttonStyle(.borderless).foregroundStyle(Vana.muted)
+                    .help("Choose install… — point at the wrapper app if it lives somewhere the "
+                          + "scan does not look, such as Downloads")
             }
 
             // The local server auto-creates its own account on first login (see LocalServer.swift)
@@ -754,6 +758,30 @@ struct ContentView: View {
     }
 
     private func refresh() { Task { await refreshAsync() } }
+
+    /// Point the launcher at a wrapper the scan cannot reach. Choosing it through a panel is
+    /// also what grants access to a TCC-gated location such as Downloads, so this is the whole
+    /// reason the scan itself does not need to go there.
+    private func chooseInstall() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose your HorizonXI wrapper"
+        panel.message = "Pick the wrapper app that contains the game — usually siku.app."
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let found = Install.installs(inWrapper: url)
+        guard !found.isEmpty else {
+            notice = "No HorizonXI install inside \(url.lastPathComponent)."
+            return
+        }
+        for i in found where !installs.contains(where: { $0.id == i.id }) { installs.append(i) }
+        selected = found.first
+        selected?.remember()
+        recheck()
+    }
 
     private func refreshAsync() async {
         // Use the install we used last time straight away. Scanning /Volumes can take a long

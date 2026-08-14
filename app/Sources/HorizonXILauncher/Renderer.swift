@@ -20,7 +20,7 @@ enum Renderer: String, Codable, CaseIterable, Identifiable {
     case vulkan
 
     /// D3D8 -> d3d8to9 -> DXVK 1.10.3 (patched) -> MoltenVK -> Metal. Renders correctly, fog
-    /// included; ~24 fps in the menus and ~7.5 fps in the world.
+    /// included; 43–47 fps in the world at 4K with every setting at maximum.
     ///
     /// The long-standing black world was fixed-function fog: DXVK declared a zero-sized
     /// fragment push-constant range, so the fog constants arrived zeroed and every lit surface
@@ -28,8 +28,9 @@ enum Renderer: String, Codable, CaseIterable, Identifiable {
     /// correct. The bundled d3d9 is DXVK 1.10.3 + patches/dxvk-1.10.3-horizonxi.patch, which
     /// fixes that properly rather than bypassing fog.
     ///
-    /// The frame rate is *not* limited by this pathway -- see docs/PERFORMANCE.md. Discarding
-    /// every draw call makes it slower, not faster.
+    /// The frame rate was never limited by this pathway -- discarding every draw call makes it
+    /// slower, not faster. What limited it was FFXI blocking on a lens-flare occlusion read-back
+    /// four times a frame; see docs/MAX4K.md and `PerfSettings.flareReadbackNoWait`.
     case metal
 
     var id: String { rawValue }
@@ -51,8 +52,8 @@ enum Renderer: String, Codable, CaseIterable, Identifiable {
             return "Draws correctly on the GPU — 8-10 fps in a zone on an M1. The fallback if "
                  + "Metal/DXVK misbehaves on your machine."
         case .metal:
-            return "Recommended. The world draws correctly, fog included. ~24 fps in the "
-                 + "menus, ~7.5 fps in a zone; the limit is the client, not this pathway."
+            return "Recommended. The world draws correctly, fog included, at 43–47 fps in a "
+                 + "zone at 4K with every setting at maximum."
         }
     }
 
