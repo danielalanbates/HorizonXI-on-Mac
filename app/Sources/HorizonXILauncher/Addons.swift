@@ -66,7 +66,12 @@ struct AddonSuite {
     private static func loadedNames(in text: String, start: String, stop: String,
                                     prefix: String) -> [String] {
         var out: [String] = []
-        var inside = false
+        // A default.txt with no markers is the normal case for an install whose script was
+        // written by hand or by a server other than HorizonXI. Reading only between markers
+        // there found nothing, so every addon the player actually runs showed as disabled.
+        // Without markers, the whole file is the managed region.
+        let hasMarkers = text.contains(start) && text.contains(stop)
+        var inside = !hasMarkers
         for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line == start { inside = true; continue }
@@ -94,12 +99,40 @@ struct AddonSuite {
         let pluginBody = items.filter { $0.isPlugin && $0.enabled }
             .map { "/load \($0.name)" }
 
+        if !(text.contains(pluginsStart) && text.contains(addonsStart)) {
+            adoptScript(&lines)
+        }
+
         guard replace(&lines, start: addonsStart, stop: addonsStop, with: addonBody),
               replace(&lines, start: pluginsStart, stop: pluginsStop, with: pluginBody)
         else { return false }
 
         return (try? lines.joined(separator: "\n").write(to: url, atomically: true,
                                                          encoding: .utf8)) != nil
+    }
+
+    /// Put the managed markers into a script that has none, so the launcher can own the load
+    /// lines from then on. The existing `/load` and `/addon load` lines are removed and the two
+    /// empty blocks take their place; everything else in the file — `/wait`, `/ambient`, aliases,
+    /// whatever the player added — keeps its position. `winefix` is deliberately left where it
+    /// is: it is this project's compatibility shim, not a user-facing addon, and the UI never
+    /// offers it, so it must not be swept into a block the UI rewrites.
+    private static func adoptScript(_ lines: inout [String]) {
+        var insertAt: Int? = nil
+        var kept: [String] = []
+        for line in lines {
+            let t = line.trimmingCharacters(in: .whitespaces).lowercased()
+            let isLoad = (t.hasPrefix("/load ") || t.hasPrefix("/addon load "))
+                && t != "/load winefix"
+            if isLoad {
+                if insertAt == nil { insertAt = kept.count }
+                continue
+            }
+            kept.append(line)
+        }
+        let at = insertAt ?? kept.count
+        kept.insert(contentsOf: [pluginsStart, pluginsStop, addonsStart, addonsStop], at: at)
+        lines = kept
     }
 
     private static func replace(_ lines: inout [String], start: String, stop: String,

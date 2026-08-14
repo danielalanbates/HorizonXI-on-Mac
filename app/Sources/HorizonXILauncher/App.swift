@@ -247,6 +247,49 @@ struct ContentView: View {
         .sheet(isPresented: $showAddons) { addonsSheet }
     }
 
+    /// What the selected server permits. See `AddonPolicy` for why an unsourced policy shows
+    /// everything rather than guessing at a list.
+    private var addonPolicy: AddonPolicy {
+        store.selected.map(AddonPolicies.policy(for:)) ?? .unknown
+    }
+
+    // Built outside the view body: as interpolated expressions inline, the type-checker gave up
+    // on them ("unable to type-check this expression in reasonable time").
+    private static func unknownPolicyNote(_ server: String) -> String {
+        "This server's addon rules are not published anywhere this launcher could source them, "
+        + "so nothing below is filtered. Check what \(server) allows before you use it — on most "
+        + "private servers an unapproved addon is a bannable offence."
+    }
+
+    private static func allowlistNote(_ server: String, hidden: Int, source: String) -> String {
+        var s = "Showing only what \(server) approves"
+        if hidden > 0 {
+            let noun = hidden == 1 ? "item is" : "items are"
+            s += " — \(hidden) installed \(noun) hidden because they are not on the list"
+        }
+        return s + ". Source: \(source)."
+    }
+
+    @ViewBuilder
+    private var addonPolicyNote: some View {
+        let policy = addonPolicy
+        let serverName = store.selected?.name ?? "this server"
+        let hidden = addonItems.filter { !policy.allows($0.name) }.count
+        switch policy {
+        case .unknown:
+            Text(Self.unknownPolicyNote(serverName))
+                .font(.caption2).foregroundStyle(Vana.ember)
+                .fixedSize(horizontal: false, vertical: true)
+        case let .unrestricted(reason):
+            Text(reason).font(.caption2).foregroundStyle(Vana.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        case let .allowlist(_, source):
+            Text(Self.allowlistNote(serverName, hidden: hidden, source: source))
+                .font(.caption2).foregroundStyle(Vana.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     /// Ashita's plugins and Lua addons, the same set HorizonXI's own launcher manages.
     private var addonsSheet: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -255,6 +298,8 @@ struct ContentView: View {
                  + "you added by hand outside those blocks is left alone.")
                 .font(.caption).foregroundStyle(Vana.muted)
 
+            addonPolicyNote
+
             if !addonWarning.isEmpty {
                 Text(addonWarning).font(.caption2).foregroundStyle(Vana.ember)
                     .fixedSize(horizontal: false, vertical: true)
@@ -262,12 +307,16 @@ struct ContentView: View {
 
             List {
                 Section("Plugins") {
-                    ForEach($addonItems.filter { $0.wrappedValue.isPlugin }) { $item in
+                    ForEach($addonItems.filter {
+                        $0.wrappedValue.isPlugin && addonPolicy.allows($0.wrappedValue.name)
+                    }) { $item in
                         Toggle(item.name, isOn: $item.enabled)
                     }
                 }
                 Section("Addons") {
-                    ForEach($addonItems.filter { !$0.wrappedValue.isPlugin }) { $item in
+                    ForEach($addonItems.filter {
+                        !$0.wrappedValue.isPlugin && addonPolicy.allows($0.wrappedValue.name)
+                    }) { $item in
                         Toggle(item.name, isOn: $item.enabled)
                     }
                 }
@@ -275,8 +324,12 @@ struct ContentView: View {
             .frame(height: 320)
 
             HStack {
+                // "All" means all the ones this server permits. Enabling something the server
+                // forbids is not a convenience, it is a ban.
                 Button("Enable all") {
-                    for i in addonItems.indices { addonItems[i].enabled = true }
+                    for i in addonItems.indices where addonPolicy.allows(addonItems[i].name) {
+                        addonItems[i].enabled = true
+                    }
                 }
                 Button("Disable all") {
                     for i in addonItems.indices { addonItems[i].enabled = false }
@@ -284,6 +337,12 @@ struct ContentView: View {
                 Spacer()
                 Button("Cancel") { showAddons = false }
                 Button("Apply") {
+                    // Belt and braces: a hidden row cannot be toggled on, but the list on disk
+                    // may already have named something this server forbids, and pressing Apply
+                    // must not write it back out.
+                    for i in addonItems.indices where !addonPolicy.allows(addonItems[i].name) {
+                        addonItems[i].enabled = false
+                    }
                     if let i = selected, !AddonSuite.write(addonItems, to: i) {
                         notice = "Could not write scripts/default.txt — its launcher markers are missing."
                     } else {
@@ -742,6 +801,14 @@ struct ContentView: View {
     }
 
     private func launchClient(_ i: Install, server: Server) {
+        // Two servers on the list publish no login host anywhere this project could find. Ashita
+        // would take `--server ` with nothing after it and fail somewhere less obvious, so say
+        // what is actually missing instead.
+        if server.host.trimmingCharacters(in: .whitespaces).isEmpty {
+            notice = "\(server.name) has no login host set. Get it from that server's own "
+                   + "launcher or setup guide and put it in the server's Host field."
+            return
+        }
         // A world the install has no boot profile for — the local one, on every machine — needs
         // that file to exist before anything can be written into it.
         if !Credentials.ensureProfile(server.bootProfile, in: i) {
