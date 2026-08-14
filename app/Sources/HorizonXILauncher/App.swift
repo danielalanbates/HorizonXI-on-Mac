@@ -387,7 +387,25 @@ struct ContentView: View {
             }
             Toggle("Bump mapping", isOn: $graphics.bumpMapping)
             Toggle("Environmental animation", isOn: $graphics.environmentAnimation)
-            Toggle("Match interface size to resolution", isOn: $graphics.uiFollowsResolution)
+            Divider()
+            Toggle("Match interface to render resolution", isOn: $graphics.uiFollowsResolution)
+            if !graphics.uiFollowsResolution {
+                Picker("Interface resolution", selection: Binding(
+                    get: { "\(graphics.uiWidth)x\(graphics.uiHeight)" },
+                    set: { id in
+                        let parts = id.split(separator: "x").compactMap { Int($0) }
+                        if parts.count == 2 { graphics.uiWidth = parts[0]; graphics.uiHeight = parts[1] }
+                    })) {
+                    ForEach(GraphicsSettings.uiResolutions, id: \.0) { r in
+                        Text(r.0).tag("\(r.1)x\(r.2)")
+                    }
+                }
+                Text("FFXI draws the interface at this resolution and scales it up to the "
+                     + "window, so a lower number means bigger menus and text. The world is "
+                     + "still drawn at the render resolution above.")
+                    .font(.caption2).foregroundStyle(Vana.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             HStack {
                 Button("Balanced") { graphics = .balanced }

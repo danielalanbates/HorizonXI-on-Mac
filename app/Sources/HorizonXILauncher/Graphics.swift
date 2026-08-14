@@ -15,10 +15,18 @@ struct GraphicsSettings: Codable, Equatable {
     /// Renderer resolution — what the world is actually drawn at (`0001`/`0002`).
     var width: Int = 1280
     var height: Int = 720
-    /// Menu/UI resolution (`0037`/`0038`). Kept equal to the renderer resolution: FFXI scales
-    /// the interface from these independently, and mismatching them is how the UI ends up
-    /// enormous or postage-stamp sized at 4K.
+    /// Menu/UI resolution (`0037`/`0038`).
+    ///
+    /// FFXI draws the interface at this resolution and scales the result up to the window, so it
+    /// is independent of what the world is drawn at — and **a lower interface resolution means a
+    /// larger interface**, which is the whole point of exposing it. At 4K the stock behaviour of
+    /// matching the two leaves the UI unreadably small.
+    ///
+    /// `uiFollowsResolution` keeps the old behaviour (match the renderer). When it is off,
+    /// `uiWidth`/`uiHeight` are written instead.
     var uiFollowsResolution: Bool = true
+    var uiWidth: Int = 1920
+    var uiHeight: Int = 1080
     /// Background (environment) texture resolution, `0003`, and its texture-set twin `0004`.
     /// 512 / 1024 / 2048 / 4096; the stock HorizonXI profile ships 2048, "max" is 4096.
     var textureResolution: Int = 2048
@@ -35,6 +43,54 @@ struct GraphicsSettings: Codable, Equatable {
     var soundChannels: Int = 12
 
     static let key = "graphics.settings"
+
+    // A hand-written decoder, because the synthesised one fails on a missing key rather than
+    // using the default. The blob on disk was written by whichever build the user had before, so
+    // every field added since then is absent from it -- and a decode failure resets the lot.
+    init() {}
+
+    init(width: Int, height: Int, uiFollowsResolution: Bool, textureResolution: Int,
+         mipMapping: Int, textureCompression: Int, bumpMapping: Bool,
+         environmentAnimation: Bool, soundChannels: Int,
+         uiWidth: Int = 1920, uiHeight: Int = 1080) {
+        self.width = width; self.height = height
+        self.uiFollowsResolution = uiFollowsResolution
+        self.uiWidth = uiWidth; self.uiHeight = uiHeight
+        self.textureResolution = textureResolution
+        self.mipMapping = mipMapping; self.textureCompression = textureCompression
+        self.bumpMapping = bumpMapping; self.environmentAnimation = environmentAnimation
+        self.soundChannels = soundChannels
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = GraphicsSettings()
+        width  = try c.decodeIfPresent(Int.self, forKey: .width)  ?? d.width
+        height = try c.decodeIfPresent(Int.self, forKey: .height) ?? d.height
+        uiFollowsResolution = try c.decodeIfPresent(Bool.self, forKey: .uiFollowsResolution)
+            ?? d.uiFollowsResolution
+        uiWidth  = try c.decodeIfPresent(Int.self, forKey: .uiWidth)  ?? d.uiWidth
+        uiHeight = try c.decodeIfPresent(Int.self, forKey: .uiHeight) ?? d.uiHeight
+        textureResolution = try c.decodeIfPresent(Int.self, forKey: .textureResolution)
+            ?? d.textureResolution
+        mipMapping = try c.decodeIfPresent(Int.self, forKey: .mipMapping) ?? d.mipMapping
+        textureCompression = try c.decodeIfPresent(Int.self, forKey: .textureCompression)
+            ?? d.textureCompression
+        bumpMapping = try c.decodeIfPresent(Bool.self, forKey: .bumpMapping) ?? d.bumpMapping
+        environmentAnimation = try c.decodeIfPresent(Bool.self, forKey: .environmentAnimation)
+            ?? d.environmentAnimation
+        soundChannels = try c.decodeIfPresent(Int.self, forKey: .soundChannels) ?? d.soundChannels
+    }
+
+    /// Interface resolutions, smallest first — and smaller means a *bigger* on-screen interface.
+    /// The labels say so, because "960 × 540" on its own reads like a downgrade.
+    static let uiResolutions: [(String, Int, Int)] = [
+        ("960 × 540 — largest interface", 960, 540),
+        ("1280 × 720 — larger", 1280, 720),
+        ("1920 × 1080 — standard", 1920, 1080),
+        ("2560 × 1440 — smaller", 2560, 1440),
+        ("3840 × 2160 — smallest", 3840, 2160),
+    ]
 
     static let resolutions: [(String, Int, Int)] = [
         ("1280 × 720", 1280, 720),
@@ -73,6 +129,9 @@ struct GraphicsSettings: Codable, Equatable {
         if uiFollowsResolution {
             out["0037"] = String(width)
             out["0038"] = String(height)
+        } else {
+            out["0037"] = String(uiWidth)
+            out["0038"] = String(uiHeight)
         }
         return out
     }
@@ -112,7 +171,11 @@ struct GraphicsSettings: Codable, Equatable {
         g.bumpMapping = (vals["0019"] ?? 1) != 0
         g.environmentAnimation = (vals["0021"] ?? 1) != 0
         g.soundChannels = vals["0029"] ?? g.soundChannels
-        g.uiFollowsResolution = (vals["0037"] ?? g.width) == g.width
+        let uw = vals["0037"] ?? g.width
+        let uh = vals["0038"] ?? g.height
+        g.uiFollowsResolution = uw == g.width && uh == g.height
+        g.uiWidth = uw
+        g.uiHeight = uh
         return g
     }
 
