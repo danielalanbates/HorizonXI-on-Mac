@@ -19,6 +19,10 @@
 set -euo pipefail
 setopt NULL_GLOB 2>/dev/null || true
 
+# zsh sets $0 to the *function name*, not the script path, inside a function -- captured here,
+# at top level, so cmd_watchdog_spawn can re-invoke this same script from within cmd_start.
+SELF="${0:A}"
+
 LSB_ROOT="${LSB_ROOT:-$HOME/Games/lsb}"
 SRC="$LSB_ROOT/server"
 RUN="$LSB_ROOT/run"
@@ -416,12 +420,55 @@ cmd_start() {
   step "running: ${up:-none}"
   [[ "$up" == *xi_map* ]] || die "xi_map did not stay up — see $RUN/xi_map.log"
   step "local server ready on 127.0.0.1 — accounts are created on first login"
+
+  cmd_watchdog_spawn
+}
+
+# ---------------------------------------------------------------------------------------------
+# watchdog — this build's xi_map crashes every 15-20 minutes on real engine bugs (a Lua error
+# in mob spell-choice AI, and separately a null-pointer in pathfinding's UpdateSpeed) that are
+# out of scope to fix here. Losing xi_map silently disconnects anyone in-world with a timeout,
+# which reads as "the launcher is broken" rather than "the server crashed" -- so restart
+# whichever process died instead of leaving it down until someone notices.
+
+cmd_watchdog() {
+  step "watchdog: monitoring ${SERVERS[*]} every 15s"
+  # Declared once, outside the loop: re-declaring `local s` on every iteration is what made
+  # cmd_stop's version of this same loop echo stray "s=xi_map" lines (see its comment above).
+  local s
+  while true; do
+    sleep 15
+    for s in "${SERVERS[@]}"; do
+      pid_of "$s" >/dev/null && continue
+      step "watchdog: $s is down — restarting"
+      ( cd "$SRC" && nohup "./$s" >>"$RUN/$s.log" 2>&1 & print -r -- $! > "$RUN/$s.pid" )
+    done
+  done
+}
+
+# One watchdog per machine, not one per `start` call -- a second copy would just double-restart
+# on top of the first and both would race to write the same .pid files.
+cmd_watchdog_spawn() {
+  local wpf="$RUN/watchdog.pid"
+  if [[ -f "$wpf" ]] && kill -0 "$(<"$wpf")" 2>/dev/null; then
+    return
+  fi
+  ( nohup "$SELF" watchdog >>"$RUN/watchdog.log" 2>&1 & print -r -- $! > "$wpf" )
+  step "watchdog: started (pid $(<"$wpf"))"
 }
 
 cmd_stop() {
   # All declared up front: re-running `local` on a name that is already local makes zsh echo it,
   # which turns up as stray "i=6" lines in the launcher's log.
   local s pid i
+  # Kill the watchdog *first* -- stopping the servers while it is still running just teaches it
+  # to immediately restart the one that goes down first.
+  local wpf="$RUN/watchdog.pid"
+  if [[ -f "$wpf" ]] && pid="$(<"$wpf")" && kill -0 "$pid" 2>/dev/null; then
+    step "watchdog: stopping (pid $pid)"
+    kill "$pid" 2>/dev/null || true
+  fi
+  rm -f "$wpf"
   # Reverse order: map first, then world, so zones get to save their state before the process
   # holding the world session goes away.
   for s in "${(Oa)SERVERS[@]}"; do
@@ -454,9 +501,10 @@ cmd_stop() {
 }
 
 case "${1:-status}" in
-  status) cmd_status ;;
-  setup)  cmd_setup ;;
-  start)  cmd_start ;;
-  stop)   cmd_stop ;;
-  *) die "usage: lsb-server.sh [status|setup|start|stop]" ;;
+  status)   cmd_status ;;
+  setup)    cmd_setup ;;
+  start)    cmd_start ;;
+  stop)     cmd_stop ;;
+  watchdog) cmd_watchdog ;;
+  *) die "usage: lsb-server.sh [status|setup|start|stop|watchdog]" ;;
 esac
