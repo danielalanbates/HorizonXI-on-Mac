@@ -3,11 +3,34 @@
 Running Final Fantasy XI private servers — **HorizonXI**, CatsEyeXI, Eden, and others — natively
 on Apple Silicon macOS under Wine, no virtual machine.
 
-> ## 📣 Status — playable, correct, and slow
-> The Metal renderer is **correct** — full textures, fog, UI. The frame rate is not: ~24 fps in
-> the menus, **~7.5 fps in the world**. As of 2026-08-11 the reason is measured and it is *not*
-> the renderer — see [Performance](#performance--where-it-actually-stands). Testers welcome,
-> especially on Apple Silicon with more than 8 GB and on Intel Macs.
+> ## 📣 Status — playable and correct, still short of 30 fps
+> The Metal renderer is **correct** — full textures, fog, UI. The frame rate is **~24 fps in the
+> world at 4K with every setting at maximum**, and the reason is measured precisely: the client
+> blocks ~26 ms of every ~40 ms frame waiting on a 16×16 render-target read-back it does four
+> times a frame, which decides whether entities are drawn at all. It is not the renderer, and it
+> cannot be skipped or faked — see [`docs/MAX4K.md`](docs/MAX4K.md), which also records the
+> attempts that failed. Testers welcome, especially on Apple Silicon with more than 8 GB.
+
+> ### 2026-08-14 — any server, its own addon rules, and the stock title screen
+>
+> | HorizonXI's branding, on a LandSandBoat world | after |
+> | --- | --- |
+> | ![before](docs/img/title-before.png) | ![after](docs/img/title-after.png) |
+>
+> Three things landed, all driven by playing on a server that is not HorizonXI:
+>
+> * **The title screen no longer says HORIZON XI** on other servers. Their installer bakes the
+>   logo into the game's own data (`menu/titlwin` in `ROM/119/50.dat`); the launcher now
+>   side-loads a patched copy through XIPivot for every server except HorizonXI, leaving the
+>   real game files untouched. Finding that texture needed a DAT image scanner, which ships as
+>   [`scripts/datimg.py`](scripts/datimg.py). Four other approaches failed first and are written
+>   up in [`docs/BRANDING.md`](docs/BRANDING.md) so nobody repeats them.
+> * **The addon screen only offers what the server allows.** On HorizonXI an unapproved addon is
+>   a bannable offence, and the screen was offering all 105 installed. It now filters to their
+>   published list and names the source; servers whose rules could not be sourced are shown
+>   unfiltered *and said to be unfiltered*, rather than given a guessed allowlist.
+>   [`docs/ADDON-POLICY.md`](docs/ADDON-POLICY.md)
+> * **Servers with no published login host** now say so instead of launching into a failure.
 
 > ### 2026-08-10 — the launcher, and three renderers measured
 >
