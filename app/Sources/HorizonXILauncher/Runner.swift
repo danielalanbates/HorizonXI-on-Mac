@@ -22,6 +22,14 @@ final class Runner: ObservableObject {
         "0007": "1", "0035": "1",
     ]
 
+    /// Raw stream text, which arrives mid-line and unbounded — a whole session of wine and Ashita
+    /// output is megabytes, and SwiftUI re-lays-out the entire string on every change, so the cap
+    /// matters for responsiveness as much as for memory.
+    func appendChunk(_ s: String) {
+        log += s
+        if log.count > 200_000 { log = String(log.suffix(150_000)) }
+    }
+
     func appendLine(_ s: String) {
         log += s.hasSuffix("\n") ? s : s + "\n"
         if log.count > 200_000 { log = String(log.suffix(150_000)) }
@@ -169,13 +177,20 @@ final class Runner: ObservableObject {
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = pipe
+        // The pipe has to keep being drained for as long as *anything* is writing to it, and
+        // that outlives this process: horizon-loader.exe inherits these descriptors from
+        // Ashita-cli.exe and keeps logging into them for the whole session. Dropping the reader
+        // when the injector exited left the game writing into a pipe nobody emptied -- 64 KB
+        // later it blocked in write() forever, which looked exactly like the client freezing on
+        // the HorizonXI splash screen. Read to EOF instead, which is when the last writer has
+        // closed, and never key it off a process exit.
         pipe.fileHandleForReading.readabilityHandler = { h in
             let d = h.availableData
-            guard !d.isEmpty, let s = String(data: d, encoding: .utf8) else { return }
-            Task { @MainActor [weak self] in self?.log += s }
+            if d.isEmpty { h.readabilityHandler = nil; return }   // EOF
+            guard let s = String(data: d, encoding: .utf8) else { return }
+            Task { @MainActor [weak self] in self?.appendChunk(s) }
         }
         p.terminationHandler = { pr in
-            pipe.fileHandleForReading.readabilityHandler = nil
             Task { @MainActor in done(pr.terminationStatus) }
         }
         do {
