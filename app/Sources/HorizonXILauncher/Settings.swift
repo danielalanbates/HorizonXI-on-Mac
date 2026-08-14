@@ -10,10 +10,10 @@ struct PerfSettings: Codable {
     /// WINEDEBUG=-all. Wine's debug channels are extremely expensive even when nothing consumes
     /// them; leaving them on costs frames.
     var silenceWineDebug = true
-    /// Metal HUD overlay — used to actually measure the frame rate rather than guess at it.
-    /// On by default: the whole point of testing against the local server is measuring fps,
-    /// not guessing at it from how smooth it looks.
-    var metalHUD = true
+    /// Metal HUD overlay. A measurement tool, not a feature: it belongs on the benchmark
+    /// harness (`scripts/`, which sets `MTL_HUD_ENABLED` itself), not on top of somebody's
+    /// game. Off by default; the toggle stays for when a number is actually wanted.
+    var metalHUD = false
     /// Keep the game off macOS App Nap / timer coalescing when it loses focus.
     var disableAppNap = true
     /// FFXI limits itself to 60/n fps, n=2 by default (30 fps) -- but under wine the limiter
@@ -36,7 +36,15 @@ struct PerfSettings: Codable {
     static func load() -> PerfSettings {
         guard let d = UserDefaults.standard.data(forKey: key),
               let s = try? JSONDecoder().decode(PerfSettings.self, from: d) else { return .init() }
-        return s
+        // The HUD used to default on, so every existing install has `true` saved. Clear it once
+        // rather than leaving a measurement overlay pinned over the game forever.
+        var s2 = s
+        if !UserDefaults.standard.bool(forKey: "perf.hudDefaultCleared") {
+            UserDefaults.standard.set(true, forKey: "perf.hudDefaultCleared")
+            s2.metalHUD = false
+            s2.save()
+        }
+        return s2
     }
 
     func save() {

@@ -66,6 +66,11 @@ struct ContentView: View {
     @State private var pass = ""
     @State private var remember = Credentials.remember
     @State private var showDetails = false
+    @State private var showGraphics = false
+    @State private var graphics = GraphicsSettings.load()
+    @State private var showAddons = false
+    @State private var addonItems: [AddonSuite.Item] = []
+    @State private var addonWarning = ""
     @State private var notice = ""
     @State private var scanning = false
 
@@ -236,6 +241,112 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $newServer) { addServerSheet }
+        .sheet(isPresented: $showGraphics) { graphicsSheet }
+        .sheet(isPresented: $showAddons) { addonsSheet }
+    }
+
+    /// Ashita's plugins and Lua addons, the same set HorizonXI's own launcher manages.
+    private var addonsSheet: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Addons & plugins").font(.headline)
+            Text("Written to scripts/default.txt, between the launcher-managed markers. Anything "
+                 + "you added by hand outside those blocks is left alone.")
+                .font(.caption).foregroundStyle(Vana.muted)
+
+            if !addonWarning.isEmpty {
+                Text(addonWarning).font(.caption2).foregroundStyle(Vana.ember)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            List {
+                Section("Plugins") {
+                    ForEach($addonItems.filter { $0.wrappedValue.isPlugin }) { $item in
+                        Toggle(item.name, isOn: $item.enabled)
+                    }
+                }
+                Section("Addons") {
+                    ForEach($addonItems.filter { !$0.wrappedValue.isPlugin }) { $item in
+                        Toggle(item.name, isOn: $item.enabled)
+                    }
+                }
+            }
+            .frame(height: 320)
+
+            HStack {
+                Button("Enable all") {
+                    for i in addonItems.indices { addonItems[i].enabled = true }
+                }
+                Button("Disable all") {
+                    for i in addonItems.indices { addonItems[i].enabled = false }
+                }
+                Spacer()
+                Button("Cancel") { showAddons = false }
+                Button("Apply") {
+                    if let i = selected, !AddonSuite.write(addonItems, to: i) {
+                        notice = "Could not write scripts/default.txt — its launcher markers are missing."
+                    } else {
+                        notice = "Addon list saved. It takes effect the next time you press Play."
+                    }
+                    showAddons = false
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20).frame(width: 460)
+    }
+
+    /// FFXI's own graphics settings, written into the selected world's boot profile. See
+    /// `GraphicsSettings` for why this is not a wrapper around Config.exe.
+    private var graphicsSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Graphics").font(.headline)
+            Text("Applied to \(store.selected?.bootProfile ?? "the boot profile") the next time "
+                 + "you press Play.")
+                .font(.caption).foregroundStyle(Vana.muted)
+
+            Picker("Resolution", selection: Binding(
+                get: { "\(graphics.width)x\(graphics.height)" },
+                set: { id in
+                    let parts = id.split(separator: "x").compactMap { Int($0) }
+                    if parts.count == 2 { graphics.width = parts[0]; graphics.height = parts[1] }
+                })) {
+                ForEach(GraphicsSettings.resolutions, id: \.0) { r in
+                    Text(r.0).tag("\(r.1)x\(r.2)")
+                }
+            }
+            Picker("Texture resolution", selection: $graphics.textureResolution) {
+                ForEach([512, 1024, 2048, 4096], id: \.self) { Text(String($0)).tag($0) }
+            }
+            Picker("Mip mapping", selection: $graphics.mipMapping) {
+                ForEach(0...4, id: \.self) { Text($0 == 0 ? "Off" : String($0)).tag($0) }
+            }
+            Picker("Textures", selection: $graphics.textureCompression) {
+                Text("Uncompressed").tag(0)
+                Text("Compressed").tag(2)
+            }
+            Toggle("Bump mapping", isOn: $graphics.bumpMapping)
+            Toggle("Environmental animation", isOn: $graphics.environmentAnimation)
+            Toggle("Match interface size to resolution", isOn: $graphics.uiFollowsResolution)
+
+            HStack {
+                Button("Balanced") { graphics = .balanced }
+                Button("Max (4K)") { graphics = .max4K }
+                Spacer()
+                Button("Cancel") { showGraphics = false }
+                Button("Apply") {
+                    graphics.save()
+                    if let i = selected, let s = store.selected {
+                        Credentials.ensureProfile(s.bootProfile, in: i)
+                        graphics.write(to: i, profile: s.bootProfile)
+                        notice = "Graphics written to \(s.bootProfile)."
+                    }
+                    showGraphics = false
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.top, 4)
+        }
+        .padding(20).frame(width: 380)
     }
 
     private var addServerSheet: some View {
@@ -478,6 +589,14 @@ struct ContentView: View {
 
             playButton
 
+            // Graphics and addons are things people change often -- they belong next to Play,
+            // not inside a collapsed diagnostics section.
+            HStack(spacing: 8) {
+                Button("Graphics…") { openGraphics() }
+                Button("Addons…") { openAddons() }
+            }
+            .font(.caption)
+
             if !notice.isEmpty {
                 Text(notice).font(.caption2).foregroundStyle(Vana.gold)
             }
@@ -494,7 +613,6 @@ struct ContentView: View {
                     Toggle("Large address aware", isOn: $perf.largeAddressAware)
                     Toggle("Show frame rate (Metal HUD)", isOn: $perf.metalHUD)
                     HStack(spacing: 8) {
-                        Button("Graphics…") { openFFXIConfig() }
                         Button("Repair") { if let i = selected { runner.repair(i) } }
                             .disabled(runner.busy)
                     }
@@ -660,16 +778,27 @@ struct ContentView: View {
         checks = await Task.detached(priority: .userInitiated) { Preflight.run(i) }.value
     }
 
-    private func openFFXIConfig() {
+    /// Open the panel on whatever the profile actually says, not on this app's last write —
+    /// the boot .ini is a plain text file the user may well have edited by hand.
+    private func openGraphics() {
+        if let i = selected, let s = store.selected,
+           let onDisk = GraphicsSettings.read(from: i, profile: s.bootProfile) {
+            graphics = onDisk
+        }
+        showGraphics = true
+    }
+
+    private func openAddons() {
         guard let i = selected else { return }
-        let p = Process()
-        p.executableURL = i.wine
-        p.arguments = ["C:\\HorizonXI\\SquareEnix\\FINAL FANTASY XI\\FINAL FANTASY XI Config.exe"]
-        p.currentDirectoryURL = i.gameDir
-        var e = ProcessInfo.processInfo.environment
-        for (k, v) in perf.environment(for: i) { e[k] = v }
-        p.environment = e
-        try? p.run()
+        addonItems = AddonSuite.scan(i)
+        let bad = AddonSuite.mismatchedPlugins(i)
+        addonWarning = bad.isEmpty ? "" :
+            "Ashita refused these plugins on the last run because they are built for a different "
+            + "interface version than this Ashita core: \(bad.joined(separator: ", ")). "
+            + (bad.contains { $0.lowercased() == "addons" }
+               ? "That includes the Lua host, so no addon below can run until it is fixed."
+               : "")
+        showAddons = true
     }
 
     private func color(_ s: Check.State) -> Color {
