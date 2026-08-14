@@ -55,6 +55,8 @@ struct ContentView: View {
 
     @StateObject private var store = ServerStore()
     @StateObject private var local = LocalServer()
+    @StateObject private var feeds = ServerFeeds()
+    @State private var bannerIndex = 0
     @State private var worldHover = false
     @State private var forceSetup = false
     @State private var newServer = false
@@ -107,7 +109,12 @@ struct ContentView: View {
         // Discovery walks /Volumes, and an external drive can make that take tens of seconds.
         // Doing it on the main thread means the window never appears at all — which looked
         // exactly like the app failing to launch. Scan off the main actor and fill the UI in.
-        .task { await refreshAsync() }
+        .task {
+            await refreshAsync()
+            // Pick up each server's own published addon list, so the app's compiled-in snapshot
+            // does not go stale between releases. Silent on failure -- offline must still launch.
+            await feeds.refreshAsync(servers: store.servers)
+        }
     }
 
     // MARK: - Left: title, server, status
@@ -126,10 +133,7 @@ struct ContentView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(3.5)
                     .foregroundStyle(Vana.gold)
-                Text(store.selected?.note ?? "running natively — no virtual machine")
-                    .font(.callout)
-                    .foregroundStyle(Vana.muted)
-                    .padding(.top, 4)
+                newsBanner
             }
             .padding(.horizontal, 34).padding(.top, 34).padding(.bottom, 20)
 
@@ -248,9 +252,51 @@ struct ContentView: View {
     }
 
     /// What the selected server permits. See `AddonPolicy` for why an unsourced policy shows
-    /// everything rather than guessing at a list.
+    /// everything rather than guessing at a list. A list fetched from the server's own page this
+    /// launch beats the snapshot compiled into the app.
     private var addonPolicy: AddonPolicy {
-        store.selected.map(AddonPolicies.policy(for:)) ?? .unknown
+        guard let s = store.selected else { return .unknown }
+        return AddonPolicies.policy(for: s, fetched: feeds.fetchedAddonLists)
+    }
+
+    /// A rotating strip of what the launcher knows about the selected world.
+    ///
+    /// Every line here is something the launcher actually holds -- the server's era, its own
+    /// note, the state of its addon rules, whether this project has tested it. **Nothing is
+    /// invented to fill the space.** No FFXI private server publishes a news feed a launcher can
+    /// read (see `ServerFeeds` for what was checked), so there are no headlines to rotate; the
+    /// moment one does, fetched items appear here first and are marked as such.
+    @ViewBuilder
+    private var newsBanner: some View {
+        let items = feeds.bannerItems(for: store.selected, policy: addonPolicy)
+        if items.isEmpty {
+            Text("running natively — no virtual machine")
+                .font(.callout).foregroundStyle(Vana.muted).padding(.top, 4)
+        } else {
+            let item = items[min(bannerIndex, items.count - 1) % items.count]
+            HStack(alignment: .top, spacing: 8) {
+                Circle().fill(item.fetched ? Vana.gold : Vana.crystal.opacity(0.5))
+                    .frame(width: 6, height: 6).padding(.top, 6)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title)
+                        .font(.callout).foregroundStyle(Vana.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let url = item.url {
+                        Link("Open \(url.host ?? "page")", destination: url)
+                            .font(.caption2).foregroundStyle(Vana.gold)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(minHeight: 46, alignment: .top)
+            .padding(.top, 4)
+            .id(item.id)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.45), value: bannerIndex)
+            .onReceive(Timer.publish(every: 7, on: .main, in: .common).autoconnect()) { _ in
+                bannerIndex = (bannerIndex + 1) % max(items.count, 1)
+            }
+        }
     }
 
     // Built outside the view body: as interpolated expressions inline, the type-checker gave up

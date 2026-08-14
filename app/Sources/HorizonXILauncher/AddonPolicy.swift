@@ -125,8 +125,24 @@ enum AddonPolicies {
     static let localWorld = AddonPolicy.unrestricted(
         reason: "Your own LandSandBoat world — no server rules to break.")
 
-    static func policy(for server: Server) -> AddonPolicy {
+    /// The page a server publishes its approved list on, where one exists and is machine-readable.
+    /// Checked 2026-08-14; only HorizonXI has one. `horizonxi.com/players/Addons` returns 403 to
+    /// anything that is not a browser, which is why the `.info` mirror -- the page HorizonXI's own
+    /// wiki links players to -- is what gets fetched.
+    static func publishedListURL(for server: Server) -> URL? {
+        switch server.name {
+        case "HorizonXI": return URL(string: "https://horizonxi.info/addons")
+        default: return nil
+        }
+    }
+
+    /// `fetched` is whatever `ServerFeeds` pulled from the server's own page this launch, which
+    /// takes precedence over the list compiled into the app -- that one is a snapshot and goes
+    /// stale. Falls back to the snapshot when the fetch failed or the machine is offline.
+    static func policy(for server: Server,
+                       fetched: [String: AddonPolicy] = [:]) -> AddonPolicy {
         if server.local { return localWorld }
+        if let live = fetched[server.name] { return live }
         switch server.name {
         case "HorizonXI": return horizon
         default: return .unknown
