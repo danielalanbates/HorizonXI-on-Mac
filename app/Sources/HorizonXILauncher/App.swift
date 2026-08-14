@@ -613,6 +613,10 @@ struct ContentView: View {
                     Toggle("Silence wine debug channels", isOn: $perf.silenceWineDebug)
                     Toggle("Keep awake (no App Nap)", isOn: $perf.disableAppNap)
                     Toggle("Large address aware", isOn: $perf.largeAddressAware)
+                    Toggle("Fast lens flares (skip occlusion wait)", isOn: $perf.flareReadbackNoWait)
+                        .help("FFXI stops the whole frame four times to read back a 16×16 lens-flare "
+                              + "visibility test. Skipping the wait roughly doubles the frame rate "
+                              + "and costs one frame of latency on flare brightness.")
                     Toggle("Show frame rate (Metal HUD)", isOn: $perf.metalHUD)
                     HStack(spacing: 8) {
                         Button("Repair") { if let i = selected { runner.repair(i) } }

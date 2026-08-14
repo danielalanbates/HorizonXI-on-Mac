@@ -402,10 +402,19 @@ index 32645d2..f729b8f 100644
  
  namespace dxvk {
 diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
-index 734a7a0..a6ba745 100644
+index 734a7a0..eb54dbd 100644
 --- a/src/d3d9/d3d9_device.cpp
 +++ b/src/d3d9/d3d9_device.cpp
-@@ -30,8 +30,187 @@
+@@ -1,5 +1,8 @@
+ #include "d3d9_device.h"
+ 
++#include <mutex>
++#include <unordered_map>
++
+ #include "d3d9_annotation.h"
+ #include "d3d9_interface.h"
+ #include "d3d9_swapchain.h"
+@@ -30,8 +33,353 @@
  #pragma fenv_access (on)
  #endif
  
@@ -482,6 +491,120 @@ index 734a7a0..a6ba745 100644
 +
  namespace dxvk {
  
++namespace {
++  // Flush attribution (DXVK_FLUSH_LOG=<path>).
++  //
++  // In-world FFXI submits ~33 command buffers per frame; character select, at a comparable draw
++  // count, submits ~6. Each submit is a command-buffer commit on Metal, so knowing *which*
++  // D3D9 entry point is forcing them is the difference between guessing and fixing.
++  enum FlushSite { kFsUpdateTex, kFsSetRT, kFsSetDS, kFsEndScene, kFsMisc1, kFsMisc2,
++                   kFsQueryEnd, kFsNumSites };
++  static const char* kFlushSiteNames[kFsNumSites] = {
++    "UpdateTexture", "SetRenderTarget", "SetDepthStencil", "EndScene",
++    "misc4475", "misc5158", "QueryEnd" };
++
++  struct FlushProbe {
++    FILE* file = nullptr;
++    uint64_t calls[kFsNumSites] = { };
++    uint64_t flushes[kFsNumSites] = { };
++    std::chrono::steady_clock::time_point tick;
++    uint64_t frames = 0;
++
++    FlushProbe() {
++      const char* p = std::getenv("DXVK_FLUSH_LOG");
++      if (p && *p) file = std::fopen(p, "a");
++      if (file) {
++        std::fprintf(file, "fps");
++        for (size_t i = 0; i < kFsNumSites; i++)
++          std::fprintf(file, ",%s_calls,%s_flushes", kFlushSiteNames[i], kFlushSiteNames[i]);
++        std::fprintf(file, "\n");
++        std::fflush(file);
++      }
++      tick = std::chrono::steady_clock::now();
++    }
++    bool on() const { return file != nullptr; }
++    void call(FlushSite s) { if (file) calls[s]++; }
++    void flushed(FlushSite s) { if (file) flushes[s]++; }
++    void frame() {
++      if (!file) return;
++      frames++;
++      auto now = std::chrono::steady_clock::now();
++      double dt = std::chrono::duration<double>(now - tick).count();
++      if (dt < 1.0) return;
++      std::fprintf(file, "%.2f", double(frames) / dt);
++      for (size_t i = 0; i < kFsNumSites; i++) {
++        std::fprintf(file, ",%.1f,%.1f", double(calls[i]) / frames, double(flushes[i]) / frames);
++        calls[i] = 0; flushes[i] = 0;
++      }
++      std::fprintf(file, "\n");
++      std::fflush(file);
++      tick = now; frames = 0;
++    }
++  };
++  static FlushProbe g_flushProbe;
++  static FlushSite g_currentSite = kFsMisc1;
++
++  // Stall attribution (DXVK_STALL_LOG=<path>).
++  //
++  // The 4K frame is 40 ms with the GPU doing ~3 ms of work and neither of the two busy threads
++  // saturated -- the profile of two threads waiting on each other rather than of either being
++  // the cost. This measures the waiting directly: how long the calling thread spends blocked
++  // inside the places where D3D9 can block, per frame. Reported in milliseconds per frame, so
++  // a bucket at 20 in a 40 ms frame is half the frame spent doing nothing.
++  //
++  // Deliberately cheap: two clock reads per instrumented call and no allocation, unlike
++  // DXVK_DRAW_PROBE, which crashes the client at 4K with the sidecar attached.
++  enum StallSite { kStMapWait, kStMapBlocked, kStSyncCs, kStNumSites };
++  static const char* kStallSiteNames[kStNumSites] = { "map_wait", "map_blocked", "sync_cs" };
++
++  struct StallProbe {
++    FILE* file = nullptr;
++    uint64_t ns[kStNumSites] = { };
++    uint64_t hits[kStNumSites] = { };
++    std::chrono::steady_clock::time_point tick;
++    uint64_t frames = 0;
++
++    StallProbe() {
++      const char* p = std::getenv("DXVK_STALL_LOG");
++      if (p && *p) file = std::fopen(p, "a");
++      if (file) {
++        std::fprintf(file, "fps");
++        for (size_t i = 0; i < kStNumSites; i++)
++          std::fprintf(file, ",%s_ms,%s_n", kStallSiteNames[i], kStallSiteNames[i]);
++        std::fprintf(file, "\n");
++        std::fflush(file);
++      }
++      tick = std::chrono::steady_clock::now();
++    }
++    bool on() const { return file != nullptr; }
++    void add(StallSite s, std::chrono::steady_clock::time_point t0) {
++      if (!file) return;
++      ns[s] += std::chrono::duration_cast<std::chrono::nanoseconds>(
++        std::chrono::steady_clock::now() - t0).count();
++      hits[s]++;
++    }
++    void frame() {
++      if (!file) return;
++      frames++;
++      auto now = std::chrono::steady_clock::now();
++      double dt = std::chrono::duration<double>(now - tick).count();
++      if (dt < 1.0) return;
++      std::fprintf(file, "%.2f", double(frames) / dt);
++      for (size_t i = 0; i < kStNumSites; i++) {
++        std::fprintf(file, ",%.2f,%.1f",
++                     double(ns[i]) / 1.0e6 / double(frames), double(hits[i]) / double(frames));
++        ns[i] = 0; hits[i] = 0;
++      }
++      std::fprintf(file, "\n");
++      std::fflush(file);
++      tick = now; frames = 0;
++    }
++  };
++  static StallProbe g_stallProbe;
++}
++
++
++
 +  // Draw-cost probe (DXVK_DRAW_PROBE=<path>). Reports, once per second of wall time, how many
 +  // milliseconds of that second were spent inside our D3D9 draw entry points. Compared against
 +  // the present probe's "outside Present" figure this says whether a slow frame is our
@@ -522,6 +645,10 @@ index 734a7a0..a6ba745 100644
 +          std::fprintf(file, "draws_per_sec,draw_ms_per_sec,api_ms_per_sec");
 +          for (int i = 0; i < ApiCount; i++)
 +            std::fprintf(file, ",%s", g_apiNames[i]);
++          for (size_t i = 0; i < NumGapBuckets; i++)
++            std::fprintf(file, ",gap%zu_n,gap%zu_ms", i, i);
++          for (int i = 0; i < ApiCount; i++)
++            std::fprintf(file, ",before_%s_n,before_%s_ms", g_apiNames[i], g_apiNames[i]);
 +          std::fprintf(file, "\n");
 +        }
 +        tick = std::chrono::steady_clock::now();
@@ -531,10 +658,45 @@ index 734a7a0..a6ba745 100644
 +
 +      inline void count(D3D9ApiCall which) { if (file) api[which] += 1; }
 +
++      // Time between leaving one D3D9 entry point and entering the next. That interval is
++      // everything above us: FFXI's own code plus the Ashita and d3d8to9 proxies. Bucketing it
++      // separates a uniform per-call tax (thousands of ~1us gaps) from the game doing real work
++      // (a few very large gaps). Buckets are upper bounds in microseconds.
++      static constexpr size_t NumGapBuckets = 7;
++      static constexpr double GapEdges[NumGapBuckets] = { 1, 2, 5, 10, 50, 500, 1e9 };
++      uint64_t gapCount[NumGapBuckets] = { };
++      double   gapMs[NumGapBuckets] = { };
++      std::chrono::steady_clock::time_point lastExit;
++      bool haveLastExit = false;
++
++      // Which call the game makes *after* a long pause says what it was busy doing: a pause
++      // before Clear is the frame boundary, before LockBuffer it just built geometry on the CPU.
++      uint64_t bigGapBy[ApiCount] = { };
++      double   bigGapMsBy[ApiCount] = { };
++
++      inline void enterFrom(D3D9ApiCall which, std::chrono::steady_clock::time_point t0) {
++        if (!haveLastExit)
++          return;
++        double us = std::chrono::duration<double, std::micro>(t0 - lastExit).count();
++        for (size_t i = 0; i < NumGapBuckets; i++) {
++          if (us <= GapEdges[i]) {
++            gapCount[i] += 1;
++            gapMs[i] += us / 1000.0;
++            break;
++          }
++        }
++        if (us > 100.0) {
++          bigGapBy[which] += 1;
++          bigGapMsBy[which] += us / 1000.0;
++        }
++      }
++
 +      inline void addApi(D3D9ApiCall which, std::chrono::steady_clock::time_point t0) {
 +        api[which] += 1;
-+        apiMs += std::chrono::duration<double, std::milli>(
-+          std::chrono::steady_clock::now() - t0).count();
++        auto now = std::chrono::steady_clock::now();
++        apiMs += std::chrono::duration<double, std::milli>(now - t0).count();
++        lastExit = now;
++        haveLastExit = true;
 +      }
 +
 +      void add(std::chrono::steady_clock::time_point t0) {
@@ -550,6 +712,16 @@ index 734a7a0..a6ba745 100644
 +          std::fprintf(file, ",%.0f", double(api[i]) / dt);
 +          api[i] = 0;
 +        }
++        for (size_t i = 0; i < NumGapBuckets; i++) {
++          std::fprintf(file, ",%.0f,%.1f", double(gapCount[i]) / dt, gapMs[i] / dt);
++          gapCount[i] = 0;
++          gapMs[i] = 0.0;
++        }
++        for (int i = 0; i < ApiCount; i++) {
++          std::fprintf(file, ",%.0f,%.1f", double(bigGapBy[i]) / dt, bigGapMsBy[i] / dt);
++          bigGapBy[i] = 0;
++          bigGapMsBy[i] = 0.0;
++        }
 +        std::fprintf(file, "\n");
 +        std::fflush(file);
 +        tick = now;
@@ -564,7 +736,10 @@ index 734a7a0..a6ba745 100644
 +      D3D9ApiCall which;
 +      bool on;
 +      D3D9ApiTimer(D3D9ApiCall w) : which(w), on(g_drawProbe.on()) {
-+        if (on) t0 = std::chrono::steady_clock::now();
++        if (on) {
++          t0 = std::chrono::steady_clock::now();
++          g_drawProbe.enterFrom(w, t0);
++        }
 +      }
 +      ~D3D9ApiTimer() { if (on) g_drawProbe.addApi(which, t0); }
 +    };
@@ -593,16 +768,34 @@ index 734a7a0..a6ba745 100644
    D3D9DeviceEx::D3D9DeviceEx(
            D3D9InterfaceEx*       pParent,
            D3D9Adapter*           pAdapter,
-@@ -376,6 +555,8 @@ namespace dxvk {
+@@ -376,6 +724,10 @@ namespace dxvk {
      const RECT*    pDestRect,
            HWND     hDestWindowOverride,
      const RGNDATA* pDirtyRegion) {
 +    g_batchProbe.frame();
++    g_flushProbe.frame();
++    g_stallProbe.frame();
 +
      return PresentEx(
        pSourceRect,
        pDestRect,
-@@ -1410,6 +1591,7 @@ namespace dxvk {
+@@ -1270,6 +1622,7 @@ namespace dxvk {
+       return D3D_OK;
+ 
+     // Do a strong flush if the first render target is changed.
++    g_currentSite = kFsSetRT;
+     FlushImplicit(RenderTargetIndex == 0 ? TRUE : FALSE);
+     m_flags.set(D3D9DeviceFlag::DirtyFramebuffer);
+ 
+@@ -1390,6 +1743,7 @@ namespace dxvk {
+ 
+ 
+   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::EndScene() {
++    g_currentSite = kFsEndScene;
+     D3D9DeviceLock lock = LockDevice();
+ 
+     if (unlikely(!m_flags.test(D3D9DeviceFlag::InScene)))
+@@ -1410,6 +1764,7 @@ namespace dxvk {
            D3DCOLOR Color,
            float    Z,
            DWORD    Stencil) {
@@ -610,7 +803,7 @@ index 734a7a0..a6ba745 100644
      if (unlikely(!Count && pRects))
        return D3D_OK;
  
-@@ -1569,6 +1751,7 @@ namespace dxvk {
+@@ -1569,6 +1924,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetTransform(D3DTRANSFORMSTATETYPE State, const D3DMATRIX* pMatrix) {
@@ -618,7 +811,7 @@ index 734a7a0..a6ba745 100644
      return SetStateTransform(GetTransformIndex(State), pMatrix);
    }
  
-@@ -1605,6 +1788,7 @@ namespace dxvk {
+@@ -1605,6 +1961,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetViewport(const D3DVIEWPORT9* pViewport) {
@@ -626,7 +819,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(ShouldRecord()))
-@@ -1787,6 +1971,7 @@ namespace dxvk {
+@@ -1787,6 +2144,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value) {
@@ -634,7 +827,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      // D3D9 only allows reading for values 0 and 7-255 so we don't need to do anything but return OK
-@@ -2226,6 +2411,7 @@ namespace dxvk {
+@@ -2226,6 +2584,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetTexture(DWORD Stage, IDirect3DBaseTexture9* pTexture) {
@@ -642,7 +835,7 @@ index 734a7a0..a6ba745 100644
      if (unlikely(InvalidSampler(Stage)))
        return D3D_OK;
  
-@@ -2261,6 +2447,7 @@ namespace dxvk {
+@@ -2261,6 +2620,7 @@ namespace dxvk {
            DWORD                    Stage,
            D3DTEXTURESTAGESTATETYPE Type,
            DWORD                    Value) {
@@ -650,7 +843,7 @@ index 734a7a0..a6ba745 100644
      return SetStateTextureStageState(Stage, RemapTextureStageStateType(Type), Value);
    }
  
-@@ -2291,6 +2478,7 @@ namespace dxvk {
+@@ -2291,6 +2651,7 @@ namespace dxvk {
            DWORD               Sampler,
            D3DSAMPLERSTATETYPE Type,
            DWORD               Value) {
@@ -658,7 +851,7 @@ index 734a7a0..a6ba745 100644
      if (unlikely(InvalidSampler(Sampler)))
        return D3D_OK;
  
-@@ -2397,6 +2585,42 @@ namespace dxvk {
+@@ -2397,6 +2758,42 @@ namespace dxvk {
            D3DPRIMITIVETYPE PrimitiveType,
            UINT             StartVertex,
            UINT             PrimitiveCount) {
@@ -701,7 +894,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2433,6 +2657,42 @@ namespace dxvk {
+@@ -2433,6 +2830,42 @@ namespace dxvk {
            UINT             NumVertices,
            UINT             StartIndex,
            UINT             PrimitiveCount) {
@@ -744,7 +937,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2469,6 +2729,39 @@ namespace dxvk {
+@@ -2469,6 +2902,39 @@ namespace dxvk {
            UINT             PrimitiveCount,
      const void*            pVertexStreamZeroData,
            UINT             VertexStreamZeroStride) {
@@ -784,7 +977,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2522,6 +2815,39 @@ namespace dxvk {
+@@ -2522,6 +2988,39 @@ namespace dxvk {
            D3DFORMAT        IndexDataFormat,
      const void*            pVertexStreamZeroData,
            UINT             VertexStreamZeroStride) {
@@ -824,7 +1017,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2718,6 +3044,7 @@ namespace dxvk {
+@@ -2718,6 +3217,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetVertexDeclaration(IDirect3DVertexDeclaration9* pDecl) {
@@ -832,7 +1025,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      D3D9VertexDecl* decl = static_cast<D3D9VertexDecl*>(pDecl);
-@@ -2762,6 +3089,7 @@ namespace dxvk {
+@@ -2762,6 +3262,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetFVF(DWORD FVF) {
@@ -840,7 +1033,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (FVF == 0)
-@@ -2823,6 +3151,7 @@ namespace dxvk {
+@@ -2823,6 +3324,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetVertexShader(IDirect3DVertexShader9* pShader) {
@@ -848,7 +1041,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      D3D9VertexShader* shader = static_cast<D3D9VertexShader*>(pShader);
-@@ -2888,6 +3217,7 @@ namespace dxvk {
+@@ -2888,6 +3390,7 @@ namespace dxvk {
            UINT   StartRegister,
      const float* pConstantData,
            UINT   Vector4fCount) {
@@ -856,7 +1049,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      return SetShaderConstants<
-@@ -2979,6 +3309,7 @@ namespace dxvk {
+@@ -2979,6 +3482,7 @@ namespace dxvk {
            IDirect3DVertexBuffer9* pStreamData,
            UINT                    OffsetInBytes,
            UINT                    Stride) {
@@ -864,7 +1057,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(StreamNumber >= caps::MaxStreams))
-@@ -3098,6 +3429,7 @@ namespace dxvk {
+@@ -3098,6 +3602,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetIndices(IDirect3DIndexBuffer9* pIndexData) {
@@ -872,7 +1065,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      D3D9IndexBuffer* buffer = static_cast<D3D9IndexBuffer*>(pIndexData);
-@@ -3155,6 +3487,7 @@ namespace dxvk {
+@@ -3155,6 +3660,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetPixelShader(IDirect3DPixelShader9* pShader) {
@@ -880,7 +1073,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      D3D9PixelShader* shader = static_cast<D3D9PixelShader*>(pShader);
-@@ -3224,6 +3557,7 @@ namespace dxvk {
+@@ -3224,6 +3730,7 @@ namespace dxvk {
      UINT   StartRegister,
      const float* pConstantData,
      UINT   Vector4fCount) {
@@ -888,7 +1081,7 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      return SetShaderConstants <
-@@ -3892,8 +4226,13 @@ namespace dxvk {
+@@ -3892,8 +4399,13 @@ namespace dxvk {
      DxvkDeviceFeatures enabled = {};
  
      // Geometry shaders are used for some meta ops
@@ -904,7 +1097,7 @@ index 734a7a0..a6ba745 100644
      enabled.extRobustness2.robustBufferAccess2 = supported.extRobustness2.robustBufferAccess2;
  
      enabled.extMemoryPriority.memoryPriority = supported.extMemoryPriority.memoryPriority;
-@@ -3921,7 +4260,10 @@ namespace dxvk {
+@@ -3921,7 +4433,10 @@ namespace dxvk {
      enabled.core.features.sampleRateShading = VK_TRUE;
      enabled.core.features.samplerAnisotropy = supported.core.features.samplerAnisotropy;
      enabled.core.features.shaderClipDistance = VK_TRUE;
@@ -916,7 +1109,117 @@ index 734a7a0..a6ba745 100644
  
      // Ensure we support real BC formats and unofficial vendor ones.
      enabled.core.features.textureCompressionBC = VK_TRUE;
-@@ -4128,6 +4470,7 @@ namespace dxvk {
+@@ -4060,7 +4575,10 @@ namespace dxvk {
+   bool D3D9DeviceEx::WaitForResource(
+   const Rc<DxvkResource>&                 Resource,
+         uint64_t                          SequenceNumber,
+-        DWORD                             MapFlags) {
++        DWORD                             MapFlags,
++        bool                              IsImage) {
++    auto stallStart = std::chrono::steady_clock::now();
++
+     // Wait for the any pending D3D9 command to be executed
+     // on the CS thread so that we can determine whether the
+     // resource is currently in use or not.
+@@ -4079,6 +4597,7 @@ namespace dxvk {
+         // still try to spin on `Map` until the resource is
+         // idle, so we should flush pending commands
+         FlushImplicit(FALSE);
++        g_stallProbe.add(kStMapWait, stallStart);
+         return false;
+       }
+       else {
+@@ -4087,10 +4606,13 @@ namespace dxvk {
+         Flush();
+         SynchronizeCsThread(SequenceNumber);
+ 
+-        m_dxvkDevice->waitForResource(Resource, access);
++        auto blockStart = std::chrono::steady_clock::now();
++        m_dxvkDevice->waitForResource(Resource, access, IsImage);
++        g_stallProbe.add(kStMapBlocked, blockStart);
+       }
+     }
+ 
++    g_stallProbe.add(kStMapWait, stallStart);
+     return true;
+   }
+ 
+@@ -4121,6 +4643,74 @@ namespace dxvk {
+   }
+ 
+ 
++
++  // Which texture locks stall on the GPU (D3D9_LOCKIMAGE_PROBE=<path>, off unless set).
++  //
++  // In-world, 100% of this project's GPU synchronisations come from LockImage and they cost
++  // ~22 ms of a ~32 ms frame. Whether that is fixable depends entirely on *what* is being
++  // locked -- pool, usage and size decide which of DXVK's escape hatches (DISCARD, staging
++  // upload, skipWait) is even available. Aggregated by texture kind so it costs a hash lookup
++  // per lock rather than a line of I/O.
++  namespace {
++    struct LockImageProbe {
++      struct Key {
++        uint32_t pool, usage, format, w, h, discard, readback, waited;
++        bool operator==(const Key& o) const {
++          return pool == o.pool && usage == o.usage && format == o.format && w == o.w
++              && h == o.h && discard == o.discard && readback == o.readback
++              && waited == o.waited;
++        }
++      };
++      struct Hash {
++        size_t operator()(const Key& k) const {
++          size_t h = 1469598103934665603ull;
++          for (uint32_t v : { k.pool, k.usage, k.format, k.w, k.h, k.discard, k.readback,
++                              k.waited })
++            h = (h ^ v) * 1099511628211ull;
++          return h;
++        }
++      };
++
++      FILE* file = nullptr;
++      std::mutex mutex;
++      std::unordered_map<Key, uint64_t, Hash> counts;
++      dxvk::high_resolution_clock::time_point tick;
++
++      LockImageProbe() {
++        const char* path = std::getenv("D3D9_LOCKIMAGE_PROBE");
++        if (path == nullptr || *path == '\0')
++          return;
++        file = std::fopen(path, "a");
++        if (file != nullptr) {
++          std::fprintf(file, "pool,usage,format,w,h,discard,readback,waited,locks_per_s\n");
++          std::fflush(file);
++        }
++        tick = dxvk::high_resolution_clock::now();
++      }
++
++      void record(const Key& k) {
++        if (file == nullptr)
++          return;
++        std::lock_guard<std::mutex> lock(mutex);
++        counts[k] += 1;
++        auto now = dxvk::high_resolution_clock::now();
++        double dt = std::chrono::duration<double>(now - tick).count();
++        if (dt < 2.0)
++          return;
++        for (const auto& e : counts) {
++          std::fprintf(file, "%u,0x%x,%u,%u,%u,%u,%u,%u,%.1f\n",
++            e.first.pool, e.first.usage, e.first.format, e.first.w, e.first.h,
++            e.first.discard, e.first.readback, e.first.waited, double(e.second) / dt);
++        }
++        std::fflush(file);
++        counts.clear();
++        tick = now;
++      }
++    };
++
++    static LockImageProbe g_lockImageProbe;
++  }
++
+   HRESULT D3D9DeviceEx::LockImage(
+             D3D9CommonTexture*      pResource,
+             UINT                    Face,
+@@ -4128,6 +4718,7 @@ namespace dxvk {
              D3DLOCKED_BOX*          pLockedBox,
        const D3DBOX*                 pBox,
              DWORD                   Flags) {
@@ -924,7 +1227,60 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      UINT Subresource = pResource->CalcSubresource(Face, MipLevel);
-@@ -4588,6 +4931,7 @@ namespace dxvk {
+@@ -4208,6 +4799,9 @@ namespace dxvk {
+     DxvkBufferSliceHandle physSlice;
+ 
+     if (Flags & D3DLOCK_DISCARD) {
++      g_lockImageProbe.record({ uint32_t(desc.Pool), uint32_t(desc.Usage),
++                                uint32_t(desc.Format), desc.Width, desc.Height, 1u,
++                                uint32_t(needsReadback), 0u });
+       // We do not have to preserve the contents of the
+       // buffer if the entire image gets discarded.
+       physSlice = pResource->DiscardMapSlice(Subresource);
+@@ -4303,11 +4897,40 @@ namespace dxvk {
+             }
+           });
+           TrackTextureMappingBufferSequenceNumber(pResource, Subresource);
+-        } else if (!(Flags & D3DLOCK_DONOTWAIT) && !WaitForResource(mappedBuffer, pResource->GetMappingBufferSequenceNumber(Subresource), D3DLOCK_DONOTWAIT)) {
++        } else if (!(Flags & D3DLOCK_DONOTWAIT) && !WaitForResource(mappedBuffer, pResource->GetMappingBufferSequenceNumber(Subresource), D3DLOCK_DONOTWAIT, true)) {
+           pResource->EnableStagingBufferUploads(Subresource);
+         }
+ 
+-        if (!WaitForResource(mappedBuffer, pResource->GetMappingBufferSequenceNumber(Subresource), Flags))
++        g_lockImageProbe.record({ uint32_t(desc.Pool), uint32_t(desc.Usage),
++                                  uint32_t(desc.Format), desc.Width, desc.Height,
++                                  uint32_t((Flags & D3DLOCK_DISCARD) != 0),
++                                  uint32_t(needsReadback), 1u });
++
++        // D3D9_RT_READBACK_NOWAIT=<max edge in px>: do not block on the read-back of a small
++        // render target.
++        //
++        // FFXI reads a 16x16 D3DUSAGE_RENDERTARGET texture back about 5.4 times per frame --
++        // the shape of an occlusion / lens-flare visibility test. Each read-back drains the
++        // pipeline: measured in town it is ~22 ms of a ~32 ms frame, and it is the reason the
++        // CPU and GPU run in lockstep with the GPU only ~70% busy. The copy is still issued, so
++        // the buffer keeps being refreshed; skipping only the wait means the game reads the
++        // previous frame's result instead of this frame's. For a visibility factor driving a
++        // flare's brightness, one frame of lag is not observable -- but this is a semantic
++        // change, so it is opt-in and bounded to small surfaces.
++        static const uint32_t rtNoWaitMaxEdge = [] {
++          const char* v = std::getenv("D3D9_RT_READBACK_NOWAIT");
++          return (v != nullptr && *v != '\0') ? uint32_t(std::atoi(v)) : 0u;
++        }();
++
++        const bool smallRtReadback = rtNoWaitMaxEdge != 0
++          && needsReadback
++          && desc.Pool == D3DPOOL_DEFAULT
++          && (desc.Usage & D3DUSAGE_RENDERTARGET)
++          && desc.Width  <= rtNoWaitMaxEdge
++          && desc.Height <= rtNoWaitMaxEdge;
++
++        if (!smallRtReadback &&
++            !WaitForResource(mappedBuffer, pResource->GetMappingBufferSequenceNumber(Subresource), Flags, true))
+           return D3DERR_WASSTILLDRAWING;
+       }
+     }
+@@ -4588,6 +5211,7 @@ namespace dxvk {
            UINT                    SizeToLock,
            void**                  ppbData,
            DWORD                   Flags) {
@@ -932,7 +1288,68 @@ index 734a7a0..a6ba745 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(ppbData == nullptr))
-@@ -5553,6 +5897,58 @@ namespace dxvk {
+@@ -4773,25 +5397,50 @@ namespace dxvk {
+   }
+ 
+ 
++
++
+   void D3D9DeviceEx::FlushImplicit(BOOL StrongHint) {
++    g_flushProbe.call(g_currentSite);
+     // Flush only if the GPU is about to go idle, in
+     // order to keep the number of submissions low.
+     uint32_t pending = m_dxvkDevice->pendingSubmissions();
+ 
++    // Submission pacing, made tunable (DXVK_FLUSH_INTERVAL_US, DXVK_NO_STRONG_FLUSH=1).
++    //
++    // The 750 us floor was chosen for Vulkan drivers where a submit is cheap. On Metal through
++    // MoltenVK each submit is a command-buffer commit, and FFXI in town was measured at ~30
++    // submits *per frame* -- it calls this on every texture upload and on every change of
++    // render target 0, and a city streams textures continuously. Raising the interval trades
++    // latency for far fewer commits.
++    static const uint32_t minFlushUs = [] {
++      const char* v = std::getenv("DXVK_FLUSH_INTERVAL_US");
++      return (v && *v) ? uint32_t(std::atoi(v)) : MinFlushIntervalUs;
++    }();
++    static const bool noStrongFlush = [] {
++      const char* v = std::getenv("DXVK_NO_STRONG_FLUSH");
++      return v && *v && *v != '0';
++    }();
++
++    if (noStrongFlush)
++      StrongHint = FALSE;
++
+     if (StrongHint || pending <= MaxPendingSubmits) {
+       auto now = dxvk::high_resolution_clock::now();
+ 
+-      uint32_t delay = MinFlushIntervalUs
++      uint32_t delay = minFlushUs
+                      + IncFlushIntervalUs * pending;
+ 
+       // Prevent flushing too often in short intervals.
+-      if (now - m_lastFlush >= std::chrono::microseconds(delay))
++      if (now - m_lastFlush >= std::chrono::microseconds(delay)) {
++        g_flushProbe.flushed(g_currentSite);
+         Flush();
++      }
+     }
+   }
+ 
+ 
+   void D3D9DeviceEx::SynchronizeCsThread(uint64_t SequenceNumber) {
++    auto stallStart = std::chrono::steady_clock::now();
+     D3D9DeviceLock lock = LockDevice();
+ 
+     // Dispatch current chunk so that all commands
+@@ -4799,6 +5448,7 @@ namespace dxvk {
+     FlushCsChunk();
+ 
+     m_csThread.synchronize(SequenceNumber);
++    g_stallProbe.add(kStSyncCs, stallStart);
+   }
+ 
+ 
+@@ -5553,6 +6203,58 @@ namespace dxvk {
    }
  
  
@@ -991,19 +1408,24 @@ index 734a7a0..a6ba745 100644
    void D3D9DeviceEx::BindFramebuffer() {
      m_flags.clr(D3D9DeviceFlag::DirtyFramebuffer);
  
-@@ -5581,8 +5977,20 @@ namespace dxvk {
+@@ -5581,8 +6283,25 @@ namespace dxvk {
          m_state.renderTargets[i]->GetRenderTargetLayout() };
      }
  
-+    // Keeping the depth-stencil attached even while depth and stencil are disabled costs
-+    // nothing -- the pipeline's depth/stencil state already says "don't test, don't write" --
-+    // but detaching it changes the attachment set, which forces a new framebuffer and spills
-+    // the render pass. FFXI toggles ZENABLE/ZWRITEENABLE constantly (world geometry vs UI), so
-+    // detaching produced ~59 render passes per frame, and on Metal every render pass is a new
-+    // MTLRenderCommandEncoder. Set DXVK_KEEP_DEPTH=0 to get the old behaviour back for A/B.
++    // DXVK_KEEP_DEPTH=1 keeps the depth-stencil attached even while depth and stencil are
++    // disabled. Detaching it changes the attachment set, which forces a new framebuffer and
++    // spills the render pass, and FFXI toggles ZENABLE/ZWRITEENABLE constantly (world geometry
++    // vs UI) -- roughly 24,000 render-pass breaks per session. It is the architecturally
++    // correct fix and it does remove them.
++    //
++    // It is off by default anyway, because it was measured and it does not pay: those breaks
++    // are only ~700 render passes a second, under 2% of the frame, and keeping the attachment
++    // bound adds depth load/store work that made the measured frame rate slightly *worse*
++    // (11.6 vs 12.9 fps). Kept because it is the right answer on a driver where render passes
++    // are expensive, and because the measurement is worth being able to repeat.
 +    static const bool keepDepthAttached = [] {
 +      const char* v = std::getenv("DXVK_KEEP_DEPTH");
-+      return v == nullptr || std::strcmp(v, "0") != 0;
++      return v != nullptr && std::strcmp(v, "0") != 0;
 +    }();
 +
      if (m_state.depthStencil != nullptr &&
@@ -1013,7 +1435,7 @@ index 734a7a0..a6ba745 100644
          || m_state.renderStates[D3DRS_ZWRITEENABLE]
          || m_state.renderStates[D3DRS_STENCILENABLE])) {
        const DxvkImageCreateInfo& dsImageInfo = m_state.depthStencil->GetCommonTexture()->GetImage()->info();
-@@ -5595,6 +6003,12 @@ namespace dxvk {
+@@ -5595,6 +6314,12 @@ namespace dxvk {
        }
      }
  
@@ -1026,8 +1448,16 @@ index 734a7a0..a6ba745 100644
      // Create and bind the framebuffer object to the context
      EmitCs([
        cAttachments = std::move(attachments)
+@@ -6429,6 +7154,7 @@ namespace dxvk {
+ 
+ 
+   void D3D9DeviceEx::End(D3D9Query* pQuery) {
++    g_currentSite = kFsQueryEnd;
+     D3D9DeviceLock lock = LockDevice();
+ 
+     EmitCs([cQuery = Com<D3D9Query, false>(pQuery)](DxvkContext* ctx) {
 diff --git a/src/d3d9/d3d9_device.h b/src/d3d9/d3d9_device.h
-index cec4829..74155f0 100644
+index cec4829..8e1e04a 100644
 --- a/src/d3d9/d3d9_device.h
 +++ b/src/d3d9/d3d9_device.h
 @@ -1,5 +1,8 @@
@@ -1039,6 +1469,16 @@ index cec4829..74155f0 100644
  #include "../dxvk/dxvk_device.h"
  #include "../dxvk/dxvk_cs.h"
  
+@@ -665,7 +668,8 @@ namespace dxvk {
+     bool WaitForResource(
+       const Rc<DxvkResource>&                 Resource,
+             uint64_t                          SequenceNumber,
+-            DWORD                             MapFlags);
++            DWORD                             MapFlags,
++            bool                              IsImage = false);
+ 
+     /**
+      * \brief Locks a subresource of an image
 diff --git a/src/d3d9/d3d9_device_child.h b/src/d3d9/d3d9_device_child.h
 index 433a269..1b62f06 100644
 --- a/src/d3d9/d3d9_device_child.h
@@ -1326,19 +1766,20 @@ index 43a712a..e0bcc25 100644
  #include "d3d9_device.h"
  #include "d3d9_state.h"
 diff --git a/src/d3d9/d3d9_swapchain.cpp b/src/d3d9/d3d9_swapchain.cpp
-index 306a79b..02f1bdf 100644
+index 306a79b..8888818 100644
 --- a/src/d3d9/d3d9_swapchain.cpp
 +++ b/src/d3d9/d3d9_swapchain.cpp
-@@ -1,4 +1,8 @@
+@@ -1,4 +1,9 @@
  #include "d3d9_swapchain.h"
 +
 +#include <chrono>
 +#include <cstdio>
 +#include <cstdlib>
++#include <tlhelp32.h>
  #include "d3d9_surface.h"
  #include "d3d9_monitor.h"
  
-@@ -244,12 +248,133 @@ namespace dxvk {
+@@ -244,12 +249,732 @@ namespace dxvk {
    }
  
  
@@ -1391,6 +1832,585 @@ index 306a79b..02f1bdf 100644
 +      }
 +    };
 +    static D3D9PresentProbe g_presentProbe;
++  }
++
++  // Wait probe (DXVK_WAIT_LOG=<path>).
++  //
++  // Per-thread CPU accounting settled that the client is *waiting*, not computing: 1.75 s of CPU
++  // across a 40 s in-world window while presenting at 12 fps. That says a blocking call is eating
++  // the frame, but not which one. This patches FFXiMain.dll's import table so every blocking
++  // entry point it calls goes through a timer first, and writes one CSV row per second with the
++  // count and total milliseconds for each. Nothing here changes behaviour -- each thunk calls
++  // straight through to the original -- and none of it runs unless the variable is set.
++  namespace {
++    enum WaitFn {
++      kSleep, kSleepEx, kWaitSingle, kWaitSingleEx, kWaitMulti, kWaitMultiEx,
++      kSelect, kRecv, kWSAWaitMulti, kWSAEnumEvents, kWaitMsg, kNtDelay, kFrameLatency,
++      kNumWaitFns
++    };
++
++    static const char* const kWaitNames[kNumWaitFns] = {
++      "Sleep", "SleepEx", "WaitForSingleObject", "WaitForSingleObjectEx",
++      "WaitForMultipleObjects", "WaitForMultipleObjectsEx", "select", "recv",
++      "WSAWaitForMultipleEvents", "WSAEnumNetworkEvents", "MsgWaitForMultipleObjects",
++      "NtDelayExecution", "SyncFrameLatency" };
++
++    struct WaitProbe {
++      FILE* file = nullptr;
++      std::atomic<uint64_t> count[kNumWaitFns] = { };
++      std::atomic<uint64_t> nanos[kNumWaitFns] = { };
++      std::chrono::steady_clock::time_point tick;
++      uint64_t frames = 0;
++      bool hooked = false;
++
++      WaitProbe() {
++        const char* p = std::getenv("DXVK_WAIT_LOG");
++        if (p && *p)
++          file = std::fopen(p, "a");
++        if (file) {
++          std::fprintf(file, "fps,wall_ms,frame_user_ms,frame_kernel_ms");
++          for (size_t i = 0; i < kNumWaitFns; i++)
++              std::fprintf(file, ",%s_n,%s_ms,%s_mainn,%s_mainms",
++              kWaitNames[i], kWaitNames[i], kWaitNames[i], kWaitNames[i]);
++          std::fprintf(file, "\n");
++          std::fflush(file);
++        }
++        tick = std::chrono::steady_clock::now();
++      }
++
++      bool on() const { return file != nullptr; }
++
++      // The thread that calls Present is the frame thread; only its waits can cost frame rate.
++      // Clamping every thread's short sleeps moved 15 s of CPU and not one frame, because the
++      // sleeping was happening off the frame path -- so the counters are split by thread now.
++      std::atomic<uint32_t> presentThread = { 0 };
++      std::atomic<uint64_t> countMain[kNumWaitFns] = { };
++      std::atomic<uint64_t> nanosMain[kNumWaitFns] = { };
++
++      void add(WaitFn fn, std::chrono::steady_clock::time_point t0) {
++        auto dt = std::chrono::steady_clock::now() - t0;
++        uint64_t ns = uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(dt).count());
++        count[fn].fetch_add(1, std::memory_order_relaxed);
++        nanos[fn].fetch_add(ns, std::memory_order_relaxed);
++        if (GetCurrentThreadId() == presentThread.load(std::memory_order_relaxed)) {
++          countMain[fn].fetch_add(1, std::memory_order_relaxed);
++          nanosMain[fn].fetch_add(ns, std::memory_order_relaxed);
++        }
++      }
++
++      // Frame-thread CPU accounting. The frame thread turned out to make no blocking calls at
++      // all, so the question became whether its ~77 ms per frame is spent executing or parked in
++      // the kernel. GetThreadTimes answers it directly: user + kernel time for this thread only,
++      // against the wall clock over the same second.
++      uint64_t prevUser = 0, prevKernel = 0;
++      bool haveTimes = false;
++
++      void frame() {
++        if (!file)
++          return;
++        frames += 1;
++        auto now = std::chrono::steady_clock::now();
++        double dt = std::chrono::duration<double>(now - tick).count();
++        if (dt < 1.0)
++          return;
++
++        double userMs = 0.0, kernelMs = 0.0;
++        FILETIME ftC, ftE, ftK, ftU;
++        if (GetThreadTimes(GetCurrentThread(), &ftC, &ftE, &ftK, &ftU)) {
++          auto to64 = [](const FILETIME& f) {
++            return (uint64_t(f.dwHighDateTime) << 32) | f.dwLowDateTime; };
++          uint64_t u = to64(ftU), k = to64(ftK);
++          if (haveTimes) {
++            userMs   = double(u - prevUser)   / 10000.0;   // 100 ns units
++            kernelMs = double(k - prevKernel) / 10000.0;
++          }
++          prevUser = u; prevKernel = k; haveTimes = true;
++        }
++
++        std::fprintf(file, "%.2f", double(frames) / dt);
++        std::fprintf(file, ",%.1f,%.1f,%.1f", dt * 1000.0, userMs, kernelMs);
++        for (size_t i = 0; i < kNumWaitFns; i++) {
++          uint64_t n  = count[i].exchange(0, std::memory_order_relaxed);
++          uint64_t ns = nanos[i].exchange(0, std::memory_order_relaxed);
++          uint64_t nm = countMain[i].exchange(0, std::memory_order_relaxed);
++          uint64_t nsm = nanosMain[i].exchange(0, std::memory_order_relaxed);
++          std::fprintf(file, ",%llu,%.2f,%llu,%.2f", (unsigned long long) n, double(ns) / 1.0e6,
++            (unsigned long long) nm, double(nsm) / 1.0e6);
++        }
++        std::fprintf(file, "\n");
++        std::fflush(file);
++        tick = now;
++        frames = 0;
++      }
++    };
++
++    static WaitProbe g_waitProbe;
++
++    // Sampling profiler (DXVK_SAMPLE_LOG=<path>).
++    //
++    // The frame thread runs flat out -- 1040 ms of user CPU per 1058 ms of wall clock -- so the
++    // question is no longer "what is it waiting for" but "what code is it running". A helper
++    // thread suspends the frame thread on a fixed interval, reads its instruction pointer, and
++    // attributes the sample to whichever module the address falls in. That is a real profile of
++    // translated 32-bit code, which the host-side tools cannot produce: `sample` cannot unwind
++    // through this stack and reports two meaningless addresses.
++    struct ModuleBucket {
++      char     name[64] = { };
++      uintptr_t lo = 0, hi = 0;
++      uint64_t hits = 0;
++    };
++
++    struct SampleProfiler {
++      FILE* file = nullptr;
++      HANDLE thread = nullptr;
++      std::atomic<bool> stop = { false };
++      ModuleBucket mods[64] = { };
++      size_t modCount = 0;
++      uint64_t unknown = 0, total = 0;
++
++      bool on() const { return file != nullptr; }
++
++      void addModule(const char* name) {
++        HMODULE m = GetModuleHandleA(name);
++        if (m == nullptr || modCount >= 64)
++          return;
++        auto base = reinterpret_cast<uint8_t*>(m);
++        auto dos  = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
++        auto nt   = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
++        auto& b = mods[modCount++];
++        std::snprintf(b.name, sizeof(b.name), "%s", name);
++        b.lo = uintptr_t(base);
++        b.hi = b.lo + nt->OptionalHeader.SizeOfImage;
++      }
++
++      // Per-symbol counts for the hot module. Knowing the time is in ntdll is not enough: a
++      // sample parked in NtWaitForSingleObject means the thread is blocked, one in the wow64
++      // transition thunk means it is paying per-call overhead, and those lead opposite ways.
++      // Resolved by walking the export table for the nearest exported address at or below the
++      // sampled instruction pointer -- no symbol server involved.
++      static constexpr size_t NumSyms = 24;
++      struct SymBucket { char name[64] = { }; uint64_t hits = 0; };
++      SymBucket syms[NumSyms] = { };
++      size_t symCount = 0;
++      HMODULE hotModule = nullptr;
++
++      const char* nearestExport(HMODULE mod, uintptr_t ip) {
++        auto base = reinterpret_cast<uint8_t*>(mod);
++        auto dos  = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
++        auto nt   = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
++        auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
++        if (dir.VirtualAddress == 0)
++          return nullptr;
++        auto exp = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(base + dir.VirtualAddress);
++        auto funcs = reinterpret_cast<uint32_t*>(base + exp->AddressOfFunctions);
++        auto names = reinterpret_cast<uint32_t*>(base + exp->AddressOfNames);
++        auto ords  = reinterpret_cast<uint16_t*>(base + exp->AddressOfNameOrdinals);
++
++        uintptr_t bestAddr = 0;
++        const char* best = nullptr;
++        for (uint32_t i = 0; i < exp->NumberOfNames; i++) {
++          uintptr_t a = uintptr_t(base) + funcs[ords[i]];
++          if (a <= ip && a > bestAddr) {
++            bestAddr = a;
++            best = reinterpret_cast<const char*>(base + names[i]);
++          }
++        }
++        return best;
++      }
++
++      void countSym(const char* name) {
++        for (size_t i = 0; i < symCount; i++) {
++          if (std::strcmp(syms[i].name, name) == 0) {
++            syms[i].hits++;
++            return;
++          }
++        }
++        if (symCount < NumSyms) {
++          std::snprintf(syms[symCount].name, sizeof(syms[symCount].name), "%s", name);
++          syms[symCount].hits = 1;
++          symCount++;
++        }
++      }
++
++      static constexpr size_t NumOffsets = 16;
++      struct OffBucket { uintptr_t off = 0; uint64_t hits = 0; };
++      OffBucket offs[NumOffsets] = { };
++      size_t offCount = 0;
++
++      void countOffset(uintptr_t off) {
++        off &= ~uintptr_t(0x3F);              // 64-byte granularity: a function, not a line
++        for (size_t i = 0; i < offCount; i++) {
++          if (offs[i].off == off) {
++            offs[i].hits++;
++            return;
++          }
++        }
++        if (offCount < NumOffsets)
++          offs[offCount++] = { off, 1 };
++      }
++
++      void hit(uintptr_t ip) {
++        total++;
++        for (size_t i = 0; i < modCount; i++) {
++          if (ip >= mods[i].lo && ip < mods[i].hi) {
++            mods[i].hits++;
++            if (hotModule != nullptr && uintptr_t(hotModule) == mods[i].lo) {
++              const char* s = nearestExport(hotModule, ip);
++              countSym(s ? s : "<no-export>");
++              // Nearest-export naming is only as good as the export table: wine's ntdll has a
++              // great deal of unexported code, so an address in the wow64 transition path
++              // resolves to whichever export happens to sit below it. Raw offsets say which
++              // it really is -- compare them against the reported symbol's address.
++              countOffset(ip - mods[i].lo);
++            }
++            return;
++          }
++        }
++        unknown++;
++      }
++
++      void report() {
++        if (!file)
++          return;
++        std::fprintf(file, "total=%llu unknown=%llu", (unsigned long long) total,
++          (unsigned long long) unknown);
++        for (size_t i = 0; i < modCount; i++)
++          std::fprintf(file, " %s=%llu", mods[i].name, (unsigned long long) mods[i].hits);
++        for (size_t i = 0; i < symCount; i++)
++          std::fprintf(file, " |%s=%llu", syms[i].name, (unsigned long long) syms[i].hits);
++        for (size_t i = 0; i < offCount; i++)
++          std::fprintf(file, " @%llx=%llu", (unsigned long long) offs[i].off,
++            (unsigned long long) offs[i].hits);
++        // The reference point for reading those offsets.
++        if (hotModule != nullptr) {
++          void* nd = (void*) GetProcAddress(hotModule, "NtDelayExecution");
++          if (nd)
++            std::fprintf(file, " NtDelayExecution@%llx",
++              (unsigned long long) (uintptr_t(nd) - uintptr_t(hotModule)));
++        }
++        std::fprintf(file, "\n");
++        std::fflush(file);
++        for (size_t i = 0; i < modCount; i++)
++          mods[i].hits = 0;
++        symCount = 0;
++        offCount = 0;
++        unknown = total = 0;
++      }
++    };
++
++    static SampleProfiler g_profiler;
++
++    static DWORD WINAPI SampleThreadProc(void* param) {
++      HANDLE target = reinterpret_cast<HANDLE>(param);
++      auto tick = std::chrono::steady_clock::now();
++      while (!g_profiler.stop.load(std::memory_order_relaxed)) {
++        if (SuspendThread(target) != DWORD(-1)) {
++          CONTEXT ctx = { };
++          ctx.ContextFlags = CONTEXT_CONTROL;
++          if (GetThreadContext(target, &ctx)) {
++#if defined(_WIN64)
++            g_profiler.hit(uintptr_t(ctx.Rip));
++#else
++            g_profiler.hit(uintptr_t(ctx.Eip));
++#endif
++          }
++          ResumeThread(target);
++        }
++        Sleep(1);
++        auto now = std::chrono::steady_clock::now();
++        if (std::chrono::duration<double>(now - tick).count() >= 1.0) {
++          g_profiler.report();
++          tick = now;
++        }
++      }
++      return 0;
++    }
++
++    static void StartProfiler() {
++      if (g_profiler.thread != nullptr)
++        return;
++      const char* p = std::getenv("DXVK_SAMPLE_LOG");
++      if (p == nullptr || *p == '\0')
++        return;
++      // Only start once FFXiMain is mapped, so its address range is known.
++      if (GetModuleHandleA("FFXiMain.dll") == nullptr)
++        return;
++      g_profiler.file = std::fopen(p, "a");
++      if (g_profiler.file == nullptr)
++        return;
++      for (const char* m : { "FFXiMain.dll", "d3d8.dll", "d3d9.dll", "polcore.dll",
++                             "polcoreE.dll", "Ashita.dll", "kernel32.dll", "ntdll.dll",
++                             "user32.dll", "gdi32.dll", "ws2_32.dll", "msvcrt.dll",
++                             "horizon-loader.exe", "win32u.dll", "opengl32.dll" })
++        g_profiler.addModule(m);
++
++      // ntdll took ~90% of the frame thread's samples, so that is the module worth naming.
++      // Overridable, because the answer there may point at a different one next.
++      const char* hot = std::getenv("DXVK_SAMPLE_MODULE");
++      g_profiler.hotModule = GetModuleHandleA(hot && *hot ? hot : "ntdll.dll");
++
++      HANDLE dup = nullptr;
++      DuplicateHandle(GetCurrentProcess(), GetCurrentThread(),
++                      GetCurrentProcess(), &dup, 0, FALSE, DUPLICATE_SAME_ACCESS);
++      g_profiler.thread = CreateThread(nullptr, 0, &SampleThreadProc, dup, 0, nullptr);
++      Logger::info(str::format("sample profiler started over ", g_profiler.modCount, " modules"));
++    }
++
++    // The thunks. Each records elapsed time against its slot and forwards unchanged.
++    using PfnSleep       = void  (WINAPI*)(DWORD);
++    using PfnSleepEx     = DWORD (WINAPI*)(DWORD, BOOL);
++    using PfnWaitSingle  = DWORD (WINAPI*)(HANDLE, DWORD);
++    using PfnWaitSingleEx= DWORD (WINAPI*)(HANDLE, DWORD, BOOL);
++    using PfnWaitMulti   = DWORD (WINAPI*)(DWORD, const HANDLE*, BOOL, DWORD);
++    using PfnWaitMultiEx = DWORD (WINAPI*)(DWORD, const HANDLE*, BOOL, DWORD, BOOL);
++    using PfnWaitMsg     = DWORD (WINAPI*)(DWORD, const HANDLE*, BOOL, DWORD, DWORD);
++    using PfnGeneric     = int   (WINAPI*)(void);
++
++    static void*  g_orig[kNumWaitFns] = { };
++
++    // Short-sleep clamp (FFXI_SLEEP_CLAMP=<ms>, unset = leave alone).
++    //
++    // The client polls with ~200 Sleep() calls per frame. On Windows a 1 ms sleep costs about
++    // that; under this wine it costs 1.25 ms, and 200 of them is 250 ms of wall clock spent
++    // doing nothing -- which is the whole of the in-world stall. Requests at or below the clamp
++    // become Sleep(0), which yields the timeslice without arming a timer (measured at 4 us).
++    // The loop then makes progress at CPU speed. Only sleeps *shorter* than the clamp are
++    // touched, so any genuine long wait is left exactly as the client asked for it.
++    static DWORD g_sleepClamp = 0;
++
++    static void WINAPI HookSleep(DWORD ms) {
++      auto t0 = std::chrono::steady_clock::now();
++      reinterpret_cast<PfnSleep>(g_orig[kSleep])(ms <= g_sleepClamp ? 0 : ms);
++      g_waitProbe.add(kSleep, t0);
++    }
++    static DWORD WINAPI HookSleepEx(DWORD ms, BOOL alert) {
++      auto t0 = std::chrono::steady_clock::now();
++      DWORD r = reinterpret_cast<PfnSleepEx>(g_orig[kSleepEx])(ms, alert);
++      g_waitProbe.add(kSleepEx, t0);
++      return r;
++    }
++    static DWORD WINAPI HookWaitSingle(HANDLE h, DWORD ms) {
++      auto t0 = std::chrono::steady_clock::now();
++      DWORD r = reinterpret_cast<PfnWaitSingle>(g_orig[kWaitSingle])(h, ms);
++      g_waitProbe.add(kWaitSingle, t0);
++      return r;
++    }
++    static DWORD WINAPI HookWaitSingleEx(HANDLE h, DWORD ms, BOOL alert) {
++      auto t0 = std::chrono::steady_clock::now();
++      DWORD r = reinterpret_cast<PfnWaitSingleEx>(g_orig[kWaitSingleEx])(h, ms, alert);
++      g_waitProbe.add(kWaitSingleEx, t0);
++      return r;
++    }
++    static DWORD WINAPI HookWaitMulti(DWORD n, const HANDLE* h, BOOL all, DWORD ms) {
++      auto t0 = std::chrono::steady_clock::now();
++      DWORD r = reinterpret_cast<PfnWaitMulti>(g_orig[kWaitMulti])(n, h, all, ms);
++      g_waitProbe.add(kWaitMulti, t0);
++      return r;
++    }
++    static DWORD WINAPI HookWaitMultiEx(DWORD n, const HANDLE* h, BOOL all, DWORD ms, BOOL alert) {
++      auto t0 = std::chrono::steady_clock::now();
++      DWORD r = reinterpret_cast<PfnWaitMultiEx>(g_orig[kWaitMultiEx])(n, h, all, ms, alert);
++      g_waitProbe.add(kWaitMultiEx, t0);
++      return r;
++    }
++    static DWORD WINAPI HookWaitMsg(DWORD n, const HANDLE* h, BOOL all, DWORD ms, DWORD mask) {
++      auto t0 = std::chrono::steady_clock::now();
++      DWORD r = reinterpret_cast<PfnWaitMsg>(g_orig[kWaitMsg])(n, h, all, ms, mask);
++      g_waitProbe.add(kWaitMsg, t0);
++      return r;
++    }
++
++    // ws2_32 entry points, timed the same way. Their signatures differ but every one of them is
++    // called through a pointer whose arguments we never touch, so a cdecl-shaped forward with the
++    // right stack size is all that is needed -- declared with the real prototypes to keep the
++    // 32-bit stdcall stack balanced.
++    using PfnSelect   = int (WINAPI*)(int, void*, void*, void*, const void*);
++    using PfnRecv     = int (WINAPI*)(UINT_PTR, char*, int, int);
++    using PfnWSAWait  = DWORD (WINAPI*)(DWORD, const HANDLE*, BOOL, DWORD, BOOL);
++    using PfnWSAEnum  = int (WINAPI*)(UINT_PTR, HANDLE, void*);
++
++    static int WINAPI HookSelect(int n, void* r, void* w, void* e, const void* tv) {
++      auto t0 = std::chrono::steady_clock::now();
++      int rc = reinterpret_cast<PfnSelect>(g_orig[kSelect])(n, r, w, e, tv);
++      g_waitProbe.add(kSelect, t0);
++      return rc;
++    }
++    static int WINAPI HookRecv(UINT_PTR s, char* buf, int len, int flags) {
++      auto t0 = std::chrono::steady_clock::now();
++      int rc = reinterpret_cast<PfnRecv>(g_orig[kRecv])(s, buf, len, flags);
++      g_waitProbe.add(kRecv, t0);
++      return rc;
++    }
++    static DWORD WINAPI HookWSAWait(DWORD n, const HANDLE* h, BOOL all, DWORD ms, BOOL alert) {
++      auto t0 = std::chrono::steady_clock::now();
++      DWORD rc = reinterpret_cast<PfnWSAWait>(g_orig[kWSAWaitMulti])(n, h, all, ms, alert);
++      g_waitProbe.add(kWSAWaitMulti, t0);
++      return rc;
++    }
++    static int WINAPI HookWSAEnum(UINT_PTR s, HANDLE ev, void* out) {
++      auto t0 = std::chrono::steady_clock::now();
++      int rc = reinterpret_cast<PfnWSAEnum>(g_orig[kWSAEnumEvents])(s, ev, out);
++      g_waitProbe.add(kWSAEnumEvents, t0);
++      return rc;
++    }
++
++    struct WaitHookSpec { const char* dll; const char* name; void* thunk; };
++
++    // NtDelayExecution is where the sleeping actually shows up: 72% of the frame thread's
++    // samples. Sleep() in kernel32 forwards to it, but so does whatever else in the chain is
++    // pacing the client, which is why hooking Sleep alone changed nothing on the frame path.
++    // Interval is a LARGE_INTEGER in 100 ns units, negative meaning relative.
++    using PfnNtDelay = LONG (WINAPI*)(BOOLEAN, LARGE_INTEGER*);
++
++    static LONG WINAPI HookNtDelay(BOOLEAN alertable, LARGE_INTEGER* interval) {
++      auto t0 = std::chrono::steady_clock::now();
++      LARGE_INTEGER zero = { };
++      LARGE_INTEGER* use = interval;
++      if (g_sleepClamp != 0 && interval != nullptr && interval->QuadPart < 0) {
++        // Relative delay, in 100 ns units. Anything at or under the clamp becomes a plain
++        // yield, which costs microseconds instead of a timer arming at this wine's ~1.25 ms
++        // granularity.
++        int64_t ms = -interval->QuadPart / 10000;
++        if (ms <= int64_t(g_sleepClamp))
++          use = &zero;
++      }
++      LONG r = reinterpret_cast<PfnNtDelay>(g_orig[kNtDelay])(alertable, use);
++      g_waitProbe.add(kNtDelay, t0);
++      return r;
++    }
++
++    static const WaitHookSpec kWaitHooks[kNumWaitFns] = {
++      { "kernel32.dll", "Sleep",                     (void*) &HookSleep        },
++      { "kernel32.dll", "SleepEx",                   (void*) &HookSleepEx      },
++      { "kernel32.dll", "WaitForSingleObject",       (void*) &HookWaitSingle   },
++      { "kernel32.dll", "WaitForSingleObjectEx",     (void*) &HookWaitSingleEx },
++      { "kernel32.dll", "WaitForMultipleObjects",    (void*) &HookWaitMulti    },
++      { "kernel32.dll", "WaitForMultipleObjectsEx",  (void*) &HookWaitMultiEx  },
++      { "ws2_32.dll",   "select",                    (void*) &HookSelect       },
++      { "ws2_32.dll",   "recv",                      (void*) &HookRecv         },
++      { "ws2_32.dll",   "WSAWaitForMultipleEvents",  (void*) &HookWSAWait      },
++      { "ws2_32.dll",   "WSAEnumNetworkEvents",      (void*) &HookWSAEnum      },
++      { "user32.dll",   "MsgWaitForMultipleObjects", (void*) &HookWaitMsg      },
++      { "ntdll.dll",    "NtDelayExecution",          (void*) &HookNtDelay      },
++      // Timed in place rather than hooked -- it is our own function, not an import.
++      { "",             "",                          nullptr                   },
++    };
++
++    // Rewrite one module's import table. Walks every imported DLL's thunk array and swaps the
++    // resolved address for ours wherever the name matches, which is the least invasive way to
++    // intercept a call in a module we do not control -- no code is patched.
++    static uint32_t HookImportsOf(HMODULE mod) {
++      if (mod == nullptr)
++        return 0;
++      auto base = reinterpret_cast<uint8_t*>(mod);
++      auto dos  = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
++      if (dos->e_magic != IMAGE_DOS_SIGNATURE)
++        return 0;
++      auto nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
++      if (nt->Signature != IMAGE_NT_SIGNATURE)
++        return 0;
++      auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
++      if (dir.VirtualAddress == 0)
++        return 0;
++
++      uint32_t patched = 0;
++      auto desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + dir.VirtualAddress);
++      for (; desc->Name; desc++) {
++        const char* dllName = reinterpret_cast<const char*>(base + desc->Name);
++        if (desc->OriginalFirstThunk == 0 || desc->FirstThunk == 0)
++          continue;
++        auto names = reinterpret_cast<IMAGE_THUNK_DATA*>(base + desc->OriginalFirstThunk);
++        auto addrs = reinterpret_cast<IMAGE_THUNK_DATA*>(base + desc->FirstThunk);
++
++        for (; names->u1.AddressOfData; names++, addrs++) {
++          if (names->u1.Ordinal & IMAGE_ORDINAL_FLAG)
++            continue;
++          auto imp = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData);
++
++          for (size_t i = 0; i < kNumWaitFns; i++) {
++            if (std::strcmp(reinterpret_cast<const char*>(imp->Name), kWaitHooks[i].name) != 0)
++              continue;
++            if (_stricmp(dllName, kWaitHooks[i].dll) != 0)
++              continue;
++            if (g_orig[i] == nullptr)
++              g_orig[i] = reinterpret_cast<void*>(addrs->u1.Function);
++
++            DWORD old = 0;
++            if (VirtualProtect(&addrs->u1.Function, sizeof(void*), PAGE_READWRITE, &old)) {
++              addrs->u1.Function = reinterpret_cast<uintptr_t>(kWaitHooks[i].thunk);
++              VirtualProtect(&addrs->u1.Function, sizeof(void*), old, &old);
++              patched++;
++            }
++          }
++        }
++      }
++      return patched;
++    }
++
++    // The client's own module is the target; Ashita's proxy and the loader are hooked too so a
++    // wait made on the client's behalf is not missed.
++    static void InstallWaitHooks() {
++      static bool clampRead = false;
++      if (!clampRead) {
++        clampRead = true;
++        const char* v = std::getenv("FFXI_SLEEP_CLAMP");
++        if (v && *v)
++          g_sleepClamp = DWORD(std::atoi(v));
++      }
++      // The hooks carry both the probe and the clamp, so either one being asked for installs
++      // them.
++      if (g_waitProbe.hooked || (!g_waitProbe.on() && g_sleepClamp == 0))
++        return;
++      // Every loaded module, not a hand-picked list. The frame thread's sleeping did not go
++      // through FFXiMain's own kernel32 imports, so restricting the sweep to the obvious
++      // modules silently measured -- and clamped -- nothing on the path that matters.
++      uint32_t patched = 0;
++      HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
++      if (snap != INVALID_HANDLE_VALUE) {
++        MODULEENTRY32 me = { };
++        me.dwSize = sizeof(me);
++        for (BOOL ok = Module32First(snap, &me); ok; ok = Module32Next(snap, &me)) {
++          // Our own module is included on purpose. The frame thread's NtDelayExecution calls
++          // showed up in no module's import table, and DXVK -- which runs on that very thread
++          // -- was the one module being skipped.
++          patched += HookImportsOf(me.hModule);
++        }
++        CloseHandle(snap);
++      }
++      if (patched > 0) {
++        g_waitProbe.hooked = true;
++        Logger::info(str::format("wait probe: patched ", patched, " import slots"));
++      }
++    }
++  }
++
++  // Windows timer resolution (DXVK_TIMER_RESOLUTION=<ms>, 0 or unset = leave alone).
++  //
++  // A game that paces itself with Sleep() gets whatever granularity the process has asked for.
++  // The default is coarse -- ~15.6 ms -- and a loop that sleeps several times per frame then
++  // quantises to a multiple of that. FFXI in-world was measured idling at 11-13% CPU while
++  // stalling ~120 ms per frame, which is what eight coarse sleeps look like. timeBeginPeriod
++  // asks for a finer timer, process-wide, for as long as we are loaded. Resolved dynamically so
++  // DXVK does not gain a winmm link dependency.
++  namespace {
++    void ApplyTimerResolution() {
++      const char* v = std::getenv("DXVK_TIMER_RESOLUTION");
++      if (v == nullptr || *v == '\0')
++        return;
++      UINT ms = UINT(std::atoi(v));
++      if (ms == 0)
++        return;
++      HMODULE winmm = LoadLibraryA("winmm.dll");
++      if (winmm == nullptr)
++        return;
++      using PFN_timeBeginPeriod = MMRESULT (WINAPI *)(UINT);
++      auto fn = reinterpret_cast<PFN_timeBeginPeriod>(
++        reinterpret_cast<void*>(GetProcAddress(winmm, "timeBeginPeriod")));
++      if (fn != nullptr && fn(ms) == 0)
++        Logger::info(str::format("timer resolution set to ", ms, " ms"));
++      else
++        Logger::warn("timeBeginPeriod failed");
++    }
 +  }
 +
 +  // FFXI frame-rate divisor (FFXI_FPS_DIVISOR=<n>, 1 = 60fps target, 2 = 30fps, 0 = leave alone).
@@ -1455,12 +2475,32 @@ index 306a79b..02f1bdf 100644
            DWORD    dwFlags) {
 +    // The divisor lives in an object the client allocates during start-up, so this is retried
 +    // on early frames rather than done once at device creation.
++    static bool timerDone = false;
++    if (!timerDone) {
++      timerDone = true;
++      ApplyTimerResolution();
++    }
++
 +    static bool divisorDone = false;
 +    static uint32_t divisorAttempts = 0;
 +    if (!divisorDone && divisorAttempts < 600) {
 +      divisorAttempts++;
 +      divisorDone = ApplyFfxiFpsDivisor();
 +    }
++
++    // Retried like the divisor: FFXiMain.dll is not mapped yet on the first frames.
++    static uint32_t waitHookAttempts = 0;
++    if (waitHookAttempts < 600) {
++      waitHookAttempts++;
++      InstallWaitHooks();
++    }
++    g_waitProbe.presentThread.store(GetCurrentThreadId(), std::memory_order_relaxed);
++    static uint32_t profilerAttempts = 0;
++    if (g_profiler.thread == nullptr && profilerAttempts < 600) {
++      profilerAttempts++;
++      StartProfiler();
++    }
++    g_waitProbe.frame();
 +
 +    auto probeEnter = std::chrono::steady_clock::now();
 +    g_presentProbe.enter(probeEnter);
@@ -1472,6 +2512,46 @@ index 306a79b..02f1bdf 100644
      D3D9DeviceLock lock = m_parent->LockDevice();
  
      uint32_t presentInterval = m_presentParams.PresentationInterval;
+@@ -524,6 +1249,22 @@ namespace dxvk {
+     if (FAILED(this->GetDisplayModeEx(&mode, nullptr)))
+       return D3DERR_INVALIDCALL;
+ 
++    // A 2002 engine may poll this to pace itself. If wine reports a 0 Hz refresh rate the
++    // maths below divides by zero, and any caller waiting for a vblank waits forever. Report
++    // what we were told, once, and refuse to trust a nonsense value.
++    static bool loggedMode = false;
++    if (!loggedMode) {
++      loggedMode = true;
++      Logger::info(str::format("GetRasterStatus: display mode ", mode.Width, "x", mode.Height,
++                               " @ ", mode.RefreshRate, " Hz"));
++    }
++    if (mode.RefreshRate == 0)
++      mode.RefreshRate = 60;
++
++    static uint64_t calls = 0;
++    if ((++calls % 5000) == 0)
++      Logger::info(str::format("GetRasterStatus called ", calls, " times"));
++
+     uint32_t scanLineCount = mode.Height + vBlankLineCount;
+ 
+     auto nowUs = std::chrono::time_point_cast<std::chrono::microseconds>(
+@@ -1091,8 +1832,15 @@ namespace dxvk {
+ 
+ 
+   void D3D9SwapChainEx::SyncFrameLatency() {
+-    // Wait for the sync event so that we respect the maximum frame latency
++    // Wait for the sync event so that we respect the maximum frame latency.
++    //
++    // This is the one place the frame thread blocks, and its wait resolves inside ntdll --
++    // which is exactly where profiling put ~70-95% of the thread's samples, with no import
++    // table involved. Timed here so "the frame thread is idle" can be attributed to waiting
++    // on the GPU rather than left as a mystery.
++    auto t0 = std::chrono::steady_clock::now();
+     m_frameLatencySignal->wait(m_frameId - GetActualFrameLatency());
++    g_waitProbe.add(kFrameLatency, t0);
+   }
+ 
+ 
 diff --git a/src/d3d9/d3d9_swapchain.h b/src/d3d9/d3d9_swapchain.h
 index 150578c..5bdacb6 100644
 --- a/src/d3d9/d3d9_swapchain.h
@@ -1980,7 +3060,7 @@ index b17dd9b..8035d6a 100644
  #include "dxvk_framebuffer.h"
  #include "dxvk_limits.h"
 diff --git a/src/dxvk/dxvk_context.cpp b/src/dxvk/dxvk_context.cpp
-index 6d30088..fc48a8a 100644
+index 6d30088..1cb3822 100644
 --- a/src/dxvk/dxvk_context.cpp
 +++ b/src/dxvk/dxvk_context.cpp
 @@ -1,4 +1,9 @@
@@ -2044,7 +3124,65 @@ index 6d30088..fc48a8a 100644
    DxvkContext::DxvkContext(const Rc<DxvkDevice>& device)
    : m_device      (device),
      m_common      (&device->m_objects),
-@@ -3863,10 +3910,12 @@ namespace dxvk {
+@@ -535,15 +582,43 @@ namespace dxvk {
+     auto srcSlice = srcBuffer->getSliceHandle(srcOffset, numBytes);
+     auto dstSlice = dstBuffer->getSliceHandle(dstOffset, numBytes);
+ 
++    // Schedule partial uploads early too (DXVK_EARLY_BUFFER_COPY=1).
++    //
++    // The discard path above only applies when the copy covers a whole buffer of at most 256 KB.
++    // FFXI's uploads are partial dirty ranges of larger buffers, so it always missed, and every
++    // one of them ended the render pass: this scene spilled 604,924 times in a 40 s run, with
++    // copyBuffer the single largest cause -- more render-pass breaks per frame than draws, which
++    // is why the GPU sits at ~10% while the frame takes 40 ms.
++    //
++    // The copy can be moved to the init command buffer, which runs before the exec buffer in the
++    // same submission, whenever nothing already recorded touches either slice: the barrier set
++    // knows every access recorded so far this submission, so if neither slice is dirty there is
++    // no recorded read or write for the copy to be reordered ahead of. Off by default until it
++    // has been measured against a scene, because getting this wrong shows up as corrupt geometry
++    // rather than as a crash.
++    static const bool earlyCopyEnabled = [] {
++      const char* v = std::getenv("DXVK_EARLY_BUFFER_COPY");
++      return v && *v && *v != '0';
++    }();
++
++    bool earlyCopy = false;
++
+     if (!replaceBuffer) {
+-      this->spillRenderPass(true);
++      bool srcDirty = m_execBarriers.isBufferDirty(srcSlice, DxvkAccess::Read);
++      bool dstDirty = m_execBarriers.isBufferDirty(dstSlice, DxvkAccess::Write)
++                   || m_execBarriers.isBufferDirty(dstSlice, DxvkAccess::Read);
+ 
+-      if (m_execBarriers.isBufferDirty(srcSlice, DxvkAccess::Read)
+-       || m_execBarriers.isBufferDirty(dstSlice, DxvkAccess::Write))
+-        m_execBarriers.recordCommands(m_cmd);
++      earlyCopy = earlyCopyEnabled && srcIsReadOnly && !srcDirty && !dstDirty;
++
++      if (!earlyCopy) {
++        this->spillRenderPass(true);
++
++        if (srcDirty || m_execBarriers.isBufferDirty(dstSlice, DxvkAccess::Write))
++          m_execBarriers.recordCommands(m_cmd);
++      }
+     }
+ 
+-    DxvkCmdBuffer cmdBuffer = replaceBuffer
++    DxvkCmdBuffer cmdBuffer = (replaceBuffer || earlyCopy)
+       ? DxvkCmdBuffer::InitBuffer
+       : DxvkCmdBuffer::ExecBuffer;
+ 
+@@ -555,7 +630,7 @@ namespace dxvk {
+     m_cmd->cmdCopyBuffer(cmdBuffer,
+       srcSlice.handle, dstSlice.handle, 1, &bufferRegion);
+ 
+-    auto& barriers = replaceBuffer
++    auto& barriers = (replaceBuffer || earlyCopy)
+       ? m_initBarriers
+       : m_execBarriers;
+ 
+@@ -3863,10 +3938,12 @@ namespace dxvk {
    }
    
    
@@ -2122,10 +3260,10 @@ index 2a5ee92..e3b6e5f 100644
  
  namespace dxvk {
 diff --git a/src/dxvk/dxvk_device.cpp b/src/dxvk/dxvk_device.cpp
-index dc12ab4..9ca355c 100644
+index dc12ab4..6b93eff 100644
 --- a/src/dxvk/dxvk_device.cpp
 +++ b/src/dxvk/dxvk_device.cpp
-@@ -1,8 +1,77 @@
+@@ -1,8 +1,94 @@
  #include "dxvk_device.h"
  #include "dxvk_instance.h"
  
@@ -2143,7 +3281,7 @@ index dc12ab4..9ca355c 100644
 +  // idle. A number that does not depend on reading an on-screen overlay, so every renderer
 +  // configuration can be compared with the same instrument. Off unless the env var is set.
 +  struct DxvkFpsLog {
-+    static constexpr size_t NumTracked = 6;
++    static constexpr size_t NumTracked = 10;
 +    static constexpr DxvkStatCounter Tracked[NumTracked] = {
 +      DxvkStatCounter::CmdDrawCalls,
 +      DxvkStatCounter::CmdRenderPassCount,
@@ -2151,6 +3289,17 @@ index dc12ab4..9ca355c 100644
 +      DxvkStatCounter::QueueSubmitCount,
 +      DxvkStatCounter::CsChunkCount,
 +      DxvkStatCounter::GpuIdleTicks,
++      // How long the CPU spends *blocked on the GPU* inside DxvkDevice::waitForResource --
++      // i.e. the game locked a buffer or texture the GPU was still reading, so the queue had to
++      // be flushed and waited on. The HUD shows these too, but only as the worst single frame
++      // in each refresh interval, which reads far more alarming than the average. Logging both
++      // the count and the time per frame makes the average measurable.
++      DxvkStatCounter::GpuSyncCount,
++      DxvkStatCounter::GpuSyncTicks,
++      // ...and the same split by what was locked. Buffer stalls and texture stalls have
++      // completely different fixes, so the totals alone are not actionable.
++      DxvkStatCounter::GpuSyncImageCount,
++      DxvkStatCounter::GpuSyncImageTicks,
 +    };
 +
 +    FILE* file = nullptr;
@@ -2167,7 +3316,9 @@ index dc12ab4..9ca355c 100644
 +      if (file == nullptr)
 +        return;
 +      t0 = tick = std::chrono::steady_clock::now();
-+      std::fprintf(file, "epoch,elapsed,fps,draws,passes,barriers,submits,cschunks,gpuidle_us\n");
++      std::fprintf(file,
++        "epoch,elapsed,fps,draws,passes,barriers,submits,cschunks,gpuidle_us,"
++        "syncs,sync_ms,imgsyncs,imgsync_ms\n");
 +      std::fflush(file);
 +    }
 +
@@ -2187,11 +3338,15 @@ index dc12ab4..9ca355c 100644
 +        prev[i] = cur;
 +      }
 +
-+      std::fprintf(file, "%lld,%.1f,%.2f,%.1f,%.1f,%.1f,%.2f,%.1f,%.0f\n",
++      // GpuSyncTicks accumulates microseconds; report it as milliseconds per frame, which is
++      // directly comparable with the frame time.
++      std::fprintf(file, "%lld,%.1f,%.2f,%.1f,%.1f,%.1f,%.2f,%.1f,%.0f,%.2f,%.3f,%.2f,%.3f\n",
 +        (long long) std::time(nullptr),
 +        std::chrono::duration<double>(now - t0).count(),
 +        double(frames) / dt,
-+        perFrame[0], perFrame[1], perFrame[2], perFrame[3], perFrame[4], perFrame[5]);
++        perFrame[0], perFrame[1], perFrame[2], perFrame[3], perFrame[4], perFrame[5],
++        perFrame[6], perFrame[7] / 1000.0,
++        perFrame[8], perFrame[9] / 1000.0);
 +      std::fflush(file);
 +      frames = 0;
 +      tick = now;
@@ -2204,7 +3359,7 @@ index dc12ab4..9ca355c 100644
    DxvkDevice::DxvkDevice(
      const Rc<DxvkInstance>&         instance,
      const Rc<DxvkAdapter>&          adapter,
-@@ -210,6 +279,7 @@ namespace dxvk {
+@@ -210,6 +296,7 @@ namespace dxvk {
      
      std::lock_guard<sync::Spinlock> statLock(m_statLock);
      m_statCounters.addCtr(DxvkStatCounter::QueuePresentCount, 1);
@@ -2212,8 +3367,29 @@ index dc12ab4..9ca355c 100644
    }
  
  
+@@ -241,7 +328,8 @@ namespace dxvk {
+   }
+ 
+ 
+-  void DxvkDevice::waitForResource(const Rc<DxvkResource>& resource, DxvkAccess access) {
++  void DxvkDevice::waitForResource(const Rc<DxvkResource>& resource, DxvkAccess access,
++                                   bool isImage) {
+     if (resource->isInUse(access)) {
+       auto t0 = dxvk::high_resolution_clock::now();
+ 
+@@ -255,6 +343,10 @@ namespace dxvk {
+       std::lock_guard<sync::Spinlock> lock(m_statLock);
+       m_statCounters.addCtr(DxvkStatCounter::GpuSyncCount, 1);
+       m_statCounters.addCtr(DxvkStatCounter::GpuSyncTicks, us.count());
++      if (isImage) {
++        m_statCounters.addCtr(DxvkStatCounter::GpuSyncImageCount, 1);
++        m_statCounters.addCtr(DxvkStatCounter::GpuSyncImageTicks, us.count());
++      }
+     }
+   }
+   
 diff --git a/src/dxvk/dxvk_device.h b/src/dxvk/dxvk_device.h
-index e23f2c6..32c8d92 100644
+index e23f2c6..379a85c 100644
 --- a/src/dxvk/dxvk_device.h
 +++ b/src/dxvk/dxvk_device.h
 @@ -1,5 +1,8 @@
@@ -2225,6 +3401,19 @@ index e23f2c6..32c8d92 100644
  #include "dxvk_adapter.h"
  #include "dxvk_buffer.h"
  #include "dxvk_compute.h"
+@@ -474,7 +477,11 @@ namespace dxvk {
+      * \param [in] resource Resource to wait for
+      * \param [in] access Access mode to check
+      */
+-    void waitForResource(const Rc<DxvkResource>& resource, DxvkAccess access);
++    // isImage attributes the stall to a texture lock rather than a buffer lock. Both go
++    // through the same wait, and knowing which one dominates is the whole question when a
++    // frame is spending most of its time blocked here.
++    void waitForResource(const Rc<DxvkResource>& resource, DxvkAccess access,
++                         bool isImage = false);
+     
+     /**
+      * \brief Waits until the device becomes idle
 diff --git a/src/dxvk/dxvk_extension_provider.h b/src/dxvk/dxvk_extension_provider.h
 index 090d56d..cc6ff2d 100644
 --- a/src/dxvk/dxvk_extension_provider.h
@@ -2682,7 +3871,7 @@ index 41ff4d4..d8b4b9a 100644
  #include "dxvk_renderpass.h"
  
 diff --git a/src/dxvk/dxvk_stats.h b/src/dxvk/dxvk_stats.h
-index 9138c7c..2ba6f1b 100644
+index 9138c7c..8fcce93 100644
 --- a/src/dxvk/dxvk_stats.h
 +++ b/src/dxvk/dxvk_stats.h
 @@ -1,5 +1,8 @@
@@ -2694,6 +3883,15 @@ index 9138c7c..2ba6f1b 100644
  #include "dxvk_include.h"
  
  namespace dxvk {
+@@ -22,6 +25,8 @@ namespace dxvk {
+     QueuePresentCount,        ///< Number of present calls / frames
+     GpuSyncCount,             ///< Number of GPU synchronizations
+     GpuSyncTicks,             ///< Time spent waiting for GPU
++    GpuSyncImageCount,        ///< GPU synchronizations caused by locking an image
++    GpuSyncImageTicks,        ///< Time spent waiting for GPU on image locks
+     GpuIdleTicks,             ///< GPU idle time in microseconds
+     CsSyncCount,              ///< CS thread synchronizations
+     CsSyncTicks,              ///< Time spent waiting on CS
 diff --git a/src/dxvk/dxvk_swapchain_blitter.h b/src/dxvk/dxvk_swapchain_blitter.h
 index 915bb53..2ca1918 100644
 --- a/src/dxvk/dxvk_swapchain_blitter.h

@@ -1,0 +1,105 @@
+{
+ "tag": "max4k-prefill3",
+ "env": {
+  "ROSETTA_DISABLE_AOT": "1",
+  "X87_ATTACH": "/Users/daniel/Games/hxi-workspace/repo-push/vendor/x87sidecar_entitled",
+  "FFXI_FPS_DIVISOR": "1",
+  "MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS": "1"
+ },
+ "scene": "in-world",
+ "samples": 41,
+ "logged_out": true,
+ "cpu": {
+  "total": 37.0,
+  "top": [
+   {
+    "pid": 13141,
+    "thread": 15,
+    "cpu_s": 16.78
+   },
+   {
+    "pid": 13141,
+    "thread": 2,
+    "cpu_s": 9.3
+   },
+   {
+    "pid": 13141,
+    "thread": 8,
+    "cpu_s": 1.86
+   },
+   {
+    "pid": 13141,
+    "thread": 7,
+    "cpu_s": 1.85
+   },
+   {
+    "pid": 13141,
+    "thread": 3,
+    "cpu_s": 1.77
+   },
+   {
+    "pid": 13141,
+    "thread": 4,
+    "cpu_s": 1.48
+   }
+  ]
+ },
+ "window_s": 40,
+ "fps_median": 22.3,
+ "fps_mean": 22.29,
+ "fps_min": 16.78,
+ "fps_max": 25.8,
+ "draws": 2100.0,
+ "passes": 258.8,
+ "shots": [
+  {
+   "path": "max4k-prefill3-00.png",
+   "t": 32,
+   "stage": "boot",
+   "lit": 0.9997,
+   "colors": 94
+  },
+  {
+   "path": "max4k-prefill3-01.png",
+   "t": 47,
+   "stage": "enter1",
+   "lit": 0.9967,
+   "colors": 179
+  },
+  {
+   "path": "max4k-prefill3-02.png",
+   "t": 61,
+   "stage": "enter2",
+   "lit": 0.9997,
+   "colors": 100
+  },
+  {
+   "path": "max4k-prefill3-07.png",
+   "t": 63,
+   "stage": "charpick",
+   "lit": 0.9997,
+   "colors": 100
+  },
+  {
+   "path": "max4k-prefill3-08.png",
+   "t": 117,
+   "stage": "zonedin",
+   "lit": 0.9784,
+   "colors": 99
+  },
+  {
+   "path": "max4k-prefill3-09.png",
+   "t": 160,
+   "stage": "sample",
+   "lit": 0.9705,
+   "colors": 97
+  },
+  {
+   "path": "max4k-prefill3-10.png",
+   "t": 174,
+   "stage": "after-shutdown",
+   "lit": 0.9997,
+   "colors": 263
+  }
+ ]
+}

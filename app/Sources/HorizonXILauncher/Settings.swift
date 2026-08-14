@@ -23,6 +23,18 @@ struct PerfSettings: Codable {
     /// It does not help scenes that are genuinely compute-bound below the cap, only the
     /// self-throttling -- but it never hurts, so it is on by default.
     var fpsDivisorOne = true
+    /// Do not block on FFXI's lens-flare occlusion read-back.
+    ///
+    /// The single largest cost in the frame, by a wide margin. FFXI renders a 16×16
+    /// `D3DUSAGE_RENDERTARGET` surface and immediately locks it to read the result — about four
+    /// times per frame — which drains the whole pipeline each time. Measured at 4K max on the
+    /// local server: **26 ms of a 40 ms frame** spent with the client blocked inside those four
+    /// locks, doing nothing. Skipping only the *wait* (the copy is still issued, so the surface
+    /// keeps being refreshed) took the same scene from 18.6/24.9 fps to 42.9/46.8 fps.
+    ///
+    /// The cost of that is one frame of latency on a lens flare's brightness, which is not
+    /// observable in motion. Our patched `d3d9.dll` reads it; other pathways ignore it.
+    var flareReadbackNoWait = true
     /// Large address aware heap hint for the 32-bit client.
     var largeAddressAware = true
     /// Extra environment, one KEY=VALUE per line, for experiments.
@@ -32,6 +44,26 @@ struct PerfSettings: Codable {
     var renderer: Renderer = .metal
 
     static let key = "perf.settings"
+
+    init() { }
+
+    /// Decoded field by field rather than by the synthesised initialiser, which treats every key
+    /// as required: adding a knob would then fail to decode the settings already on disk, and
+    /// `load()`'s `try?` would quietly reset everything the user had chosen.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func b(_ k: CodingKeys, _ d: Bool) -> Bool { (try? c.decodeIfPresent(Bool.self, forKey: k)) .flatMap { $0 } ?? d }
+        msync = b(.msync, true)
+        esync = b(.esync, false)
+        silenceWineDebug = b(.silenceWineDebug, true)
+        metalHUD = b(.metalHUD, false)
+        disableAppNap = b(.disableAppNap, true)
+        fpsDivisorOne = b(.fpsDivisorOne, true)
+        flareReadbackNoWait = b(.flareReadbackNoWait, true)
+        largeAddressAware = b(.largeAddressAware, true)
+        extraEnv = ((try? c.decodeIfPresent(String.self, forKey: .extraEnv)) ?? nil) ?? ""
+        renderer = ((try? c.decodeIfPresent(Renderer.self, forKey: .renderer)) ?? nil) ?? .metal
+    }
 
     static func load() -> PerfSettings {
         guard let d = UserDefaults.standard.data(forKey: key),
@@ -74,6 +106,9 @@ struct PerfSettings: Codable {
         // Only our patched d3d9.dll reads this; harmless (silently ignored) on the other
         // renderer pathways.
         if fpsDivisorOne { env["FFXI_FPS_DIVISOR"] = "1" }
+        // 32 px bounds it to the small visibility-test surfaces; anything the game reads back at
+        // a size it could actually display still waits.
+        if flareReadbackNoWait { env["D3D9_RT_READBACK_NOWAIT"] = "32" }
         if disableAppNap { env["LSAppNapIsDisabled"] = "1" }
         if largeAddressAware { env["WINE_LARGE_ADDRESS_AWARE"] = "1" }
         for (k, v) in renderer.environment { env[k] = v }
