@@ -121,7 +121,8 @@ enum Credentials {
 
         let line = "command     = --server \(server) --user \(user) --pass \(password)"
         var replaced = false
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { l -> String in
+        let eol = TextFile.terminator(of: text)
+        let lines = TextFile.lines(of: text).map { l -> String in
             // Only the live setting, never the commented examples.
             if !l.hasPrefix(";"), l.trimmingCharacters(in: .whitespaces).hasPrefix("command"),
                l.contains("=") , !replaced {
@@ -130,7 +131,7 @@ enum Credentials {
             }
             return String(l)
         }
-        text = lines.joined(separator: "\n")
+        text = TextFile.join(lines, terminator: eol)
         guard replaced, (try? text.write(to: url, atomically: true, encoding: .utf8)) != nil
         else { return false }
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
@@ -145,7 +146,8 @@ enum Credentials {
         let url = install.gameDir.appendingPathComponent("config/boot/\(profile)")
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return }
 
-        let out = text.split(separator: "\n", omittingEmptySubsequences: false).map { l -> String in
+        let eol = TextFile.terminator(of: text)
+        let out = TextFile.lines(of: text).map { l -> String in
             let line = String(l)
             guard !line.hasPrefix(";"), line.contains("=") else { return line }
             let key = line.split(separator: "=", maxSplits: 1)[0]
@@ -154,7 +156,7 @@ enum Credentials {
             // keep the column alignment the file already uses
             let pad = max(1, 48 - key.count)
             return key + String(repeating: " ", count: pad) + "= " + v
-        }.joined(separator: "\n")
+        }.joined(separator: eol)
 
         try? out.write(to: url, atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)

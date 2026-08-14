@@ -44,7 +44,8 @@ enum Branding {
         var head: [String] = []
         var overlays: [String] = []
         var inOverlays = false
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        let eol = TextFile.terminator(of: text)
+        for raw in TextFile.lines(of: text) {
             let line = String(raw)
             let t = line.trimmingCharacters(in: .whitespaces)
             if t.lowercased() == "[overlays]" { inOverlays = true; continue }
@@ -64,10 +65,10 @@ enum Branding {
         // precedence for any path they both provide.
         if stockBranding { overlays.insert(overlayName, at: 0) }
 
-        var out = head.joined(separator: "\n")
-        if !out.hasSuffix("\n") { out += "\n" }
-        out += "[overlays]\n"
-        for (i, name) in overlays.enumerated() { out += "\(i)=\(name)\n" }
+        var out = TextFile.join(head, terminator: eol)
+        if !out.hasSuffix(eol) { out += eol }
+        out += "[overlays]" + eol
+        for (i, name) in overlays.enumerated() { out += "\(i)=\(name)" + eol }
 
         return (try? out.write(to: url, atomically: true, encoding: .utf8)) != nil
     }

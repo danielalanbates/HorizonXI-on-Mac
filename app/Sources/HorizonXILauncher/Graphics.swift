@@ -153,7 +153,7 @@ struct GraphicsSettings: Codable, Equatable {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         var vals: [String: Int] = [:]
         var inSection = false
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        for raw in TextFile.lines(of: text) {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("[") { inSection = line.hasPrefix("[ffxi.registry]"); continue }
             guard inSection, !line.hasPrefix(";"), let eq = line.firstIndex(of: "=") else { continue }

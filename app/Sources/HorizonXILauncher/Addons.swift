@@ -72,7 +72,7 @@ struct AddonSuite {
         // Without markers, the whole file is the managed region.
         let hasMarkers = text.contains(start) && text.contains(stop)
         var inside = !hasMarkers
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        for raw in TextFile.lines(of: text) {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line == start { inside = true; continue }
             if line == stop { inside = false; continue }
@@ -90,7 +90,8 @@ struct AddonSuite {
     static func write(_ items: [Item], to install: Install) -> Bool {
         let url = scriptURL(install)
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return false }
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let eol = TextFile.terminator(of: text)
+        var lines = TextFile.lines(of: text)
 
         // Addons live below plugins in the file, so replacing the lower block first keeps the
         // upper block's indices valid.
@@ -107,8 +108,8 @@ struct AddonSuite {
               replace(&lines, start: pluginsStart, stop: pluginsStop, with: pluginBody)
         else { return false }
 
-        return (try? lines.joined(separator: "\n").write(to: url, atomically: true,
-                                                         encoding: .utf8)) != nil
+        return (try? TextFile.join(lines, terminator: eol).write(to: url, atomically: true,
+                                                                 encoding: .utf8)) != nil
     }
 
     /// Put the managed markers into a script that has none, so the launcher can own the load
