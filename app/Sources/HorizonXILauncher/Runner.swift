@@ -76,10 +76,13 @@ final class Runner: ObservableObject {
               args: ["C:\\HorizonXI\\Ashita-cli.exe", profile],
               env: env,
               cwd: install.gameDir) { [weak self] code in
-            self?.running = false
-            self?.appendLine("==> game exited \(code)")
-            self?.x87Proc?.terminate()
-            self?.x87Proc = nil
+            // This is Ashita-cli.exe, the *injector*. It exits within seconds of a successful
+            // injection, while the game carries on in horizon-loader.exe -- so its exit is not
+            // the game's exit, and tearing down the sidecar here killed the client roughly ten
+            // seconds after every launch ("connects to nothing, window never appears"). Wait for
+            // the actual client process instead.
+            self?.appendLine("==> injector exited \(code)")
+            self?.watchGameProcess()
         }
         // The game runs in a child process (horizon-loader.exe) that does not exist yet at this
         // point -- Ashita-cli.exe has to inject into it first. Wait for it off the main actor,
@@ -88,6 +91,41 @@ final class Runner: ObservableObject {
             let p = await X87Sidecar.attachWhenReady { [weak self] in self?.appendLine($0) }
             self?.x87Proc = p
         }
+    }
+
+    /// Poll for the client itself, and only tear the sidecar down once it is really gone.
+    /// x87sidecar holds a live patch inside the target's Rosetta translation; terminating it
+    /// while the game is running takes the game with it.
+    private func watchGameProcess() {
+        Task { [weak self] in
+            // Give the injector's child a moment to appear before deciding it never did.
+            for _ in 0..<300 {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if !Self.gameIsRunning() { break }
+            }
+            // Two consecutive misses, because pgrep can miss the process for a beat while wine
+            // re-execs it during start-up.
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if Self.gameIsRunning() { self?.watchGameProcess(); return }
+            await MainActor.run {
+                guard let self else { return }
+                self.running = false
+                self.appendLine("==> game exited")
+                self.x87Proc?.terminate()
+                self.x87Proc = nil
+            }
+        }
+    }
+
+    private static func gameIsRunning() -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        p.arguments = ["-f", "horizon-loader.exe"]
+        p.standardOutput = Pipe()
+        p.standardError = Pipe()
+        guard (try? p.run()) != nil else { return false }
+        p.waitUntilExit()
+        return p.terminationStatus == 0
     }
 
     /// `RendererSetup.apply` just did `wineserver -k` and waited for it to actually exit, so any
