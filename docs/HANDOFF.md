@@ -1,9 +1,14 @@
 # Handoff — read this first
 
-Rewritten 2026-08-11 (evening). The previous version of this file described a renderer-bound
-game and a draw-call batcher as the route to 30 fps. **That model was wrong.** This session
-built the instrumentation to check it and the answer came out different. Everything below is
-measured; where something is a guess it says so.
+Updated 2026-08-14. **The 30 fps target is met: 43-47 fps in-world at 4K with every setting at
+maximum.** The cost was FFXI blocking on a 16x16 lens-flare occlusion read-back four times a
+frame -- 26 ms of a 40 ms frame spent waiting -- and `D3D9_RT_READBACK_NOWAIT` skips the wait.
+**Read `docs/MAX4K.md` first**; it has the numbers, the probe that found it, and the four dead
+ends that came before it.
+
+The rest of this file is the 2026-08-11 rewrite, which replaced a wrong renderer-bound model
+with a measured one. Its diagnosis still holds -- the renderer was never the limit -- and its
+working practices are still current. Its fps figures are superseded by MAX4K.md.
 
 ---
 
@@ -16,7 +21,7 @@ measured; where something is a guess it says so.
 
 | goal | status |
 | --- | --- |
-| **30 fps in gameplay** | **NOT MET.** In-world ~7.5 fps. Menus 12–24 fps. Cause now understood — see below |
+| **30 fps in gameplay** | **MET, 2026-08-14** — 43–47 fps in-world at 4K max. `docs/MAX4K.md` |
 | Understand *why* it is not 30 fps | **DONE, and it is not what we thought.** `docs/PERFORMANCE.md` |
 | Fog / correct rendering | DONE (previous session), still correct |
 | Launcher with login + password | DONE — Keychain-backed, `app/Sources/HorizonXILauncher/Credentials.swift` |
@@ -39,9 +44,14 @@ passes or draw batching cannot get to 30 fps, because they are not what the time
 on.
 
 In the world the client spends **~120 ms per frame doing nothing at all** — one stall per frame,
-outside every D3D entry point, at 13% CPU. Find that and the same Mog House is a 75 fps scene.
-It is written up as a bug report with eleven hypotheses already eliminated:
-**`docs/INWORLD-STALL.md`**. Start there.
+at 13% CPU. `docs/INWORLD-STALL.md` wrote it up as a bug report with eleven hypotheses
+eliminated and put the strongest lead on FFXI's texture path through d3d8to9.
+
+**It was found on 2026-08-14, and it was none of the eleven.** The client blocks inside `Map`,
+waiting on the GPU to finish with a 16×16 render target it reads back four times a frame — a
+lens-flare visibility test. It looked like a stall "outside every D3D entry point" because the
+probes measured the *renderer* side; the waiting is on the D3D9 frontend, in
+`WaitForResource`. `DXVK_STALL_LOG` measures it directly. See `docs/MAX4K.md`.
 
 ---
 
@@ -58,6 +68,8 @@ overlay. Our `d3d9.dll` has six probes, all off unless their environment variabl
 | `DXVK_PASS_PROBE` | which DxvkContext operation forced each render-pass break |
 | `DXVK_FB_PROBE` | what changed about the framebuffer each time it was rebuilt |
 | `DXVK_SKIP_DRAWS` | accept draws and discard them, to price the renderer out |
+| `DXVK_STALL_LOG` | **ms per frame the client spends blocked** in `WaitForResource` / `SynchronizeCsThread`. The one that found the answer; cheap enough not to crash the client at 4K, unlike `DXVK_DRAW_PROBE` |
+| `D3D9_LOCKIMAGE_PROBE` | every texture lock that stalls, aggregated by pool/usage/format/size |
 
 Plus a harness that runs a whole configuration end-to-end from one command:
 `scripts/harness/bench.py` (menus / character select) and `inworld.py` (logs a character in,
@@ -93,23 +105,23 @@ churn, the Ashita overlay addons, FFXI's graphics settings, and the CrossOver li
 
 ## 4. Where to pick this up
 
-1. **`docs/INWORLD-STALL.md`.** Worth more than everything else combined. The strongest lead is
-   that the stall is in FFXI's **texture** path through **d3d8to9** — the pauses land right
-   before `SetTexture`, and the one pathway ever measured fast in-zone (wined3d-Vulkan, 20.6 fps)
-   was the one rendering *untextured*. d3d8to9 is the only layer in the chain that is ours and
-   is not instrumented. Build it from source with the same probes and the 120 ms splits in one
-   run.
-2. **Fix the Ashita plugin version mismatch.** Independently worth doing — it restores Daniel's
-   addons — and it makes the `addons/fpslog` Lua logger in this repo work, which measures frame
-   rate on pathways that have no DXVK in them.
-3. **Phase 2 packaging** on the `docs/BUNDLING.md` plan: first-run download of a pinned
-   Sikarugir engine, our DLLs inside the app, game data from HorizonXI's own installer.
-4. **Upstream the two DXVK fixes** (`docs/UPSTREAM.md`). They are correct, small, and affect
-   every D3D9 game on Metal.
+1. **Phase 2 packaging** on the `docs/BUNDLING.md` plan: first-run download of a pinned
+   Sikarugir engine, our DLLs inside the app, game data from HorizonXI's own installer. This is
+   the top item now that the frame rate goal is met.
+2. **The launcher's first-run Downloads prompt.** It still asks for access to the Downloads
+   folder before the user has pressed anything, and three attempts did not find what is asking.
+   For a package aimed at non-technical users this matters more than it sounds. See the comment
+   on `Install.tccGatedNames`.
+3. **Upstream the DXVK fixes** (`docs/UPSTREAM.md`). They are correct, small, and affect every
+   D3D9 game on Metal. The read-back one is a semantic change and belongs upstream as an option,
+   not as a default.
+4. **Whether the read-back wait can be removed rather than skipped.** Skipping costs one frame of
+   latency on flare brightness. Issuing the copy a frame ahead, or satisfying the read from the
+   previous frame's buffer explicitly, would be exact rather than approximate.
 
-Do not promise 30 fps in beta notes. The honest line is: rendering is correct, menus run at
-12–24 fps, in-world is ~7.5 fps, and the cause of the in-world figure is identified but not yet
-fixed.
+The honest line for beta notes: rendering is correct and the world runs at 43–47 fps at 4K with
+every setting at maximum, on an M1 with 8 GB. Say that the lens-flare visibility test is read one
+frame late, because it is.
 
 ---
 

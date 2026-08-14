@@ -10,8 +10,8 @@ The shipped path burned ~193% CPU with the GPU at 4–8%. Nothing ships, and not
 announced, until the game is genuinely GPU-rendered.
 
 - [x] Get the game onto a real GPU pathway
-- [ ] Measure it (FPS, GPU%, CPU%) and prove it in-world, not just at the menu
-- [ ] Make it *smooth*, not merely GPU-backed
+- [x] Measure it (FPS, GPU%, CPU%) and prove it in-world, not just at the menu — `docs/MAX4K.md`
+- [x] Make it *smooth*, not merely GPU-backed — 43–47 fps in-world at 4K max, 2026-08-14
 
 ## 1. Run as smoothly as possible
 > "Get the game running as smoothly as possible on my Mac. Take no prisoners."
@@ -19,7 +19,7 @@ announced, until the game is genuinely GPU-rendered.
 Target machine: MacBook Pro M1, 8 GB. Zone loads used to take minutes — that is the bar to beat.
 
 ## 2. Finish the launcher
-- [ ] Standard **login name + password** fields (the Horizon launcher has them)
+- [x] Standard **login name + password** fields (the Horizon launcher has them)
 - [ ] Look and feel much closer to the real HorizonXI launcher
 - [ ] **FFXI-themed and coloured** — fun, not utilitarian
 - [ ] **Server dropdown** covering other FFXI private servers
