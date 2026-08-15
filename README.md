@@ -2,20 +2,24 @@
 
 Play Final Fantasy XI on an Apple Silicon Mac. No Windows, no virtual machine, no Boot Camp.
 
-You get a normal Mac app: type your account name and password, pick your server, press **Play**.
+You get a normal Mac app: press **Install wine…**, press **Install the game…**, type your account
+name and password, pick your server, press **Play**.
 
 <div align="center">
 
-### [⬇️ Download FFXI on Mac 2.5 (.dmg)](https://github.com/danielalanbates/HorizonXI-on-Mac/releases/download/v2.5/FFXI-on-Mac-2.5.dmg)
+### [⬇️ Download FFXI on Mac 2.6 (.dmg)](https://github.com/danielalanbates/HorizonXI-on-Mac/releases/download/v2.6/FFXI-on-Mac-2.6.dmg)
 
-[![Download](https://img.shields.io/badge/Download-FFXI%20on%20Mac%202.5-2ea44f?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/danielalanbates/HorizonXI-on-Mac/releases/download/v2.5/FFXI-on-Mac-2.5.dmg)
+[![Download](https://img.shields.io/badge/Download-FFXI%20on%20Mac%202.6-2ea44f?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/danielalanbates/HorizonXI-on-Mac/releases/download/v2.6/FFXI-on-Mac-2.6.dmg)
 
-3 MB · Apple Silicon · macOS 13 or later · signed and notarised by Apple, so it just opens
+5 MB · Apple Silicon · macOS 13 or later · signed and notarised by Apple, so it just opens
 
 </div>
 
-That file is the app only. You also need Wine and the game client — both free, both explained in
-[What you need](#what-you-need) below. It takes about ten minutes the first time.
+That file is the whole setup now. There's no Homebrew, no separate Wine app to install, no engine
+to pick from a list — the launcher fetches and builds its own Wine wrapper the first time you press
+**Install wine…**. You still need the game client itself, explained in
+[What you need](#what-you-need) below. Figure five to ten minutes the first time, mostly spent
+waiting on downloads.
 
 ![Murn in Selbina](docs/img/murn-in-selbina.png)
 
@@ -46,18 +50,21 @@ contribute right now.
 
 ## What you need
 
-Three pieces. The app tells you which one is missing at any moment.
+Three pieces. The app tells you which one is missing at any moment, and builds one of the three
+for you.
 
 | Piece | Size | Where it comes from |
 | --- | --- | --- |
 | **FFXI on Mac** (this app) | 5 MB | the Releases page here |
-| **Wine** | ~1 GB | free, two Homebrew commands — [instructions](docs/SETUP.md#installing-wine) |
-| **The FFXI game client** | ~27 GB | your server's own installer |
+| **Wine** | ~250 MB download | the app fetches and builds it — press **Install wine…** |
+| **The FFXI game client** | ~27 GB | your server's own installer, run through **Install the game…** |
 
-Neither of those two is in the download. The client is Square Enix's data and nobody may
-redistribute it. Wine is free and open source (Sikarugir, LGPL 2.1) — bundling it is planned, and
-for now you install it yourself in about five minutes. If anyone offers you a single file with
-all three in it, they are handing out Square Enix's client, which they may not do.
+Neither of the last two is in the download itself. The client is Square Enix's data and nobody
+may redistribute it, so you install it through your server's own installer. Wine is free and open
+source (Sikarugir, LGPL 2.1) — the app downloads it from Sikarugir's own GitHub releases and
+assembles it into a wrapper on your Mac, so you never touch Homebrew, a cask, or Sikarugir Creator
+yourself. If anyone offers you a single file with all three in it, they are handing out Square
+Enix's client, which they may not do.
 
 **What these servers are:** HorizonXI, CatsEyeXI and Eden run
 [LandSandBoat](https://github.com/LandSandBoat/server) or a fork of it — an open-source server
@@ -70,22 +77,24 @@ maintenance mode. This project redistributes no Square Enix data at all.
 
 1. **Install the app.** Open the `.dmg`, drag *FFXI on Mac* to Applications, open it. It's signed
    and notarised by Apple, so no right-click-to-open trick needed.
-2. **Make a Wine wrapper** — a Mac app with Windows inside it. Three Terminal commands and four
-   clicks, written out step by step in
-   [Installing Wine](docs/SETUP.md#installing-wine--the-whole-thing-click-by-click). Short
-   version: install Homebrew and Rosetta 2, `brew install --cask
-   Sikarugir-App/sikarugir/sikarugir`, open **Sikarugir Creator**, pick the
-   `WS12WineSikarugir10.0_6` engine, press **Create**, and name it `FFXI`.
-3. **Put the game in the wrapper.** Double-click your new `FFXI.app`, press **Install Software**,
-   and point it at your server's Windows installer — or copy a `HorizonXI` folder from a Windows
-   PC into the wrapper's `drive_c`. Full detail in
-   [Installing the game](docs/SETUP.md#installing-the-game-into-the-wrapper).
+2. **Press Install wine…** With nothing installed yet, the launcher offers this straight on its
+   main screen. It installs Rosetta 2 if needed, downloads Wine from Sikarugir's GitHub releases
+   (~250 MB), assembles the wrapper, and creates a blank Windows drive — four steps, shown as they
+   go green. No Terminal, no Homebrew, no picking an engine off a list.
+3. **Press Install the game…** Point it at your server's Windows installer and let it run inside
+   the wrapper the app just built — or copy an existing `HorizonXI` folder from a Windows PC into
+   the wrapper's `drive_c` by hand. Detail in
+   [Installing the game](docs/SETUP.md#installing-the-game).
 4. **Type your account name and password.** Tick *Remember me* and they go into the macOS
    Keychain — never into a file, never into this repo.
 5. **Press Play.**
 
 Stuck? Open **Setup & Diagnostics** in the app. Every check names the exact file or setting it
 couldn't find, and **Repair** re-runs the whole setup for you.
+
+Prefer doing it by hand, or troubleshooting the wrapper the app built? The old click-by-click
+Homebrew/Sikarugir Creator walkthrough still works and is kept in
+[docs/SETUP.md](docs/SETUP.md#installing-wine-by-hand) for that case.
 
 Longer walkthrough: [`docs/SETUP.md`](docs/SETUP.md).
 
@@ -156,7 +165,9 @@ Building it yourself needs only Apple's Command Line Tools:
 ```
 
 Tested on: MacBook Pro M1, 8 GB, macOS 26.5, Wine 10.0 (Sikarugir), HorizonXI client 1.9.0,
-Ashita 4.3.1.2.
+Ashita 4.3.1.2. The **Install wine…** button itself has only been verified up through a working
+`drive_c` — its wiring into a totally empty-Mac first run has not yet been driven end-to-end by
+a real user.
 
 ## Credits
 

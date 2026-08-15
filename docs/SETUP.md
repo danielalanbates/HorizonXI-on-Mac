@@ -1,28 +1,57 @@
 # Setting up — the plain-English version
 
-No Terminal. Three things have to be on your Mac, and the launcher tells you which one is
-missing at any moment.
+No Terminal, for most people. Three things have to be on your Mac, and the launcher tells you
+which one is missing at any moment — and builds one of the three for you.
 
 ## What you need
 
 | Piece | Where it comes from | Roughly |
 | --- | --- | --- |
 | **FFXI on Mac** (this launcher) | the `.dmg` on the releases page | 5 MB |
-| **A Wine wrapper** | see below | ~1 GB |
-| **The HorizonXI game client** | HorizonXI's own installer | ~27 GB |
+| **A Wine wrapper** | the launcher builds it — press **Install wine…** | ~250 MB download |
+| **The HorizonXI game client** | HorizonXI's own installer, run through **Install the game…** | ~27 GB |
 
-The last two are not in the download, and that is deliberate rather than laziness:
+The last two are not *in* the download itself, and that is deliberate rather than laziness:
 
 - The **game client** is Square Enix's data. Nobody may redistribute it, so you get it from your
   server's own installer (details below).
-- The **Wine wrapper** is ~1 GB on its own, and shipping a copy means taking on Wine's LGPL
-  obligations properly rather than as an afterthought. Bundling it is planned; today you install
-  it yourself, and it takes about five minutes.
+- The **Wine wrapper** is built from Wine's own upstream releases (Sikarugir, LGPL 2.1). Shipping
+  a pre-built copy inside this app would mean taking on Wine's LGPL relink obligations properly
+  rather than as an afterthought, so instead the launcher fetches it fresh and assembles it on
+  your Mac the first time you ask it to. That takes about five minutes, once, and needs nothing
+  from you but a click and (for Rosetta) your Mac password.
 
 Anyone offering you one file with all three in it is redistributing Square Enix's client, which
 they may not do.
 
-## Installing Wine — the whole thing, click by click
+## Installing Wine — press the button
+
+Open **FFXI on Mac** with nothing installed yet, and the main screen offers **Install wine…**
+directly. Press it and the launcher does four things, showing each as it finishes:
+
+1. **Rosetta 2** — Apple's translation layer; FFXI is a 32-bit Intel game. Installed automatically
+   if it's missing, via the normal system password prompt.
+2. **Downloading Wine** — two files, about 250 MB total, fetched from
+   [Sikarugir](https://github.com/Sikarugir-App/Sikarugir)'s own GitHub releases (a template `.app`
+   and a wine engine). The engine is checked against a pinned SHA-256 before anything is built
+   from it.
+3. **Building the wrapper** — the two pieces are unpacked into each other at
+   `~/Applications/FFXI on Mac Wine.app`, and Wine's internal library paths are fixed up so it
+   runs from that location.
+4. **Creating the Windows drive** — `wineboot` sets up a blank `drive_c`, ready for the game.
+
+When all four are green you have a working Wine wrapper and nothing left to configure. This is the
+same Wine build the manual route below produces — Sikarugir, the successor to Wineskin, an
+ordinary open-source build of Wine (LGPL 2.1). It is not CrossOver and costs nothing.
+
+If a step fails partway through, press **Install wine…** again — completed steps are skipped, so
+it picks up where it stopped rather than starting over.
+
+## Installing Wine by hand
+
+Only worth doing if the button above fails and you want to see each piece yourself, or if you're
+troubleshooting the wrapper the app built (it lives at the same place either way:
+`~/Applications/FFXI on Mac Wine.app`, or older manual installs under `~/Applications/Sikarugir/`).
 
 A "wrapper" is just a Mac app with Wine and a Windows C: drive inside it. You make one once, put
 FFXI in it, and never think about it again. Every step below was done on this Mac in about ten
@@ -78,18 +107,23 @@ That is your wrapper. It is empty — Wine and a blank Windows drive, no game ye
 
 Nothing to configure. Close Sikarugir Creator; you are done with it.
 
-## Installing the game into the wrapper
+## Installing the game
 
 FFXI itself comes from the server you intend to play on. HorizonXI's installer downloads about
 9.4 GB over BitTorrent and unpacks to roughly 27 GB, so start it before you do anything else and
 leave it running.
 
-You have two ways in, and the second is easier if you have a Windows PC already:
+You have two ways in:
 
-**Run the server's installer inside the wrapper.** Download HorizonXI's Windows installer from
-their site, then double-click your `FFXI.app` wrapper — it opens Sikarugir's own window with an
-**Install Software** button. Point that at the `.exe` you downloaded and let it run. It behaves
-like a Windows PC from there.
+**Press Install the game… in the launcher.** With a Wine wrapper already built (by the button
+above, or by hand), the main screen offers this once nothing is found. Point it at HorizonXI's
+Windows installer `.exe` and the launcher runs it inside the wrapper it manages — no separate
+Sikarugir window to find.
+
+**Or run the server's installer inside the wrapper directly.** If you built the wrapper by hand,
+double-click your `FFXI.app` wrapper — it opens Sikarugir's own window with an **Install
+Software** button. Point that at the `.exe` you downloaded and let it run. It behaves like a
+Windows PC from there.
 
 **Or copy an install you already have.** Drag the whole `HorizonXI` folder off a Windows machine
 into:
@@ -120,11 +154,13 @@ narrower and firm: **no Square Enix data is redistributed here.** You supply the
 1. **Install the launcher.** Open the `.dmg`, drag *FFXI on Mac* to Applications, and open
    it. The download is signed with a Developer ID and notarised by Apple, so it opens with no
    warning and no right-click trick.
-2. **Point it at your wrapper.** The launcher looks in `/Applications`, `~/Applications` and every
-   mounted volume for a `.app` containing a Wine build and a HorizonXI client. If you have one, it
-   finds it on its own and the dot at the bottom right turns to *ready to play*.
-3. **Install the game** if you have not: run HorizonXI's Windows installer inside the wrapper, or
-   copy an existing `HorizonXI` folder into `<wrapper>/Contents/SharedSupport/prefix*/drive_c/`.
+2. **Press Install wine…** if nothing is found. Four steps, all automatic: Rosetta 2, downloading
+   Wine, building the wrapper, creating the Windows drive. See above.
+3. **Press Install the game…** and point it at your server's Windows installer — or, if you
+   already have a wrapper from elsewhere, copy an existing `HorizonXI` folder into
+   `<wrapper>/Contents/SharedSupport/prefix*/drive_c/` by hand. The launcher also looks in
+   `/Applications`, `~/Applications` and every mounted volume on its own, so an existing install
+   is usually found without either step.
 4. **Type your account name and password**, tick *Remember me* if you want them kept — they go
    into the macOS Keychain, never into a file in this project.
 5. **Press PLAY.**
