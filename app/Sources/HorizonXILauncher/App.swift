@@ -75,8 +75,16 @@ struct ContentView: View {
     @State private var addonWarning = ""
     @State private var notice = ""
     @State private var scanning = false
+    @State private var showSetup = false
 
     private var blocked: Bool { checks.contains { $0.state == .bad } }
+
+    private var statusText: String {
+        if scanning { return "looking for your install…" }
+        if selected == nil { return "nothing installed yet" }
+        if let i = selected, !i.hasGame { return "wine is ready — the game is not installed" }
+        return blocked ? "setup incomplete" : "ready to play"
+    }
 
     var body: some View {
         ZStack {
@@ -249,6 +257,7 @@ struct ContentView: View {
         .sheet(isPresented: $newServer) { addServerSheet }
         .sheet(isPresented: $showGraphics) { graphicsSheet }
         .sheet(isPresented: $showAddons) { addonsSheet }
+        .sheet(isPresented: $showSetup) { SetupSheet { refresh() } }
     }
 
     /// What the selected server permits. See `AddonPolicy` for why an unsourced policy shows
@@ -767,6 +776,10 @@ struct ContentView: View {
                     HStack(spacing: 8) {
                         Button("Repair") { if let i = selected { runner.repair(i) } }
                             .disabled(runner.busy)
+                        // Also reachable when an install already exists: a wrapper can be
+                        // broken past what Repair fixes, and rebuilding a fresh one beside it
+                        // is faster than diagnosing wine by hand.
+                        Button("Install wine…") { showSetup = true }
                     }
                     .padding(.top, 4)
                 }
@@ -785,10 +798,29 @@ struct ContentView: View {
 
             Spacer()
 
+            // Nothing found and the scan has finished: this is a first run, and the one thing
+            // the user needs is the button that installs everything. Offering it here rather
+            // than burying it in Setup & Diagnostics is the difference between a launcher that
+            // works out of the box and one that needs the README first.
+            if !scanning && selected == nil {
+                Button { showSetup = true } label: {
+                    Label("Set up FFXI on Mac", systemImage: "wand.and.stars")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Installs Rosetta 2 and Wine, and creates the Windows drive FFXI installs into")
+            } else if !scanning, let i = selected, !i.hasGame {
+                // Wine is there, the game is not -- the state right after first-run setup.
+                Button { showSetup = true } label: {
+                    Label("Install the game…", systemImage: "arrow.down.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
             HStack(spacing: 5) {
                 Circle().fill(scanning ? Vana.gold : (blocked ? Vana.ember : Vana.crystal)).frame(width: 6, height: 6)
-                Text(scanning ? "looking for your install…" : (blocked ? "setup incomplete" : "ready to play"))
-                    .font(.caption2).foregroundStyle(Vana.muted)
+                Text(statusText).font(.caption2).foregroundStyle(Vana.muted)
             }
         }
         .padding(22)

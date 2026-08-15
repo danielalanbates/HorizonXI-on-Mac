@@ -19,6 +19,10 @@ struct Install: Identifiable, Hashable {
     var d3dMetal: URL { wrapper.appendingPathComponent("Contents/Frameworks/renderer/d3dmetal/external") }
     var systemReg: URL { prefix.appendingPathComponent("system.reg") }
 
+    /// Whether the client is actually in this prefix. A wrapper with wine but no game is the
+    /// normal state right after first-run setup, and the UI has to be able to say so.
+    var hasGame: Bool { FileManager.default.fileExists(atPath: gameDir.path) }
+
     /// Volume the wrapper lives on — the usual failure is that it simply is not mounted.
     var volume: URL? {
         let parts = wrapper.pathComponents
@@ -81,16 +85,28 @@ struct Install: Identifiable, Hashable {
                 else { continue }
                 guard let kids = try? fm.contentsOfDirectory(at: shared, includingPropertiesForKeys: nil)
                 else { continue }
-                for kid in kids where kid.lastPathComponent.hasPrefix("prefix") {
-                    let candidate = Install(wrapper: app, prefixName: kid.lastPathComponent)
-                    if fm.fileExists(atPath: candidate.gameDir.path) { found.append(candidate) }
-                }
+                // A prefix with no game in it used to be discarded outright. That made the
+                // wrapper first-run setup builds invisible to its own launcher: wine installed,
+                // drive created, and the UI still insisting nothing was found.
+                //
+                // Keeping *every* empty prefix is wrong too -- a long-lived wrapper accumulates
+                // half a dozen of them and they would all show up in the picker. So: if this
+                // wrapper has the game anywhere, show only the prefixes that have it. If it has
+                // the game nowhere, it is a fresh wrapper waiting for an install, and its
+                // prefixes are exactly what the user needs to see.
+                let candidates = kids
+                    .filter { $0.lastPathComponent.hasPrefix("prefix") }
+                    .map { Install(wrapper: app, prefixName: $0.lastPathComponent) }
+                let withGame = candidates.filter(\.hasGame)
+                found.append(contentsOf: withGame.isEmpty ? candidates : withGame)
             }
         }
         // Rank by how many preconditions the prefix already satisfies, so a half-finished
         // experiment never outranks a configured one. Equal scores fall back to name order,
         // which puts the plain `prefixNN` prefixes ahead of suffixed experiments.
         return found.sorted { a, b in
+            // An install with the game beats one without, whatever else is true of it.
+            if a.hasGame != b.hasGame { return a.hasGame }
             let sa = score(a), sb = score(b)
             if sa != sb { return sa > sb }
             // An install on an external volume works right up until the drive is unplugged, and
@@ -112,8 +128,10 @@ struct Install: Identifiable, Hashable {
         return kids
             .filter { $0.lastPathComponent.hasPrefix("prefix") }
             .map { Install(wrapper: app, prefixName: $0.lastPathComponent) }
-            .filter { fm.fileExists(atPath: $0.gameDir.path) }
-            .sorted { $0.prefixName < $1.prefixName }
+            .sorted { a, b in
+                if a.hasGame != b.hasGame { return a.hasGame }
+                return a.prefixName < b.prefixName
+            }
     }
 
     private static func score(_ i: Install) -> Int {

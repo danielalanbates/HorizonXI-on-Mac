@@ -29,7 +29,10 @@ LIBDIR="$SHARED/wine/lib"
 mkdir -p "$LIBDIR"
 
 linked=0
-for f in "$FRAMEWORKS"/*.dylib "$SHARED"/*.dylib; do
+# (N) is zsh's null_glob qualifier: a pattern that matches nothing expands to nothing instead
+# of aborting the script. A freshly created wrapper has no dylibs loose in SharedSupport -- they
+# are all in Frameworks -- so without this the script dies on exactly the case it exists for.
+for f in "$FRAMEWORKS"/*.dylib(N) "$SHARED"/*.dylib(N); do
   [[ -e "$f" ]] || continue
   base="${f:t}"
   [[ -e "$LIBDIR/$base" ]] && continue
