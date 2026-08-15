@@ -13,14 +13,59 @@ missing at any moment.
 
 The last two are not in the download, and that is deliberate rather than laziness:
 
-- The **game client** is Square Enix's data. Nobody may redistribute it. You install it with
-  HorizonXI's own Windows installer, or copy an install you already have.
-- The **Wine wrapper** used here is derived from CrossOver. Redistributing that has licence
-  implications this project has not cleared, so the launcher points at a wrapper you supply
-  rather than shipping one.
+- The **game client** is Square Enix's data. Nobody may redistribute it, so you get it from your
+  server's own installer (details below).
+- The **Wine wrapper** is ~1 GB on its own, and shipping a copy means taking on Wine's LGPL
+  obligations properly rather than as an afterthought. Bundling it is planned; today you install
+  it yourself, and it takes about five minutes.
 
-Anyone telling you they have a one-file download containing all three is redistributing something
-they should not be.
+Anyone offering you one file with all three in it is redistributing Square Enix's client, which
+they may not do.
+
+## Installing Wine
+
+The Wine used here is [Sikarugir](https://github.com/Sikarugir-App/Sikarugir) — the successor to
+Wineskin, and an ordinary open-source build of Wine (LGPL 2.1). It is not CrossOver and costs
+nothing.
+
+```sh
+brew trust Sikarugir-App/sikarugir
+brew install --cask Sikarugir-App/sikarugir/sikarugir
+```
+
+If you do not have Homebrew, paste the one-line installer from <https://brew.sh> first. Apple
+Silicon Macs also need Rosetta 2 — `softwareupdate --install-rosetta --agree-to-license` — because
+FFXI is a 32-bit x86 game.
+
+Then open Sikarugir, create a new blank wrapper, and let it fetch a Wine engine. Anything from
+**wine 10.0 or newer** works; this project is tested on `wine-10.0 (Sikarugir)`.
+
+Two warnings worth repeating:
+
+- **`sikarugir.com` is not the project.** The real one is the GitHub organisation linked above.
+  The Sikarugir team's own README tells anyone who arrived from that domain to scan for malware.
+- **If you use Kegworks or Wineskin instead, pick a pure-Wine engine, not a `CX` one.** Engines
+  with `CX` in the name (e.g. `WS12WineCX64Bit`) are CrossOver-derived and commercial.
+
+Once the wrapper exists, the launcher finds it on its own.
+
+## Installing the game
+
+FFXI itself comes from the server you intend to play on — the private servers each ship an
+installer that downloads the client (HorizonXI's is about 9.4 GB over BitTorrent, and unpacks to
+roughly 27 GB). Run that installer inside the Wine wrapper, or copy a `HorizonXI` folder from a
+Windows PC into `<wrapper>/Contents/SharedSupport/prefix*/drive_c/`.
+
+**A word on what these servers are**, since the wording elsewhere has been muddled: private
+servers like HorizonXI, CatsEyeXI and Eden run [LandSandBoat](https://github.com/LandSandBoat/server)
+or a fork of it — an open-source, independently written server that speaks FFXI's network
+protocol. It contains none of Square Enix's code. What it *needs* is Square Enix's client, which
+is why every one of them makes you install the real game rather than handing you a repack.
+
+Square Enix has not licensed or endorsed any of this. These communities have run openly for
+years, and retail FFXI has been in maintenance mode for a long time, but "long tolerated" is not
+the same as "permitted", and this project does not claim otherwise. What it does claim is
+narrower and firm: **no Square Enix data is redistributed here.** You supply the client.
 
 ## Steps
 

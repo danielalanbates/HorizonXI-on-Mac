@@ -38,13 +38,20 @@ Three pieces. The app tells you which one is missing at any moment.
 | Piece | Size | Where it comes from |
 | --- | --- | --- |
 | **FFXI on Mac** (this app) | 5 MB | the Releases page here |
-| **A Wine wrapper** | ~1 GB | you supply — see below |
+| **Wine** | ~1 GB | free, two Homebrew commands — [instructions](docs/SETUP.md#installing-wine) |
 | **The FFXI game client** | ~27 GB | your server's own installer |
 
-The game client and the Wine wrapper are not in the download, on purpose. The client is Square
-Enix's data and nobody is allowed to redistribute it, and the Wine wrapper is derived from
-CrossOver, whose licence this project has not cleared for redistribution. If anyone offers you a
-single file with all three in it, they are handing out something they shouldn't be.
+Neither of those two is in the download. The client is Square Enix's data and nobody may
+redistribute it. Wine is free and open source (Sikarugir, LGPL 2.1) — bundling it is planned, and
+for now you install it yourself in about five minutes. If anyone offers you a single file with
+all three in it, they are handing out Square Enix's client, which they may not do.
+
+**What these servers are:** HorizonXI, CatsEyeXI and Eden run
+[LandSandBoat](https://github.com/LandSandBoat/server) or a fork of it — an open-source server
+written independently, containing none of Square Enix's code. It needs Square Enix's *client*,
+which is why they all make you install the real game. Square Enix has not licensed or endorsed
+any of it; these communities have simply run openly for years while retail FFXI sits in
+maintenance mode. This project redistributes no Square Enix data at all.
 
 ## Setting it up
 
