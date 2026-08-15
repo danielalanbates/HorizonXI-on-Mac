@@ -70,11 +70,16 @@ maintenance mode. This project redistributes no Square Enix data at all.
 
 1. **Install the app.** Open the `.dmg`, drag *FFXI on Mac* to Applications, open it. It's signed
    and notarised by Apple, so no right-click-to-open trick needed.
-2. **Let it find your wrapper.** It searches `/Applications`, `~/Applications` and any connected
-   drive for a Wine wrapper containing an FFXI install. When it finds one, the dot in the bottom
-   corner turns to *ready to play*.
-3. **Install the game** if you haven't already — run your server's Windows installer inside the
-   wrapper, or copy over a `HorizonXI` folder from a Windows PC.
+2. **Make a Wine wrapper** — a Mac app with Windows inside it. Three Terminal commands and four
+   clicks, written out step by step in
+   [Installing Wine](docs/SETUP.md#installing-wine--the-whole-thing-click-by-click). Short
+   version: install Homebrew and Rosetta 2, `brew install --cask
+   Sikarugir-App/sikarugir/sikarugir`, open **Sikarugir Creator**, pick the
+   `WS12WineSikarugir10.0_6` engine, press **Create**, and name it `FFXI`.
+3. **Put the game in the wrapper.** Double-click your new `FFXI.app`, press **Install Software**,
+   and point it at your server's Windows installer — or copy a `HorizonXI` folder from a Windows
+   PC into the wrapper's `drive_c`. Full detail in
+   [Installing the game](docs/SETUP.md#installing-the-game-into-the-wrapper).
 4. **Type your account name and password.** Tick *Remember me* and they go into the macOS
    Keychain — never into a file, never into this repo.
 5. **Press Play.**

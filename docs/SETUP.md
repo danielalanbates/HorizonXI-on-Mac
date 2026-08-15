@@ -22,39 +22,87 @@ The last two are not in the download, and that is deliberate rather than lazines
 Anyone offering you one file with all three in it is redistributing Square Enix's client, which
 they may not do.
 
-## Installing Wine
+## Installing Wine — the whole thing, click by click
+
+A "wrapper" is just a Mac app with Wine and a Windows C: drive inside it. You make one once, put
+FFXI in it, and never think about it again. Every step below was done on this Mac in about ten
+minutes, most of it waiting on downloads.
 
 The Wine used here is [Sikarugir](https://github.com/Sikarugir-App/Sikarugir) — the successor to
-Wineskin, and an ordinary open-source build of Wine (LGPL 2.1). It is not CrossOver and costs
-nothing.
+Wineskin, an ordinary open-source build of Wine (LGPL 2.1). It is not CrossOver and costs nothing.
+
+### 1. Install Homebrew, if you do not have it
+
+Paste this into Terminal (Applications → Utilities → Terminal) and press Return:
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+### 2. Install Rosetta 2
+
+FFXI is a 32-bit Windows game from 2002, so an Apple Silicon Mac needs Apple's translation layer:
+
+```sh
+softwareupdate --install-rosetta --agree-to-license
+```
+
+### 3. Install Sikarugir
 
 ```sh
 brew trust Sikarugir-App/sikarugir
 brew install --cask Sikarugir-App/sikarugir/sikarugir
 ```
 
-If you do not have Homebrew, paste the one-line installer from <https://brew.sh> first. Apple
-Silicon Macs also need Rosetta 2 — `softwareupdate --install-rosetta --agree-to-license` — because
-FFXI is a 32-bit x86 game.
+That puts **Sikarugir Creator** in your Applications folder.
 
-Then open Sikarugir, create a new blank wrapper, and let it fetch a Wine engine. Anything from
-**wine 10.0 or newer** works; this project is tested on `wine-10.0 (Sikarugir)`.
+> **`sikarugir.com` is not this project.** The real one is the GitHub organisation linked above.
+> Sikarugir's own README tells anyone who arrived from that domain to scan their Mac for malware.
 
-Two warnings worth repeating:
+### 4. Make the wrapper
 
-- **`sikarugir.com` is not the project.** The real one is the GitHub organisation linked above.
-  The Sikarugir team's own README tells anyone who arrived from that domain to scan for malware.
-- **If you use Kegworks or Wineskin instead, pick a pure-Wine engine, not a `CX` one.** Engines
-  with `CX` in the name (e.g. `WS12WineCX64Bit`) are CrossOver-derived and commercial.
+Open **Sikarugir Creator**. The window has three parts: a template on the left, an engine in the
+middle, a **Create** button on the right.
 
-Once the wrapper exists, the launcher finds it on its own.
+1. Under *No engine selected*, click **Change**.
+2. Pick **`WS12WineSikarugir10.0_6`** — the top entry, and the exact build this project is tested
+   on. It downloads about 160 MB, which takes a minute; the arrow next to it disappears when it
+   has finished, and then you click the name again to select it.
+   **Do not pick anything with `CX` in the name.** Those are CrossOver-derived and commercial.
+3. **Create** turns blue. Click it.
+4. It asks where to save. Type **`FFXI`** and press Return. Leave the location alone — the default
+   is `~/Applications/Sikarugir/`, which is one of the places the launcher looks.
 
-## Installing the game
+Wait a minute or two. When it finishes you have `~/Applications/Sikarugir/FFXI.app`, about 1.4 GB.
+That is your wrapper. It is empty — Wine and a blank Windows drive, no game yet.
 
-FFXI itself comes from the server you intend to play on — the private servers each ship an
-installer that downloads the client (HorizonXI's is about 9.4 GB over BitTorrent, and unpacks to
-roughly 27 GB). Run that installer inside the Wine wrapper, or copy a `HorizonXI` folder from a
-Windows PC into `<wrapper>/Contents/SharedSupport/prefix*/drive_c/`.
+Nothing to configure. Close Sikarugir Creator; you are done with it.
+
+## Installing the game into the wrapper
+
+FFXI itself comes from the server you intend to play on. HorizonXI's installer downloads about
+9.4 GB over BitTorrent and unpacks to roughly 27 GB, so start it before you do anything else and
+leave it running.
+
+You have two ways in, and the second is easier if you have a Windows PC already:
+
+**Run the server's installer inside the wrapper.** Download HorizonXI's Windows installer from
+their site, then double-click your `FFXI.app` wrapper — it opens Sikarugir's own window with an
+**Install Software** button. Point that at the `.exe` you downloaded and let it run. It behaves
+like a Windows PC from there.
+
+**Or copy an install you already have.** Drag the whole `HorizonXI` folder off a Windows machine
+into:
+
+```
+~/Applications/Sikarugir/FFXI.app/Contents/SharedSupport/prefix/drive_c/
+```
+
+To get there in Finder: right-click `FFXI.app` → *Show Package Contents* → `SharedSupport` →
+`prefix` → `drive_c`. Drop the folder in so you end up with `drive_c/HorizonXI`.
+
+Either way, when the game files are in place, open **FFXI on Mac** and it finds the wrapper on its
+own. If it doesn't, open **Setup & Diagnostics** — it names the exact thing it could not find.
 
 **A word on what these servers are**, since the wording elsewhere has been muddled: private
 servers like HorizonXI, CatsEyeXI and Eden run [LandSandBoat](https://github.com/LandSandBoat/server)
