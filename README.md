@@ -4,6 +4,9 @@ Play Final Fantasy XI on an Apple Silicon Mac. No Windows, no virtual machine, n
 
 You get a normal Mac app: type your account name and password, pick your server, press **Play**.
 
+**[Download FFXI on Mac 2.5](https://github.com/danielalanbates/HorizonXI-on-Mac/releases/latest)**
+— 3 MB, signed and notarised by Apple. Apple Silicon, macOS 13 or later.
+
 ![Murn in Selbina](docs/img/murn-in-selbina.png)
 
 It works with **HorizonXI**, CatsEyeXI, Eden and other FFXI private servers, and it can also run
