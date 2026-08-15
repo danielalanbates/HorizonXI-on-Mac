@@ -1,230 +1,149 @@
 # FFXI on Mac
 
-Running Final Fantasy XI private servers — **HorizonXI**, CatsEyeXI, Eden, and others — natively
-on Apple Silicon macOS under Wine, no virtual machine.
+Play Final Fantasy XI on an Apple Silicon Mac. No Windows, no virtual machine, no Boot Camp.
 
-> ## 📣 Status — playable and correct, still short of 30 fps
-> The Metal renderer is **correct** — full textures, fog, UI. The frame rate is **~24 fps in the
-> world at 4K with every setting at maximum**, and the reason is measured precisely: the client
-> blocks ~26 ms of every ~40 ms frame waiting on a 16×16 render-target read-back it does four
-> times a frame, which decides whether entities are drawn at all. It is not the renderer, and it
-> cannot be skipped or faked — see [`docs/MAX4K.md`](docs/MAX4K.md), which also records the
-> attempts that failed. Testers welcome, especially on Apple Silicon with more than 8 GB.
+You get a normal Mac app: type your account name and password, pick your server, press **Play**.
 
-> ### 2026-08-14 — any server, its own addon rules, and the stock title screen
->
-> | HorizonXI's branding, on a LandSandBoat world | after |
-> | --- | --- |
-> | ![before](docs/img/title-before.png) | ![after](docs/img/title-after.png) |
->
-> Three things landed, all driven by playing on a server that is not HorizonXI:
->
-> * **The title screen no longer says HORIZON XI** on other servers. Their installer bakes the
->   logo into the game's own data (`menu/titlwin` in `ROM/119/50.dat`); the launcher now
->   side-loads a patched copy through XIPivot for every server except HorizonXI, leaving the
->   real game files untouched. Finding that texture needed a DAT image scanner, which ships as
->   [`scripts/datimg.py`](scripts/datimg.py). Four other approaches failed first and are written
->   up in [`docs/BRANDING.md`](docs/BRANDING.md) so nobody repeats them.
-> * **The addon screen only offers what the server allows.** On HorizonXI an unapproved addon is
->   a bannable offence, and the screen was offering all 105 installed. It now filters to their
->   published list and names the source; servers whose rules could not be sourced are shown
->   unfiltered *and said to be unfiltered*, rather than given a guessed allowlist.
->   [`docs/ADDON-POLICY.md`](docs/ADDON-POLICY.md)
-> * **Servers with no published login host** now say so instead of launching into a failure.
+![Murn in Selbina](docs/img/murn-in-selbina.png)
 
-> ### 2026-08-10 — the launcher, and three renderers measured
->
-> ![The launcher](docs/img/launcher.png)
->
-> The launcher now has account name and password, a world dropdown (HorizonXI pinned, the rest
-> ordered by community size), and a renderer picker. See [`docs/GOALS.md`](docs/GOALS.md).
->
-> On the graphics side, every pathway was measured on the same M1 in the same zone:
->
-> | Pathway | fps | CPU | GPU | picture |
-> | --- | --- | --- | --- | --- |
-> | OpenGL *(default)* | 3.2 in-zone | 185% | 9% | **complete and correct** |
-> | wined3d Vulkan | 20.6 | 46% | 95% | models and terrain untextured |
-> | d3d8to9 + DXVK | 29.1 | 89% | 17% | menus and UI perfect, 3D world black in-zone |
->
-> Two long-standing blockers were root-caused and fixed today — DXVK's black window was
-> MoltenVK assigning two uniform buffers to the same Metal binding, cured by
-> `MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1`; and `behaviorflags.fpu_preserve = 1` brought back
-> most of the 3D pipeline. **Neither fast pathway is playable yet**, so Classic OpenGL is still
-> the default and nothing has been announced to the HorizonXI community.
-> Full write-up: [`docs/PATHWAYS.md`](docs/PATHWAYS.md).
+It works with **HorizonXI**, CatsEyeXI, Eden and other FFXI private servers, and it can also run
+a server on your own Mac if you want to play offline.
 
-> **Status: PLAYABLE.** As of 2026-08-08, Final Fantasy XI runs natively on Apple Silicon macOS
-> under Wine — logged in, in-world, chat live, Ashita macros bound. As far as a full GitHub sweep
-> can tell this is the first time that has happened: every other FFXI-on-a-non-Windows-machine
-> project is Linux.
->
-> ![Murn in Selbina](docs/img/murn-in-selbina.png)
->
-> Level 75 Ninja standing on the dock in Selbina, no virtual machine involved.
+---
 
-Tested on: MacBook Pro M1, 8GB, macOS 26.5, Wine 10.0 (Sikarugir), HorizonXI client 1.9.0,
+## Is it good enough to actually play?
+
+Yes, with one caveat: it is not a smooth 60 fps game.
+
+| Measured on an M1 MacBook Pro, 8 GB | Frame rate |
+| --- | --- |
+| Out in the world, every setting maxed at 4K | ~24 fps |
+| Out in the world, max settings (benchmark zone) | ~28 fps |
+
+That's playable for questing, crafting, chatting and most party content. If you want to know why
+it isn't faster, the whole investigation is written up in [`docs/MAX4K.md`](docs/MAX4K.md) — short
+version: the game itself pauses waiting on the graphics card, and it is not something the Mac side
+can skip without breaking the game.
+
+More powerful Macs (M2/M3/M4, more memory) have not been tested yet. **If you have one, please
+try it and open an issue with your numbers** — that is the single most useful thing anyone can
+contribute right now.
+
+---
+
+## What you need
+
+Three pieces. The app tells you which one is missing at any moment.
+
+| Piece | Size | Where it comes from |
+| --- | --- | --- |
+| **FFXI on Mac** (this app) | 5 MB | the Releases page here |
+| **A Wine wrapper** | ~1 GB | you supply — see below |
+| **The FFXI game client** | ~27 GB | your server's own installer |
+
+The game client and the Wine wrapper are not in the download, on purpose. The client is Square
+Enix's data and nobody is allowed to redistribute it, and the Wine wrapper is derived from
+CrossOver, whose licence this project has not cleared for redistribution. If anyone offers you a
+single file with all three in it, they are handing out something they shouldn't be.
+
+## Setting it up
+
+1. **Install the app.** Open the `.dmg`, drag *FFXI on Mac* to Applications, open it. It's signed
+   and notarised by Apple, so no right-click-to-open trick needed.
+2. **Let it find your wrapper.** It searches `/Applications`, `~/Applications` and any connected
+   drive for a Wine wrapper containing an FFXI install. When it finds one, the dot in the bottom
+   corner turns to *ready to play*.
+3. **Install the game** if you haven't already — run your server's Windows installer inside the
+   wrapper, or copy over a `HorizonXI` folder from a Windows PC.
+4. **Type your account name and password.** Tick *Remember me* and they go into the macOS
+   Keychain — never into a file, never into this repo.
+5. **Press Play.**
+
+Stuck? Open **Setup & Diagnostics** in the app. Every check names the exact file or setting it
+couldn't find, and **Repair** re-runs the whole setup for you.
+
+Longer walkthrough: [`docs/SETUP.md`](docs/SETUP.md).
+
+## Addons
+
+Ashita addons work — HXUI, statustimers, the usual set. The app's **Addons** screen only shows you
+the ones your server actually allows, and names where that list came from. On HorizonXI an
+unapproved addon can get you banned, so this matters more than it sounds.
+
+Three plugins still don't load: `Nameplate`, `PacketFlow` and `Deeps`. They were built against an
+older version of Ashita than the one shipped here, so you'll see red "different interface version"
+lines in the log at startup. Harmless — everything else loads. Details and the fix we're waiting
+on: [`docs/ADDONS.md`](docs/ADDONS.md).
+
+## Running your own server
+
+Pick **Local server** in the World dropdown and press **Set up server**. The app installs the
+tools it needs and builds [LandSandBoat](https://github.com/LandSandBoat/server) on your Mac —
+about half an hour and 12 GB of disk the first time. After that, pressing Play starts the server
+and the game together. You still need the FFXI client; a server isn't a game.
+
+## Troubleshooting
+
+**The game window opens and closes right away.** Almost always the prefix configuration. Hit
+**Repair** in Setup & Diagnostics.
+
+**Red plugin errors when the game starts.** Expected — see Addons above.
+
+**It won't find my wrapper.** The wrapper has to be a `.app` on an APFS or HFS+ volume. A Wine
+prefix cannot live on an exFAT drive, and won't work from one.
+
+**The world looks black or untextured.** Make sure the renderer is set to *Metal / DXVK
+(recommended)*. The other options are there for debugging and are known to draw incorrectly.
+
+Anything else — [open an issue](../../issues). Include your Mac model, macOS version, your server,
+and what the log pane says.
+
+## Helping out
+
+This has been tested on exactly one Mac. Useful contributions, roughly in order:
+
+- **Frame rates from other Macs.** Model, memory, macOS version, where you were standing.
+- **Servers other than HorizonXI.** Login hosts, addon rules, anything that didn't work.
+- **Bug reports with the log pane contents.** The log usually says exactly what went wrong.
+- **Code.** See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+Questions are welcome, including basic ones. Nobody here was born knowing what a Wine prefix is.
+
+## Under the hood
+
+For anyone curious, or working on something similar — the technical record lives in `docs/`:
+
+- [`docs/X87-WALL.md`](docs/X87-WALL.md) — the big one. FFXI's floating-point math ran at ~1% of
+  native speed under Rosetta. Fixing that took the game from 11 fps to 28.
+- [`docs/MAX4K.md`](docs/MAX4K.md) — where the remaining frames go, and the fast trick that turned
+  out to break the game.
+- [`docs/FINDINGS.md`](docs/FINDINGS.md) — why the game exited silently for weeks, and the dozen
+  things that looked like the cause and weren't.
+- [`docs/ADDONS.md`](docs/ADDONS.md), [`docs/BRANDING.md`](docs/BRANDING.md),
+  [`docs/PATHWAYS.md`](docs/PATHWAYS.md) — addons, title-screen art, and the three renderers
+  compared.
+
+Building it yourself needs only Apple's Command Line Tools:
+
+```sh
+./app/bundle.sh          # build the .app
+./scripts/package.sh     # build the .dmg
+```
+
+Tested on: MacBook Pro M1, 8 GB, macOS 26.5, Wine 10.0 (Sikarugir), HorizonXI client 1.9.0,
 Ashita 4.3.1.2.
 
-## Quick start
+## Credits
 
-```sh
-./scripts/install.sh /path/to/wrapper.app        # configure the prefix
-"/path/to/Play HorizonXI.command"                # launch
-```
-
-Assumes the HorizonXI client is already extracted to `<prefix>/drive_c/HorizonXI` (~27GB).
-
-## Why this repo exists
-
-A GitHub sweep — ~318 FFXI-related repos, the Windower / AshitaXI / HorizonFFXI / LandSandBoat /
-EdenServer / CatsEyeXI org listings, and code search for `FFXiMain.dll`, `horizon-loader.exe`,
-`xiloader`+`WINEPREFIX` — turns up **zero** prior attempts to run FFXI on macOS:
-
-- `Windower/Lumoria` — Windower's official FFXI installer/launcher. Vala + Flatpak, **Linux only**
-- <https://gitlab.com/MattyGWS/HorizonXI-Linux-Installation> — the wiki's official pointer
-- `sheik/horizonxi-linux`, `sarca571ca/horizonxi-lutris`, `TeamLinux01/HorizonXI-on-Deck`
-- `jondwillis/kuluu-ffxi` — a Rust/Bevy client rebuild *on* macOS, but it drives the real client
-  inside Parallels
-
-The macOS-specific problems below are not covered by any of them.
-
-## What was actually wrong
-
-The symptom was a silent exit: login succeeded, the server connected, every DAT archive loaded,
-and then the process closed in ~2s with no error, no crash dump and exit code 0. It never created
-a window and never made a single d3d8 call, so it looked like a graphics problem. It was not.
-
-**The PlayOnline registry layout is counter-intuitive, and every reasonable guess at it is wrong.**
-HorizonXI ships the correct layout in `SquareEnix/Switch_Horizon.bat`:
-
-```
-HKLM\SOFTWARE\WOW6432Node\PlayOnlineUS\InstallFolder
-    0001 = ...\SquareEnix\FINAL FANTASY XI      ← the GAME dir, not PlayOnlineViewer
-    1000 = ...\SquareEnix\PlayOnlineViewer      ← POL goes in 1000
-HKLM\SOFTWARE\WOW6432Node\PlayOnlineUS\Interface
-    0001 = "0"                                   ← a string, not an empty key
-```
-
-Putting `PlayOnlineViewer` in `0001` — the obvious reading, and what the prefix had — makes
-`FFXiMain.dll` stop loading entirely. Combined with writing to the wrong registry view (below)
-and launching xiloader directly instead of through Ashita, the game aborted inside its own init
-before window setup.
-
-## Fixes this project found (macOS-specific, not in any Linux guide)
-
-1. **The wrapper's `wineserver` cannot find its own dylibs.** Its rpath is `@loader_path/../../`,
-   resolving to `SharedSupport/`, but the dylibs ship in `Contents/Frameworks/`. The usual
-   workaround is exporting `DYLD_FALLBACK_LIBRARY_PATH`, which is a trap — see #2. The correct
-   fix is to symlink the frameworks into the path the binary actually searches:
-   [`scripts/fix-wine-rpath.sh`](scripts/fix-wine-rpath.sh).
-2. **`nohup` and `/bin/sh` are SIP-protected and strip every `DYLD_*` variable.** Any launcher
-   built on `DYLD_FALLBACK_LIBRARY_PATH` breaks the moment it is backgrounded or wrapped in a
-   shell script — silently. `winetricks` is `#!/bin/sh` and hits exactly this. Fix #1 removes the
-   dependency on the variable entirely.
-3. **`reg.exe` writes the 64-bit registry view.** The 32-bit game reads
-   `HKLM\SOFTWARE\Wow6432Node\...`, so a prefix configured with plain `wine reg add` leaves the
-   game seeing nothing at all. Use `C:\windows\syswow64\reg.exe` — or write both views.
-4. **FFXI is three COM in-proc servers, not one** — `FFXi.FFXiEntry`, `FFXiMain.GameMain`,
-   `POLCore.POLCoreCom`. `regsvr32` **needs `/s`**: without it, `FFXi.dll`'s `DllRegisterServer`
-   opens a GUI dialog, and synthetic input cannot reach wine windows, so it hangs forever with
-   nothing to click. [`scripts/export-ffxi-com.py`](scripts/export-ffxi-com.py) lifts the
-   registration out of a working prefix if you need to clone it.
-5. **Launch through `Ashita-cli.exe`, not `xiloader` directly.** With the correct registry but
-   launched xiloader-direct, the game still exits silently.
-6. **Wine resolves a relative exe name against `C:\windows\system32`, not the cwd.** Always pass
-   the absolute `C:\...` path.
-7. **A wine prefix cannot live on exFAT**, and on a removable volume every process touching it
-   needs the TCC "Removable Volumes" grant — which `launchd`-spawned jobs never have. Run it from
-   a terminal with Full Disk Access.
-8. **Synthetic input (CGEvent) does not reach wine-hosted windows.** Any step needing a real
-   keypress or click cannot be automated — prefer silent/CLI equivalents everywhere else.
-
-## Things that look like the bug and are not
-
-Recorded so nobody re-treads them — all tested and disproven, with the instrumented evidence in
-[`docs/FINDINGS.md`](docs/FINDINGS.md):
-
-Ashita and its addons · `gdiplus` · sound init · the `patch.ver` version check · missing
-`ROM11`–`ROM13` (not in the client's own `file.txt` manifest) · the Wine version (9.0 CX24 and
-10.0 Sikarugir behave identically) · new-WoW64 vs a true 32-bit prefix · DAT corruption (170
-size mismatches vs `file.txt` are intentional Horizon overrides, byte-identical to a working
-Windows install) · `dgVoodoo2` and the `winefix` addon, which the Linux guides recommend —
-`winefix` ships with the client and its own description says it only fixes a micro-stutter.
-
-## The launcher
-
-`FFXI-on-Mac.app` — account login (password in the Keychain, written into Ashita's boot
-profile at launch and never into this repo), a preflight check for every precondition that has
-silently broken before, one-click prefix repair, graphics settings, and a live log.
-
-```sh
-./app/bundle.sh          # build the .app (no Xcode needed — Command Line Tools only)
-./scripts/package.sh     # build dist/FFXI-on-Mac-<version>.dmg
-```
-
-![Main menu](docs/img/main-menu.png)
-
-## Performance — where it actually stands
-
-Rendering is **correct** on Metal: D3D8 → d3d8to9 → DXVK 1.10.3 → MoltenVK, full textures, fog,
-UI. The frame rate is not there.
-
-| scene | fps |
-| --- | --- |
-| rules-of-conduct / title screens | ~24 |
-| character select (~1841 draws) | ~12 |
-| in-world, Mog House (~850 draws) | **~7.5** |
-
-Fewer draws, worse frame rate — which is the first sign that the usual explanations are wrong.
-This session instrumented the whole stack to find out where the time goes, and the answer
-overturned the previous model:
-
-- **Draw calls cost 1.9 µs each, about 3% of a frame.** Discarding *every* draw
-  (`DXVK_SKIP_DRAWS=1`) makes the frame rate go **down**, not up. Draw-call batching, instancing
-  and render-pass merging are all inside a slice of the frame too small to matter.
-- **`Present` costs 0.05 ms.** Everything inside DXVK adds up to a fifth of the frame in the
-  menus and almost nothing in the world.
-- **In the world the client stalls ~120 ms per frame at 13% CPU** — one pause per frame, outside
-  every D3D entry point, doing nothing. That single stall is the whole gap between 7.5 fps and a
-  playable game.
-
-Full measurements and method: [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md). The stall is written
-up as a bug report with a dozen hypotheses already eliminated and the strongest lead identified
-(FFXI's texture path through d3d8to9): [`docs/INWORLD-STALL.md`](docs/INWORLD-STALL.md). It is
-the highest-value thing left in this project by a wide margin.
-
-The instrumentation is reusable: our `d3d9.dll` carries six probes behind environment variables,
-and [`scripts/harness/`](scripts/harness) runs a whole configuration — launch, navigate, sample,
-screenshot, kill — from one command.
-
-## Known limitations
-
-- **~7.5 fps in the world.** Cause identified, not yet fixed. See above.
-- **No Ashita plugin or addon loads.** Ashita.dll here is plugin interface 4.16 and every
-  bundled plugin is 4.15, so the plugin manager rejects all of them — including the `Addons`
-  Lua host, so no Lua addon loads either. Affects gameplay, not just benchmarks.
-- Tested on exactly one machine: M1 MacBook Pro, 8 GB, macOS 26.5.
-
-## Roadmap
-
-- [x] Login and server connection
-- [x] Ashita injection, POL plugins, DAT overlays, macro import from a Windows install
-- [x] `install.sh` — bare prefix to running game, no GUI
-- [x] `FFXI-on-Mac.app` — launcher with preflight, repair, account login, world picker
-- [x] `package.sh` — distributable disk image, signed and notarised
-- [x] **Renderer on Metal, rendering correctly** — fog fix + Metal feature relaxations
-- [x] **Find out what actually limits the frame rate** — it is not the renderer
-- [ ] **Fix the in-world stall** — [`docs/INWORLD-STALL.md`](docs/INWORLD-STALL.md)
-- [ ] Bundle the dependencies for non-technical users — unblocked, plan in
-      [`docs/BUNDLING.md`](docs/BUNDLING.md)
-- [ ] Fix the Ashita 4.15/4.16 plugin mismatch
-- [ ] Upstream the two DXVK fixes — [`docs/UPSTREAM.md`](docs/UPSTREAM.md)
-- [ ] Announcement / macOS entry on the HorizonXI wiki — draft in
-      [`docs/ANNOUNCEMENT.md`](docs/ANNOUNCEMENT.md)
+Standing on other people's work: [Ashita](https://github.com/AshitaXI),
+[DXVK](https://github.com/doitsujin/dxvk), [d3d8to9](https://github.com/crosire/d3d8to9),
+[MoltenVK](https://github.com/KhronosGroup/MoltenVK),
+[x87sidecar](https://github.com/athei/x87sidecar),
+[LandSandBoat](https://github.com/LandSandBoat/server), and the HorizonXI team.
 
 ## Licence
 
-GPL-3.0, matching `hxiloader` and `XIV-on-Mac`.
+GPL-3.0. Third-party components and their licences: [`vendor/NOTICE.md`](vendor/NOTICE.md).
 
-Not affiliated with HorizonXI, Square Enix, or the Ashita project.
+Not affiliated with HorizonXI, Square Enix, or the Ashita project. Final Fantasy XI is a trademark
+of Square Enix Holdings Co., Ltd.

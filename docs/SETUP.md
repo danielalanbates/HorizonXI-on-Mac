@@ -41,12 +41,11 @@ setting it could not find, and **Repair** re-runs the whole prefix configuration
 
 ## Choosing a renderer
 
-**Leave this on Classic (OpenGL)** unless you are helping debug. It is the only setting that
-draws the game correctly. It is also slow — about 3 frames per second in a zone on an M1 with
-8 GB — and that is the honest state of this project today.
+**Leave this on Metal / DXVK (recommended).** It draws the game correctly — full textures, fog,
+UI — at around 24 fps in the world at 4K with every setting maxed on an M1 with 8 GB.
 
-The other two options are faster and visibly broken, in different ways. The launcher says which
-under each one, and [`PATHWAYS.md`](PATHWAYS.md) has the measurements and the reasons.
+The other options are there for debugging and draw the game wrong in various ways. The launcher
+says how under each one, and [`PATHWAYS.md`](PATHWAYS.md) has the measurements and the reasons.
 
 ## Which server
 

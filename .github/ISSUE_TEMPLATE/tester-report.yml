@@ -1,0 +1,38 @@
+name: Tester report
+description: Tell us how it ran on your Mac — good or bad
+title: "[Tester] "
+labels: ["tester-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing. Reports from Macs other than an 8 GB M1 are the most useful thing
+        anyone can send right now. "It just worked" is a perfectly good report.
+  - type: input
+    id: mac
+    attributes:
+      label: Mac model and memory
+      placeholder: MacBook Pro M3 Pro, 18 GB
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "26.5"
+    validations:
+      required: true
+  - type: input
+    id: server
+    attributes:
+      label: Server
+      placeholder: HorizonXI
+  - type: input
+    id: fps
+    attributes:
+      label: Frame rate, and where you were
+      placeholder: about 35 fps standing in Southern San d'Oria, max settings
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything that looked wrong, or anything that surprised you

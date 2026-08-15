@@ -1,0 +1,31 @@
+name: Something is broken
+description: The app or the game isn't behaving
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you were doing, and what the app or game did instead.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log pane contents
+      description: >
+        Copy what's in the log area at the bottom of the app. If the game won't start at all,
+        open Setup & Diagnostics and paste what the checks say.
+      render: text
+  - type: input
+    id: mac
+    attributes:
+      label: Mac model, memory, macOS version
+    validations:
+      required: true
+  - type: input
+    id: server
+    attributes:
+      label: Server
+      placeholder: HorizonXI
