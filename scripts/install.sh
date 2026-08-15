@@ -61,6 +61,12 @@ for REG in "$REG32" reg; do
   "$WINE" $REG add "HKLM\\SOFTWARE\\PlayOnlineUS\\Interface"     /v 0001 /d "0" /f >/dev/null 2>&1
 done
 
+# Option must behave as Alt, or no Alt-based macro can ever be typed. Wine's Mac driver defaults
+# both Option keys to composing special characters instead, which silently costs the player every
+# Alt keybind — Ashita macro books included.
+"$WINE" reg add "HKCU\\Software\\Wine\\Mac Driver" /v LeftOptionIsAlt  /d y /f >/dev/null 2>&1
+"$WINE" reg add "HKCU\\Software\\Wine\\Mac Driver" /v RightOptionIsAlt /d y /f >/dev/null 2>&1
+
 # The client ships pol.reg / polu.reg; polu.reg holds HKCU video settings the game needs present.
 for r in pol polu; do
   [[ -f "$WINEPREFIX/drive_c/$r.reg" ]] && "$WINE" regedit /S "C:\\$r.reg" >/dev/null 2>&1 || true

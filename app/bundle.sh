@@ -5,7 +5,17 @@ set -euo pipefail
 
 HERE="${0:A:h}"
 REPO="${HERE:h}"
-OUT="${1:-$HERE/build}"
+# Default output is beside the sources, except when the checkout lives in iCloud Drive: iCloud
+# re-adds extended attributes to files while they are being written, and codesign refuses any
+# bundle carrying them ("resource fork, Finder information, or similar detritus not allowed").
+# Stripping them does not help -- they come back mid-build -- so build somewhere else entirely.
+if [[ -n "${1:-}" ]]; then
+  OUT="$1"
+elif [[ "$HERE" == *"/Mobile Documents/"* ]]; then
+  OUT="${TMPDIR:-/tmp}/ffxi-on-mac-build"
+else
+  OUT="$HERE/build"
+fi
 APP="$OUT/FFXI-on-Mac.app"
 
 cd "$HERE"
@@ -67,25 +77,25 @@ PLIST
 # that can be notarised. Use the certificate *hash*, not its name -- there are two identical
 # "Developer ID Application: Daniel Bates" certs in the login keychain and codesign rejects
 # the name as ambiguous. Do NOT pass --timestamp here: it hangs on this network.
-if [[ -n "${HXI_SIGN_ID:-}" ]]; then
-  codesign --force --deep --options runtime -s "$HXI_SIGN_ID" "$APP"
-else
-  codesign --force --deep -s - "$APP" >/dev/null 2>&1 || true
-fi
+# Order matters, and the obvious order is wrong. x87sidecar_entitled needs its own entitlements
+# (get-task-allow, cs.debugger) or it cannot attach to the game at all. Signing it *after* the
+# app breaks the app's seal -- `codesign -v` then reports "a sealed resource is missing or
+# invalid" and Gatekeeper rejects the bundle. So sign the nested binary FIRST, then sign the app
+# WITHOUT --deep, which leaves nested signatures alone and seals them as they are.
+#
+# iCloud puts xattrs on everything it syncs and codesign refuses to sign a bundle carrying them
+# ("resource fork, Finder information, or similar detritus not allowed"), so strip them first.
+find "$APP" -exec xattr -c {} \; 2>/dev/null || true
 
-# Deep-signing the app just now re-signed x87sidecar_entitled with the app's own (empty)
-# entitlements, which silently breaks its ability to attach to another process. Re-sign it last,
-# on its own, with the entitlements it actually needs -- must come after the block above, not
-# before, or --deep overwrites this instead.
 X87SC="$APP/Contents/Resources/x87sidecar_entitled"
-if [[ -f "$X87SC" ]]; then
-  if [[ -n "${HXI_SIGN_ID:-}" ]]; then
-    codesign --force --options runtime -s "$HXI_SIGN_ID" \
-      --entitlements "$REPO/vendor/x87sidecar-entitlements.plist" "$X87SC"
-  else
-    codesign --force -s - \
-      --entitlements "$REPO/vendor/x87sidecar-entitlements.plist" "$X87SC" >/dev/null 2>&1 || true
-  fi
+if [[ -n "${HXI_SIGN_ID:-}" ]]; then
+  [[ -f "$X87SC" ]] && codesign --force --options runtime -s "$HXI_SIGN_ID" \
+    --entitlements "$REPO/vendor/x87sidecar-entitlements.plist" "$X87SC"
+  codesign --force --options runtime -s "$HXI_SIGN_ID" "$APP"
+else
+  [[ -f "$X87SC" ]] && codesign --force -s - \
+    --entitlements "$REPO/vendor/x87sidecar-entitlements.plist" "$X87SC" >/dev/null 2>&1 || true
+  codesign --force -s - "$APP" >/dev/null 2>&1 || true
 fi
 
 # Re-register with Launch Services. Replacing a bundle in place leaves the Dock and Finder

@@ -63,7 +63,19 @@ pure-wine engines are fine; the `CX` ones are not.
 
 ## Current status of the shipped wrapper
 
-The wrapper in use today (`siku.app`) is CrossOver-derived — `Frameworks/moltenvkcx/`,
-`wine.cx32bak/`, `prefixcx24/` give it away. It is fine for personal use on your own machine.
-It must not go into a public beta package, which is why `scripts/package.sh` deliberately
-excludes it. Replacing it with an upstream wine build is tracked in `PHASE2-PACKAGING.md`.
+**Corrected 2026-08-14.** An earlier version of this file said the wrapper in use (`siku.app`)
+was CrossOver-derived. It is not, and that mistake made bundling look blocked when it wasn't.
+
+The wine that actually runs the game is [Sikarugir](https://github.com/Sikarugir-App/Sikarugir)
+wine 10.0 — an open-source Wineskin fork of upstream WineHQ, **LGPL 2.1**. `wine --version`
+reports `wine-10.0 (Sikarugir)`, the binaries carry no CodeWeavers strings, and `ntdll.so`
+carries upstream wine's new-WoW64 strings rather than CodeWeavers' `wine32on64`.
+
+The wrapper *does* contain CrossOver leftovers — `Frameworks/moltenvkcx/`,
+`SharedSupport/wine.cx32bak/`, `SharedSupport/prefixcx24/` — but nothing in the live path loads
+any of them, and they are excluded from any package (and can be deleted outright, reclaiming
+about 845 MB). Evidence and md5s: [`docs/BUNDLING.md`](docs/BUNDLING.md).
+
+So every component in the live stack is redistributable, and bundling for a public beta is a
+packaging job — LGPL source/relink obligations for wine, nothing more. Tracked in
+`docs/PHASE2-PACKAGING.md`.
