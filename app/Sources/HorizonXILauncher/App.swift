@@ -761,6 +761,11 @@ struct ContentView: View {
                               + "a buffer the GPU has not finished writing, so NPCs blink in and "
                               + "out about once a second. Off until that is fixed properly.")
                     Toggle("Show frame rate (Metal HUD)", isOn: $perf.metalHUD)
+                    if checks.contains(where: { $0.id == "fda" && $0.state == .bad }) {
+                        Button("Open Full Disk Access settings…") {
+                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+                        }.buttonStyle(.borderedProminent)
+                    }
                     HStack(spacing: 8) {
                         Button("Repair") { if let i = active { runner.repair(i) } }
                             .disabled(runner.busy)

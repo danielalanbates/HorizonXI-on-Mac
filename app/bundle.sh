@@ -65,6 +65,15 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIconName</key><string>AppIcon</string>
   <key>CFBundleIdentifier</key><string>org.batesai.horizonxi-on-mac</string>
+  <!-- Without these usage strings macOS silently refuses the folder/volume instead of asking:
+       the launcher then reports "you don't have permission to view" wine/lib on an external
+       drive and Play stays grey. With them, the first access shows the normal permission prompt
+       once, and a Developer ID signature keeps that answer across builds. -->
+  <key>NSRemovableVolumesUsageDescription</key><string>Your FFXI game data may live on an external drive.</string>
+  <key>NSNetworkVolumesUsageDescription</key><string>Your FFXI game data may live on a network drive.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>To find a wrapper or installer you saved to Downloads.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>To find a wrapper you keep on the Desktop.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>To find a wrapper you keep in Documents.</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>2.6</string>
   <key>CFBundleVersion</key><string>7</string>

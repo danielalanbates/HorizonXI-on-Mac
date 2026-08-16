@@ -184,6 +184,11 @@ struct Install: Identifiable, Hashable {
     /// the launcher's pid catches it; `log stream` on a TCC predicate did not).
     private static let tccGatedNames: Set<String> = ["Downloads", "Desktop", "Documents"]
 
+    private static let skipNames: Set<String> = [
+        "Backups.backupdb", "Photos", "Photos Library.photoslibrary", "Library", "node_modules",
+        ".Trashes", "System Volume Information", "Movies", "Music", "Pictures",
+    ]
+
     private static func appsUnder(_ root: URL, depth: Int) -> [URL] {
         guard depth > 0 else { return [] }
         guard !tccGatedNames.contains(root.lastPathComponent) else { return [] }
@@ -196,6 +201,9 @@ struct Install: Identifiable, Hashable {
             // Checked before asking anything about the file: even a metadata query against a
             // gated folder is enough to raise the prompt.
             if tccGatedNames.contains(kid.lastPathComponent) { continue }
+            // Never descend into these: a Time Machine set on an external drive is millions of
+            // entries, and the scan visibly hung the launcher ("looking for your install…").
+            if Self.skipNames.contains(kid.lastPathComponent) { continue }
             let isDir = (try? kid.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
             guard isDir else { continue }
             if kid.pathExtension == "app" {
