@@ -91,7 +91,68 @@ final class Runner: ObservableObject {
 
     /// Run CatsEyeXI's own launcher inside the prefix (scripts/catseye-launcher.sh). Their
     /// client only comes from that launcher; running it under wine is the whole integration.
-    func runCatsEyeLauncher(_ install: Install) {
+    /// Make `C:\Games\<name>` inside the prefix point at the folder the user chose, so a Windows
+    /// installer's default path lands the files where the launcher will look for them.
+    static func linkGamesFolder(_ name: String, to dataPath: String, in install: Install) {
+        guard !dataPath.isEmpty else { return }
+        let games = install.driveC.appendingPathComponent("Games")
+        try? FileManager.default.createDirectory(at: games, withIntermediateDirectories: true)
+        let link = games.appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: link)
+        try? FileManager.default.createSymbolicLink(at: link, withDestinationURL: URL(fileURLWithPath: dataPath))
+    }
+
+    /// Download a server's Windows installer and run it inside the prefix. The user drives the
+    /// installer's own UI; `dataPath` is pre-linked as `C:\Games\<name>` for it to install into.
+    func runInstaller(from url: URL, in install: Install, dataPath: String, name: String = "") {
+        guard !busy, !running else { return }
+        busy = true
+        let nm = name.isEmpty ? url.deletingPathExtension().lastPathComponent : name
+        Self.linkGamesFolder(nm, to: dataPath, in: install)
+        let dl = install.driveC.appendingPathComponent("Installers", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dl, withIntermediateDirectories: true)
+        let exe = dl.appendingPathComponent(url.lastPathComponent.isEmpty ? "installer.exe" : url.lastPathComponent)
+        appendLine("==> downloading \(url.absoluteString)")
+        let task = URLSession.shared.downloadTask(with: url) { [weak self] tmp, _, err in
+            Task { @MainActor in
+                guard let self else { return }
+                guard let tmp, err == nil else {
+                    self.appendLine("!! download failed: \(err?.localizedDescription ?? "?")"); self.busy = false; return
+                }
+                try? FileManager.default.removeItem(at: exe)
+                do { try FileManager.default.moveItem(at: tmp, to: exe) } catch {
+                    self.appendLine("!! could not save installer: \(error.localizedDescription)"); self.busy = false; return
+                }
+                self.appendLine("==> running \(exe.lastPathComponent) in \(install.prefixName) — install into C:\\Games\\\(nm)")
+                var env = ProcessInfo.processInfo.environment
+                env["WINEPREFIX"] = install.prefix.path; env["WINEDEBUG"] = "-all"
+                env.removeValue(forKey: "DYLD_FALLBACK_LIBRARY_PATH"); env.removeValue(forKey: "DYLD_LIBRARY_PATH")
+                self.spawn(install.wine, args: ["Z:" + exe.path.replacingOccurrences(of: "/", with: "\\")],
+                           env: env, cwd: dl) { [weak self] code in
+                    self?.busy = false
+                    self?.appendLine("==> installer exited \(code)")
+                }
+            }
+        }
+        task.resume()
+    }
+
+    /// Fresh HorizonXI client into `dir` via their published torrent + updates (update-client.sh install).
+    func installHorizon(into dir: URL) {
+        guard !busy, !running, let script = Self.updateScript() else { return }
+        busy = true
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        appendLine("==> installing HorizonXI into \(dir.path) (9.4 GB torrent — leave this running)")
+        var env: [String: String] = [:]
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin")
+        spawn(URL(fileURLWithPath: "/bin/zsh"), args: [script.path, "install", dir.path],
+              env: env, cwd: script.deletingLastPathComponent()) { [weak self] code in
+            self?.busy = false; self?.appendLine("==> install exited \(code)")
+        }
+    }
+
+    func runCatsEyeLauncher(_ install: Install, dataPath: String = "") {
+        Self.linkGamesFolder("CatsEyeXI", to: dataPath, in: install)
         guard !busy, !running else { return }
         let dev = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -130,7 +191,7 @@ final class Runner: ObservableObject {
         var env = perf.environment(for: install)
         for (k, v) in X87Sidecar.requiredEnvironment { env[k] = v }
         spawn(install.wine,
-              args: ["C:\\HorizonXI\\Ashita-cli.exe", profile],
+              args: [install.gameDirWine + "\\Ashita-cli.exe", profile],
               env: env,
               cwd: install.gameDir) { [weak self] code in
             // This is Ashita-cli.exe, the *injector*. It exits within seconds of a successful

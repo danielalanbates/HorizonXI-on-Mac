@@ -141,22 +141,38 @@ the game client, which comes from your server.
    `"C:\HorizonXI\SquareEnix\PlayOnlineViewer\viewer\com\polcore.dll"`.
 8. Open **FFXI on Mac**; it finds the wrapper. If not, **Setup & Diagnostics** names what's missing.
 
-### Other worlds: CatsEyeXI, Eden, and friends
+### Where the game lives, and other worlds
+
+The app itself can live anywhere — Applications, a USB stick, your Desktop; everything it runs
+ships inside it. The game data is separate and big (a full client is ~27 GB), so **you choose
+where it goes**, per world, the first time you pick a world that isn't installed yet: the app
+shows a *Game data* card with **Download…** and **Choose folder…**. Any drive is fine, external
+included; the wrapper stays small and is shared by every world. The choice is remembered per
+world.
 
 Pick the world from the **CHANGE WORLD** menu; the app writes that server's login host into its own
-Ashita boot profile and keeps your account per world.
+Ashita boot profile and keeps your account per world. How each world's client is obtained is
+different, because each community distributes it differently — the app does whichever applies:
 
-Two things to know:
+| World | Download… does | Then |
+| --- | --- | --- |
+| HorizonXI | fetches their client the way their launcher does — a 9.4 GB torrent + their updates (needs `brew install aria2`) | Play |
+| CatsEyeXI | runs **CatsEyeXI's own launcher** inside the wrapper; it installs their client into the folder you chose | Play |
+| Eden, FFEra, Gaia XI, ValhallaXI | opens their download page — each ships a Windows installer/launcher | run it in the wrapper (**Setup & Diagnostics → Install the game…**), then **Choose folder…** |
+| Supernova, OmicronXI | opens their guide — both are *bring-your-own retail client* + their patch/DATs | **Choose folder…** at your retail install |
+| Tabula Rasa XI | nothing — their site is offline (2026-08); Discord only | — |
 
-- **Client version.** Each server insists on a minimum retail patch level of the FFXI client and
-  answers an older one with *"The game's data has been updated. Please update to continue."* The
-  app checks this before Play and tells you both numbers. HorizonXI's own updates are public and
-  the app applies them (torrent — can be slow); other servers ship theirs only through their own
-  launcher.
-- **CatsEyeXI.** Their client comes only from their launcher, so the app runs *their* launcher
-  inside the wrapper: **Setup & Diagnostics → CatsEyeXI installer…**. It opens CatsEye's own
-  install/update window (defaults to `C:\Games\CatsEyeXI`); let it finish, then Play. Verified
-  to open and render on 2026-08-15; a full install through it has not been run here yet.
+**Client version.** Each server insists on a minimum retail patch level of the FFXI client and
+answers an older one with *"The game's data has been updated. Please update to continue."* The
+app checks this before Play and tells you both numbers. HorizonXI's updates are public and the
+app applies them; other servers ship theirs only through their own launcher, which is why the
+CatsEye route runs theirs.
+
+Status of the CatsEye route, honestly: their launcher opens and renders inside the wrapper, but
+in testing its **Continue** button did not respond to automated clicks — a real mouse hasn't been
+tried yet. If it works for you, please say so in an issue; if it doesn't, the fallback is to run
+their launcher on any Windows machine and copy the `catseyexi-client` folder to the folder you
+chose.
 
 ## Addons
 

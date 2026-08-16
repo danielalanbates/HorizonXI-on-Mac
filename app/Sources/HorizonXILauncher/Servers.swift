@@ -34,6 +34,17 @@ struct Server: Codable, Identifiable, Hashable {
     /// Retail patch level (e.g. `30251204_1`) the login server rejects anything older than with
     /// "The game's data has been updated". Snapshot; refreshed from `requiredClientURL` on start.
     var requiredClient: String = ""
+    /// Folder on this Mac holding the world's game files (Ashita-cli.exe, SquareEnix/…). Empty =
+    /// the classic HorizonXI folder inside the wrapper. Chosen by the user the first time they
+    /// pick a world whose data is not installed yet; may be on any drive.
+    var dataPath: String = ""
+    /// Where a new player gets this world's client, and how (see `InstallKind`).
+    var installURL: String = ""
+    var installKind: InstallKind = .website
+    /// One line about the download: what it is and roughly how big.
+    var installNote: String = ""
+
+    enum InstallKind: String, Codable { case website, installerExe, catseyeLauncher, horizonTorrent, none }
 
     // A hand-written decoder because the synthesised one treats a missing key as an error rather
     // than as "use the default". `servers.json` on disk was written by whichever build the user
@@ -41,11 +52,13 @@ struct Server: Codable, Identifiable, Hashable {
     // throws the file away and silently resets the login hosts they typed in.
     init(name: String, host: String, bootProfile: String, verified: Bool, note: String,
          era: String = "", population: Int = 0, pinned: Bool = false, local: Bool = false,
-         requiredClientURL: String = "", requiredClient: String = "") {
+         requiredClientURL: String = "", requiredClient: String = "",
+         installURL: String = "", installKind: InstallKind = .website, installNote: String = "") {
         self.name = name; self.host = host; self.bootProfile = bootProfile
         self.verified = verified; self.note = note; self.era = era
         self.population = population; self.pinned = pinned; self.local = local
         self.requiredClientURL = requiredClientURL; self.requiredClient = requiredClient
+        self.installURL = installURL; self.installKind = installKind; self.installNote = installNote
     }
 
     init(from decoder: Decoder) throws {
@@ -61,6 +74,13 @@ struct Server: Codable, Identifiable, Hashable {
         local       = try c.decodeIfPresent(Bool.self,   forKey: .local) ?? false
         requiredClientURL = try c.decodeIfPresent(String.self, forKey: .requiredClientURL) ?? ""
         requiredClient    = try c.decodeIfPresent(String.self, forKey: .requiredClient) ?? ""
+        dataPath    = try c.decodeIfPresent(String.self, forKey: .dataPath) ?? ""
+        installURL  = try c.decodeIfPresent(String.self, forKey: .installURL) ?? ""
+        installKind = try c.decodeIfPresent(InstallKind.self, forKey: .installKind) ?? .website
+        installNote = try c.decodeIfPresent(String.self, forKey: .installNote) ?? ""
+        if installURL.isEmpty, let b = Server.builtins.first(where: { $0.name == name }) {
+            installURL = b.installURL; installKind = b.installKind; installNote = b.installNote
+        }
         // Older servers.json files predate the version check; give the built-in entry's values
         // back to a server the user has not renamed, so the check works without a reset.
         if requiredClientURL.isEmpty, requiredClient.isEmpty,
@@ -81,7 +101,9 @@ struct Server: Codable, Identifiable, Hashable {
         Server(name: "HorizonXI", host: "play.horizonxi.com", bootProfile: "horizonxi.ini",
                verified: true,
                note: "The server this project was built and tested against.",
-               era: "Chains of Promathia · 75 cap", population: 9495, pinned: true),
+               era: "Chains of Promathia · 75 cap", population: 9495, pinned: true,
+               installURL: "https://horizonxi.com/play", installKind: .horizonTorrent,
+               installNote: "HorizonXI's own client, fetched the way their launcher does it: a 9.4 GB torrent, then their updates. Needs aria2 (brew install aria2)."),
         Server(name: "Local server", host: "127.0.0.1", bootProfile: "lsb.ini",
                verified: true,
                note: "LandSandBoat, built and run on this Mac. Nobody else can reach it.",
@@ -96,37 +118,52 @@ struct Server: Codable, Identifiable, Hashable {
                // 2026-08-15. HorizonXI's client was at 30251101_2 that day, which is exactly
                // why logging into CatsEye from a HorizonXI install fails.
                requiredClientURL: "https://raw.githubusercontent.com/CatsAndBoats/catseyexi/base/settings/default/login.lua",
-               requiredClient: "30251204_1"),
+               requiredClient: "30251204_1",
+               installURL: "https://catseyexi.com/download", installKind: .catseyeLauncher,
+               installNote: "CatsEyeXI's own launcher runs inside the wrapper and installs their client (full FFXI + their DATs, ~27 GB)."),
         Server(name: "Eden", host: "play.edenxi.com", bootProfile: "eden.ini", verified: false,
                note: "Login host from Eden's own new-player wiki. Untested by this project.",
-               era: "Classic · 75 cap", population: 1925),
+               era: "Classic · 75 cap", population: 1925,
+               installURL: "https://bit.ly/Eden534", installKind: .website,
+               installNote: "Eden's installer is a Windows .exe on Google Drive (their Discord has the current link). Run it in the wrapper, then Choose folder…"),
         Server(name: "FFEra", host: "ffera.com", bootProfile: "ffera.ini", verified: false,
                note: "Longest-running 75-cap community server. Login host from FFEra's own "
                      + "wiki. Untested by this project.",
-               era: "Wings of the Goddess · 75 cap", population: 218),
+               era: "Wings of the Goddess · 75 cap", population: 218,
+               installURL: "https://ffera.com/login.php?guide=install", installKind: .website,
+               installNote: "FFEra's Windows installer (FFEraInstaller-*.exe) from their site; full client. Run it in the wrapper, then Choose folder…"),
         Server(name: "Gaia XI", host: "", bootProfile: "gaiaxi.ini", verified: false,
                note: "No login host published anywhere this project could find — get it from "
                      + "Gaia XI's own launcher.",
-               era: "75 cap", population: 276),
-        Server(name: "ValhallaXI", host: "45.79.6.92", bootProfile: "valhallaxi.ini",
+               era: "75 cap", population: 276,
+               installURL: "https://gaiaxi.com/api/download/zip/", installKind: .website,
+               installNote: "Gaia XI ships a zip with launcher.exe that downloads the whole game. Run it in the wrapper, then Choose folder…"),
+        Server(name: "ValhallaXI", host: "logon.valhalla.group", bootProfile: "valhallaxi.ini",
                verified: false,
-               note: "Login host from Valhalla's own connect page — a raw IP, so it may change "
-                     + "without this list knowing. Untested by this project.",
-               era: "90 cap", population: 216),
+               note: "Login host from Valhalla's own connect page (2026-08). Untested by this project.",
+               era: "90 cap", population: 216,
+               installURL: "https://valhalla.group/site/connect.html", installKind: .website,
+               installNote: "ValhallaInstaller.exe from their connect page installs C:\\ValhallaXI with Ashita. Run it in the wrapper, then Choose folder…"),
         Server(name: "Supernova", host: "login.supernovaffxi.com", bootProfile: "supernova.ini",
                verified: false,
                note: "Login host from Supernova's own Ashita setup guide. Untested by this "
                      + "project.",
-               era: "75 cap", population: 155),
+               era: "75 cap", population: 155,
+               installURL: "https://supernovaffxi.wordpress.com/get-started-on-supernova/client-installation/", installKind: .website,
+               installNote: "Bring-your-own retail FFXI: install PlayOnline's client, then Supernova's FFXI-UpdatePatch.zip and supernova-dats.zip from their guide."),
         Server(name: "OmicronXI", host: "OmicronFFXI.com", bootProfile: "omicronxi.ini",
                verified: false,
                note: "Heavily customized. Login host from Omicron's own wiki. Untested by this "
                      + "project.",
-               era: "99 cap", population: 105),
+               era: "99 cap", population: 105,
+               installURL: "https://omicronxi.fandom.com/wiki/Connecting_to_OmicronXI", installKind: .website,
+               installNote: "Bring-your-own retail FFXI plus their FFXI-UpdatePatch.zip, Ashita v3 and their xiloader — see their wiki."),
         Server(name: "Tabula Rasa XI", host: "", bootProfile: "tabularasa.ini", verified: false,
                note: "No login host published anywhere this project could find — get it from "
                      + "their own launcher.",
-               era: "75 cap", population: 70),
+               era: "75 cap", population: 70,
+               installKind: .none,
+               installNote: "Site offline as of 2026-08 (domain for sale); Discord only."),
     ]
 }
 

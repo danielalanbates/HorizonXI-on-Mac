@@ -4,15 +4,38 @@ import Foundation
 struct Install: Identifiable, Hashable {
     let wrapper: URL          // .../siku.app
     let prefixName: String    // e.g. prefix10
+    /// Where this world's game files live. nil = the classic `drive_c/HorizonXI`. Any other
+    /// folder on the Mac works: wine sees the whole disk as `Z:`, so a world's data can sit on
+    /// an external drive and the wrapper stays small and shared. Set per server from
+    /// `Server.dataPath`; see `Install.for(server:)`.
+    var gameDirOverride: URL? = nil
+
+    init(wrapper: URL, prefixName: String, gameDirOverride: URL? = nil) {
+        self.wrapper = wrapper; self.prefixName = prefixName; self.gameDirOverride = gameDirOverride
+    }
 
     var id: String { wrapper.path + "#" + prefixName }
+
+    /// The same wrapper and prefix, pointed at a world's own game folder.
+    func forServer(_ s: Server) -> Install {
+        var c = self
+        c.gameDirOverride = s.dataPath.isEmpty ? nil : URL(fileURLWithPath: s.dataPath)
+        return c
+    }
+
+    /// Windows-side path of `gameDir` for the wine command line: `C:\HorizonXI` for the classic
+    /// location, `Z:\Users\…` (wine's whole-disk drive) for anything else.
+    var gameDirWine: String {
+        guard let o = gameDirOverride else { return "C:\\HorizonXI" }
+        return "Z:" + o.path.replacingOccurrences(of: "/", with: "\\")
+    }
 
     var sharedSupport: URL { wrapper.appendingPathComponent("Contents/SharedSupport") }
     var wine: URL { sharedSupport.appendingPathComponent("wine/bin/wine") }
     var wineserver: URL { sharedSupport.appendingPathComponent("wine/bin/wineserver") }
     var prefix: URL { sharedSupport.appendingPathComponent(prefixName) }
     var driveC: URL { prefix.appendingPathComponent("drive_c") }
-    var gameDir: URL { driveC.appendingPathComponent("HorizonXI") }
+    var gameDir: URL { gameDirOverride ?? driveC.appendingPathComponent("HorizonXI") }
     var squareEnix: URL { gameDir.appendingPathComponent("SquareEnix") }
     var ashitaCLI: URL { gameDir.appendingPathComponent("Ashita-cli.exe") }
     var frameworks: URL { wrapper.appendingPathComponent("Contents/Frameworks") }

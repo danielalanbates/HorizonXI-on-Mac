@@ -49,6 +49,11 @@ enum Vana {
 struct ContentView: View {
     @State private var installs: [Install] = []
     @State private var selected: Install?
+    /// The wrapper/prefix in `selected`, pointed at the chosen world's game folder.
+    private var active: Install? {
+        guard let i = selected else { return nil }
+        return i.forServer(store.selected ?? Server.builtins[0])
+    }
     @State private var checks: [Check] = []
     @State private var perf = PerfSettings.load()
     @StateObject private var runner = Runner()
@@ -84,7 +89,7 @@ struct ContentView: View {
     private var statusText: String {
         if scanning { return "looking for your install…" }
         if selected == nil { return "nothing installed yet" }
-        if let i = selected, !i.hasGame { return "wine is ready — the game is not installed" }
+        if let i = active, !i.hasGame { return "wine is ready — \(store.selected?.name ?? "the game")'s data is not installed" }
         return blocked ? "setup incomplete" : "ready to play"
     }
 
@@ -228,6 +233,13 @@ struct ContentView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+        // A world other than HorizonXI with no folder of its own would be run out of HorizonXI's
+        // files -- which is exactly what earns "The game's data has been updated" from CatsEye.
+        // Say so right under the world, and offer the two ways to fix it.
+        if let i = active, let s = store.selected,
+           !i.hasGame || (s.dataPath.isEmpty && !s.local && s.name != "HorizonXI") {
+            gameDataCard(for: s, install: i)
+        }
         }
         .sheet(isPresented: $newServer) { addServerSheet }
         .sheet(isPresented: $showGraphics) { graphicsSheet }
@@ -392,7 +404,7 @@ struct ContentView: View {
                     for i in addonItems.indices where !addonPolicy.allows(addonItems[i].name) {
                         addonItems[i].enabled = false
                     }
-                    if let i = selected, !AddonSuite.write(addonItems, to: i) {
+                    if let i = active, !AddonSuite.write(addonItems, to: i) {
                         notice = "Could not write scripts/default.txt — its launcher markers are missing."
                     } else {
                         notice = "Addon list saved. It takes effect the next time you press Play."
@@ -752,10 +764,10 @@ struct ContentView: View {
                               + "out about once a second. Off until that is fixed properly.")
                     Toggle("Show frame rate (Metal HUD)", isOn: $perf.metalHUD)
                     HStack(spacing: 8) {
-                        Button("Repair") { if let i = selected { runner.repair(i) } }
+                        Button("Repair") { if let i = active { runner.repair(i) } }
                             .disabled(runner.busy)
                         if store.selected?.name == "CatsEyeXI" {
-                            Button("CatsEyeXI installer…") { if let i = selected { runner.runCatsEyeLauncher(i) } }
+                            Button("CatsEyeXI installer…") { if let i = active { runner.runCatsEyeLauncher(i) } }
                                 .disabled(runner.busy)
                                 .help("Runs CatsEyeXI's own launcher inside the wrapper to install or update their client (their storage is private, so only their launcher can fetch it).")
                         }
@@ -792,13 +804,6 @@ struct ContentView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .help("Installs Rosetta 2 and Wine, and creates the Windows drive FFXI installs into")
-            } else if !scanning, let i = selected, !i.hasGame {
-                // Wine is there, the game is not -- the state right after first-run setup.
-                Button { showSetup = true } label: {
-                    Label("Install the game…", systemImage: "arrow.down.circle")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
             }
 
             HStack(spacing: 5) {
@@ -883,6 +888,79 @@ struct ContentView: View {
                 }
     }
 
+    /// Shown when the chosen world's game files are not where the launcher expects them. Two
+    /// answers, both one click: point at a folder that already has them, or get them from the
+    /// world's own source. The location is the user's to choose — external drives welcome — and
+    /// is remembered per world in servers.json.
+    private func gameDataCard(for s: Server, install i: Install) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("GAME DATA").font(.caption).tracking(2.5).foregroundStyle(Vana.gold)
+            Text(s.dataPath.isEmpty
+                 ? (i.hasGame ? "\(s.name) has no folder of its own yet — Play would use HorizonXI's files, which \(s.name)'s login server may reject."
+                              : "\(s.name)'s game files are not installed yet.")
+                 : "Nothing playable at \(s.dataPath).")
+                .font(.caption2).foregroundStyle(Vana.muted).fixedSize(horizontal: false, vertical: true)
+            if !s.installNote.isEmpty {
+                Text(s.installNote).font(.caption2).foregroundStyle(Vana.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                if s.installKind != .none {
+                    Button { downloadGameData(for: s, install: i) } label: {
+                        Label("Download…", systemImage: "arrow.down.circle")
+                    }.buttonStyle(.borderedProminent)
+                }
+                Button("Choose folder…") { chooseGameData(for: s) }
+                if s.name == "HorizonXI" {
+                    Button("Install into wrapper…") { showSetup = true }
+                        .help("The classic route: run HorizonXI's installer inside the wrapper.")
+                }
+            }.font(.caption)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.25)))
+    }
+
+    /// Ask where this world's files are (or should go). Defaults to ~/Games/FFXI/<world>, and
+    /// the user can pick any drive. The choice is stored on the server entry.
+    private func chooseGameData(for s: Server) {
+        let panel = NSOpenPanel()
+        panel.title = "Game data for \(s.name)"
+        panel.message = "Choose the folder that holds (or will hold) \(s.name)'s game files — the one with Ashita-cli.exe in it. Any drive is fine."
+        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
+        panel.prompt = "Use this folder"
+        let def = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Games/FFXI/\(s.name)")
+        try? FileManager.default.createDirectory(at: def, withIntermediateDirectories: true)
+        panel.directoryURL = def
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        var c = s; c.dataPath = url.path; store.update(c)
+        recheck()
+    }
+
+    /// Get the world's client the way that world distributes it. Nothing here redistributes
+    /// Square Enix data: each route runs or opens the server's own installer.
+    private func downloadGameData(for s: Server, install i: Install) {
+        if s.dataPath.isEmpty && s.name != "HorizonXI" {
+            chooseGameData(for: s)
+            guard let again = store.servers.first(where: { $0.name == s.name }), !again.dataPath.isEmpty else { return }
+            downloadGameData(for: again, install: i.forServer(again)); return
+        }
+        switch s.installKind {
+        case .catseyeLauncher:
+            runner.runCatsEyeLauncher(i, dataPath: s.dataPath)
+        case .horizonTorrent:
+            runner.installHorizon(into: i.gameDir)
+        case .installerExe:
+            guard let u = URL(string: s.installURL) else { return }
+            runner.runInstaller(from: u, in: i, dataPath: s.dataPath)
+        case .website:
+            if let u = URL(string: s.installURL) { NSWorkspace.shared.open(u) }
+            notice = "\(s.name)'s download page is open in your browser. When their installer has run, point Choose folder… at the folder with Ashita-cli.exe."
+        case .none:
+            notice = "\(s.name) publishes no client download this launcher knows about."
+        }
+    }
+
     private var playButton: some View {
         Button(action: play) {
             Text(runner.running ? "RUNNING" : "PLAY")
@@ -907,7 +985,7 @@ struct ContentView: View {
     // MARK: - Actions
 
     private func play() {
-        guard let i = selected else { return }
+        guard let i = active else { return }
         notice = ""
         updateChecked = false
         Credentials.username = user
@@ -1049,14 +1127,14 @@ struct ContentView: View {
     private func recheck() { Task { await recheckAsync() } }
 
     private func recheckAsync() async {
-        guard let i = selected else { checks = []; return }
+        guard let i = active else { checks = []; return }
         checks = await Task.detached(priority: .userInitiated) { Preflight.run(i) }.value
     }
 
     /// Open the panel on whatever the profile actually says, not on this app's last write —
     /// the boot .ini is a plain text file the user may well have edited by hand.
     private func openGraphics() {
-        if let i = selected, let s = store.selected,
+        if let i = active, let s = store.selected,
            let onDisk = GraphicsSettings.read(from: i, profile: s.bootProfile) {
             graphics = onDisk
         }
@@ -1064,7 +1142,7 @@ struct ContentView: View {
     }
 
     private func openAddons() {
-        guard let i = selected else { return }
+        guard let i = active else { return }
         addonItems = AddonSuite.scan(i)
         let bad = AddonSuite.mismatchedPlugins(i)
         addonWarning = bad.isEmpty ? "" :

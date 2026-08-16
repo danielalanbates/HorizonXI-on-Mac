@@ -28,7 +28,8 @@ API="https://api.horizonxi.com/api/v1/launcher"
 UA="FFXI-on-Mac launcher"
 
 game="${2:-}"
-[[ -n "$game" && -d "$game" ]] || die "usage: $0 {check|horizon} <drive_c/HorizonXI>"
+[[ "${1:-}" == install && -n "$game" ]] && mkdir -p "$game"
+[[ -n "$game" && -d "$game" ]] || die "usage: $0 {check|horizon|install} <game dir>"
 ffxi="$game/SquareEnix/FINAL FANTASY XI"
 
 # The retail patch level the client is at. patch.cfg is the client's own record of applied
@@ -51,6 +52,28 @@ case "${1:-}" in
     latest=$(fetch_json "$API/install-game" 2>/dev/null \
       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["updateData"][-1]["marketingVersion"] if d.get("updateData") else d["installData"]["baseGameMarketingVersion"])' 2>/dev/null || print "")
     print "installed=${inst:-unknown} horizon=${hm:-unknown} latest=${latest:-unknown}"
+    ;;
+
+  install)
+    # Fresh client: their base torrent (HorizonXI.zip, ~9.4 GB) into an empty folder, then fall
+    # through to the update path. Same magnet their launcher uses.
+    command -v aria2c >/dev/null || die "aria2c is not installed (brew install aria2). HorizonXI ships its client as a torrent; nothing else can fetch it."
+    [[ -f "$game/version.json" ]] && { say "already has a client (version.json) — updating instead"; exec "$0" horizon "$game"; }
+    read -r magnet base mv <<< "$(fetch_json "$API/install-game" | python3 -c '
+import json,sys; d=json.load(sys.stdin)["installData"]; print(d["baseGameMagnetLink"], d["baseZipName"], d["baseGameMarketingVersion"])')"
+    [[ -n "$magnet" ]] || die "could not read the install manifest from api.horizonxi.com"
+    dl="$game/updates"; mkdir -p "$dl"
+    say "fetching $base ($mv) by torrent into $dl — this is ~9.4 GB"
+    aria2c --dir="$dl" --seed-time=0 --bt-stop-timeout=1800 --summary-interval=60 \
+           --console-log-level=warn --enable-dht=true --allow-overwrite=true "$magnet" \
+      || die "torrent download failed or stalled — run again to resume"
+    [[ -f "$dl/$base" ]] || die "aria2 finished but $base is not in $dl"
+    say "extracting $base"
+    ditto -x -k "$dl/$base" "$game" || die "unzip failed"
+    if [[ -d "$game/HorizonXI" && ! -f "$game/version.json" ]]; then ditto "$game/HorizonXI" "$game" && rm -rf "$game/HorizonXI"; fi
+    [[ -f "$game/version.json" ]] || print -r -- "{\n  \"version\": \"$mv\"\n}" > "$game/version.json"
+    say "base client in place — applying updates"
+    exec "$0" horizon "$game"
     ;;
 
   horizon)
