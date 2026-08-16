@@ -101,7 +101,8 @@ struct Install: Identifiable, Hashable {
         var seen = Set<String>()
 
         for root in roots {
-            for app in appsUnder(root, depth: 3) {
+            // depth 4: "Video Games/Mac/FFXI/siku.app" on an external drive is four deep.
+            for app in appsUnder(root, depth: 4) {
                 guard seen.insert(app.path).inserted else { continue }
                 let shared = app.appendingPathComponent("Contents/SharedSupport")
                 guard fm.isExecutableFile(atPath: shared.appendingPathComponent("wine/bin/wine").path)
