@@ -34,7 +34,7 @@ enum X87Sidecar {
             if let pid = await Task.detached(priority: .userInitiated, operation: {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-                p.arguments = ["-f", "horizon-loader.exe"]
+                p.arguments = ["-f", await MainActor.run { Runner.currentGameExe }]
                 let pipe = Pipe()
                 p.standardOutput = pipe
                 p.standardError = Pipe()
@@ -62,7 +62,7 @@ enum X87Sidecar {
             return nil
         }
         guard let pid = await findGamePID() else {
-            await log("!! x87sidecar: horizon-loader.exe never appeared, gave up after 40s")
+            await log("!! x87sidecar: \(await MainActor.run { Runner.currentGameExe }) never appeared, gave up after 40s")
             return nil
         }
         // Ashita-cli.exe is still writing into this same process's memory for a moment after

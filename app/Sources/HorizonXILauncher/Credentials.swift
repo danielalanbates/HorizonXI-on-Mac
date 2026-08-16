@@ -98,16 +98,71 @@ enum Credentials {
         let target = dir.appendingPathComponent(profile)
         if fm.fileExists(atPath: target.path) { return true }
 
-        for seed in ["horizonxi.ini", "example-privateserver.ini", "example.ini"] {
+        // Seed order: a profile the world's own installer shipped (any non-example .ini in the
+        // folder), then HorizonXI's, then Ashita's examples. Whatever it came from, `file =` is
+        // then made to name the boot loader that actually exists in this install's bootloader/
+        // folder — a profile copied from horizonxi.ini into a CatsEye or Eden install would
+        // otherwise try to run horizon-loader.exe, which is not there.
+        var seeds = ["horizonxi.ini", "example-privateserver.ini", "example.ini"]
+        if let kids = try? fm.contentsOfDirectory(atPath: dir.path) {
+            let own = kids.filter { $0.hasSuffix(".ini") && !$0.hasPrefix("example") && $0 != "horizonxi.ini" }.sorted()
+            seeds = own + seeds
+        }
+        for seed in seeds {
             let src = dir.appendingPathComponent(seed)
             guard fm.fileExists(atPath: src.path),
                   let text = try? String(contentsOf: src, encoding: .utf8) else { continue }
             guard (try? text.write(to: target, atomically: true, encoding: .utf8)) != nil
             else { continue }
             try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+            fixBootLoader(profile, in: install)
             return true
         }
         return false
+    }
+
+    /// Boot loaders this launcher knows how to find, in preference order, when a profile names one
+    /// that is not in the install.
+    static let knownLoaders = ["horizon-loader.exe", "xiloader.exe", "pol.exe", "catseye-loader.exe", "eden-loader.exe"]
+
+    /// Make `[ashita.boot] file =` name a loader that exists in `bootloader/`.
+    static func fixBootLoader(_ profile: String, in install: Install) {
+        let fm = FileManager.default
+        let url = install.gameDir.appendingPathComponent("config/boot/\(profile)")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+        let bl = install.gameDir.appendingPathComponent("bootloader")
+        let present = ((try? fm.contentsOfDirectory(atPath: bl.path)) ?? []).filter { $0.lowercased().hasSuffix(".exe") }
+        guard !present.isEmpty else { return }
+        let named = bootLoaderName(in: install, profile: profile) ?? ""
+        if present.contains(where: { $0.caseInsensitiveCompare(named) == .orderedSame }) { return }
+        let pick = knownLoaders.first { k in present.contains { $0.caseInsensitiveCompare(k) == .orderedSame } } ?? present.sorted()[0]
+        let eol = TextFile.terminator(of: text)
+        var replaced = false
+        let lines = TextFile.lines(of: text).map { l -> String in
+            let t = l.trimmingCharacters(in: .whitespaces)
+            if !t.hasPrefix(";"), t.hasPrefix("file"), t.contains("="), !replaced {
+                replaced = true
+                return "file        = .\\\\bootloader\\\\\(pick)"
+            }
+            return String(l)
+        }
+        guard replaced else { return }
+        try? TextFile.join(lines, terminator: eol).write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// Basename of the executable the profile boots (`[ashita.boot] file`), e.g. horizon-loader.exe.
+    static func bootLoaderName(in install: Install, profile: String) -> String? {
+        let url = install.gameDir.appendingPathComponent("config/boot/\(profile)")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        for raw in TextFile.lines(of: text) {
+            let t = raw.trimmingCharacters(in: .whitespaces)
+            guard !t.hasPrefix(";"), t.hasPrefix("file"), let eq = t.firstIndex(of: "=") else { continue }
+            let v = t[t.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+            guard !v.isEmpty else { return nil }
+            let name = v.replacingOccurrences(of: "/", with: "\\").split(separator: "\\").last.map(String.init) ?? v
+            return name.isEmpty ? nil : name
+        }
+        return nil
     }
 
     /// Rewrite the `command = ...` line of the Ashita boot profile with these credentials.

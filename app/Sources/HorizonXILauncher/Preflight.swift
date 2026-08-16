@@ -51,8 +51,12 @@ enum Preflight {
         add("wine", "Wine binary", fm.isExecutableFile(atPath: install.wine.path),
             install.wine.path, "missing \(install.wine.path)")
 
-        add("client", "HorizonXI client", fm.fileExists(atPath: install.gameDir.path),
+        add("client", "Game folder", fm.fileExists(atPath: install.gameDir.path),
             install.gameDir.path, "no client at \(install.gameDir.path)")
+
+        let se = install.squareEnix
+        add("squareenix", "FINAL FANTASY XI data", fm.fileExists(atPath: se.appendingPathComponent("FINAL FANTASY XI").path),
+            se.path, "no SquareEnix/FINAL FANTASY XI under \(se.deletingLastPathComponent().path)")
 
         add("ashita", "Ashita-cli.exe", fm.fileExists(atPath: install.ashitaCLI.path),
             "present — launch must go through Ashita, not xiloader",

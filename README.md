@@ -154,25 +154,40 @@ Pick the world from the **CHANGE WORLD** menu; the app writes that server's logi
 Ashita boot profile and keeps your account per world. How each world's client is obtained is
 different, because each community distributes it differently — the app does whichever applies:
 
-| World | Download… does | Then |
+Every world's **Download…** is one button — the app runs the fetch that world uses, inside the
+wrapper, into the folder you pick:
+
+| World | Download… does | Verified here |
 | --- | --- | --- |
-| HorizonXI | fetches their client the way their launcher does — a 9.4 GB torrent + their updates (needs `brew install aria2`) | Play |
-| CatsEyeXI | runs **CatsEyeXI's own launcher** inside the wrapper; it installs their client into the folder you chose | Play |
-| Eden, FFEra, Gaia XI, ValhallaXI | opens their download page — each ships a Windows installer/launcher | run it in the wrapper (**Setup & Diagnostics → Install the game…**), then **Choose folder…** |
-| Supernova, OmicronXI | opens their guide — both are *bring-your-own retail client* + their patch/DATs | **Choose folder…** at your retail install |
-| Tabula Rasa XI | nothing — their site is offline (2026-08); Discord only | — |
+| HorizonXI | fetches their client the way their launcher does — a 9.4 GB base torrent then their update chain, all the way to the current 2.0.3 (needs `brew install aria2`, bundled) | ✅ full download 1.x → 2.0.3; launches, connects, reaches login |
+| CatsEyeXI | runs **CatsEyeXI's own launcher** inside the wrapper; it installs their full client (~15 GB) into the folder you pick | ✅ client installed; launches, connects, reaches login |
+| Eden, FFEra | downloads their own installer (a 5–6 GB Google-Drive zip) and runs it in the wrapper | ⚙️ download link + installer flow wired; not yet driven end-to-end |
+| ValhallaXI | downloads their small web-installer, which then pulls the client | ⚙️ wired; not yet driven end-to-end |
+| Gaia XI | opens their site (their zip is behind a login) → then **Run installer…** on the file you saved | ⚙️ manual step + installer flow |
+| Supernova, OmicronXI | *bring-your-own retail* — the app fetches **Square Enix's own free client** (7.7 GB, five parts), runs SE's installer + PlayOnline update in the wrapper, adds Ashita v4 + xiloader, then the world's patch/DATs | ⚙️ full pipeline scripted (`scripts/retail-client.sh`); not yet driven end-to-end |
+| Tabula Rasa XI | nothing — server defunct (site parked, repo dead since 2024) | — |
 
-**Client version.** Each server insists on a minimum retail patch level of the FFXI client and
-answers an older one with *"The game's data has been updated. Please update to continue."* The
-app checks this before Play and tells you both numbers. HorizonXI's updates are public and the
-app applies them; other servers ship theirs only through their own launcher, which is why the
-CatsEye route runs theirs.
+"Verified here" is honest: HorizonXI and CatsEyeXI were downloaded and launched on the test Mac
+(an 8 GB M1) all the way to each server's login handshake — the client boots under wine, the x87
+sidecar attaches, the loader connects and resolves the host. Logging *in* then needs your own
+account (created on that server's site or through its loader — never here). The other worlds'
+download-and-launch is coded from each server's published installer but has not yet been run
+start-to-finish; see `docs/SERVERS-WORKLOG.md` for exactly what is and isn't proven.
 
-Status of the CatsEye route, honestly: their launcher opens and renders inside the wrapper, but
-in testing its **Continue** button did not respond to automated clicks — a real mouse hasn't been
-tried yet. If it works for you, please say so in an issue; if it doesn't, the fallback is to run
-their launcher on any Windows machine and copy the `catseyexi-client` folder to the folder you
-chose.
+**One folder per world, any drive.** Each world keeps its own game folder (set with **Choose
+folder…**, remembered per world). The app finds `Ashita-cli.exe` and the `SquareEnix` data inside
+whatever layout that world's installer produced, and re-points the wrapper's PlayOnline registry
+at the selected world before every launch — so several worlds coexist in one wrapper without
+their clients colliding.
+
+**Client version.** Each server insists on a minimum retail patch level and answers an older one
+with *"The game's data has been updated. Please update to continue."* The app checks this before
+Play and names both numbers. HorizonXI's updates are public and the app applies them; other
+servers ship theirs only through their own launcher.
+
+**Already have an installer?** For any world, **Setup & Diagnostics → Run installer…** runs a
+`.exe` (or a `.zip` holding one) you already downloaded — from the server's site, their Discord,
+or a Windows machine — inside the wrapper, into that world's folder.
 
 ## Addons
 

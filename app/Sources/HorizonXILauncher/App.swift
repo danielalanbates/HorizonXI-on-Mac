@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 @main
 struct HorizonXILauncherApp: App {
@@ -118,6 +119,11 @@ struct ContentView: View {
                 await MainActor.run { pass = found }
             }
         }
+        .onChange(of: runner.loginFailure) { f in
+            guard !f.isEmpty else { return }
+            notice = "\(store.selected?.name ?? "The server") said: \(f)"
+                + (f.contains("Invalid") ? " Check the account name and password — accounts are created on the server's own site or through its loader, not here." : "")
+        }
         .onChange(of: store.selectedID) { _ in
             if store.selected?.local == true { local.refresh() }
             // The preflight checks are per world now (each has its own game folder): CatsEye's
@@ -129,6 +135,23 @@ struct ContentView: View {
         // exactly like the app failing to launch. Scan off the main actor and fill the UI in.
         .task {
             await refreshAsync()
+            // `open -a "FFXI on Mac" --args --play [--world <name>]`: press Play as soon as the
+            // install is known. For Shortcuts/Stream Deck users, and for this project's own
+            // unattended tests (see docs/SERVERS-WORKLOG.md).
+            let args = CommandLine.arguments
+            if let w = args.firstIndex(of: "--world"), w + 1 < args.count,
+               let srv = store.servers.first(where: { $0.name == args[w + 1] }) { store.select(srv) }
+            if args.contains("--play") {
+                if selected == nil { runner.appendLine("!! --play: no install found yet") }
+                else if runner.running { runner.appendLine("!! --play: already running") }
+                else {
+                    if remember, !user.isEmpty, pass.isEmpty { pass = Credentials.password(for: user) }
+                    await recheckAsync()
+                    runner.appendLine("==> --play: \(store.selected?.name ?? "?") as \(user.isEmpty ? "(no account)" : user)")
+                    play()
+                    if !notice.isEmpty { runner.appendLine("!! \(notice)") }
+                }
+            }
             // Pick up each server's own published addon list, so the app's compiled-in snapshot
             // does not go stale between releases. Silent on failure -- offline must still launch.
             await feeds.refreshAsync(servers: store.servers)
@@ -777,9 +800,18 @@ struct ContentView: View {
                             .help("Fetches HorizonXI's own updates (torrent) into this install. Not required to play.")
                         }
                         if store.selected?.name == "CatsEyeXI" {
-                            Button("CatsEyeXI installer…") { if let i = active { runner.runCatsEyeLauncher(i) } }
+                            Button("CatsEyeXI installer…") { if let i = active, let s = store.selected { runner.runCatsEyeLauncher(i, dataPath: s.dataPath) } }
                                 .disabled(runner.busy)
                                 .help("Runs CatsEyeXI's own launcher inside the wrapper to install or update their client (their storage is private, so only their launcher can fetch it).")
+                        }
+                        if let s = store.selected, !s.local {
+                            Button("Run installer…") { if let i = active { runLocalInstaller(for: s, install: i) } }
+                                .disabled(runner.busy)
+                                .help("Run a Windows installer or launcher (.exe or .zip) you already downloaded for \(s.name), inside the wrapper. It installs into C:\\Games\\\(s.name), which is \(s.dataPath.isEmpty ? "the folder you choose" : s.dataPath).")
+                        }
+                        if runner.busy {
+                            Button("Stop install") { if let i = active { runner.cancelInstaller(i) } }
+                                .help("Kills whatever is running in the installer prefix.")
                         }
                         // Also reachable when an install already exists: a wrapper can be
                         // broken past what Repair fixes, and rebuilding a fresh one beside it
@@ -921,6 +953,10 @@ struct ContentView: View {
                     }.buttonStyle(.borderedProminent)
                 }
                 Button("Choose folder…") { chooseGameData(for: s) }
+                if !s.local {
+                    Button("Run installer…") { runLocalInstaller(for: s, install: i) }
+                        .help("Already have \(s.name)'s installer? Run it inside the wrapper.")
+                }
                 if s.name == "HorizonXI" {
                     Button("Install into wrapper…") { showSetup = true }
                         .help("The classic route: run HorizonXI's installer inside the wrapper.")
@@ -936,7 +972,7 @@ struct ContentView: View {
     private func chooseGameData(for s: Server) {
         let panel = NSOpenPanel()
         panel.title = "Game data for \(s.name)"
-        panel.message = "Choose the folder that holds (or will hold) \(s.name)'s game files — the one with Ashita-cli.exe in it. Any drive is fine."
+        panel.message = "Choose the folder that holds (or will hold) \(s.name)'s game files. Any drive is fine; the launcher finds Ashita-cli.exe and SquareEnix inside it, however \(s.name)'s installer laid them out."
         panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
         panel.prompt = "Use this folder"
         let def = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Games/FFXI/\(s.name)")
@@ -946,6 +982,32 @@ struct ContentView: View {
         var c = s; c.dataPath = url.path; store.update(c)
         recheck()
     }
+
+    /// The user already has the world's installer (their site, Discord, a friend's USB stick).
+    /// Run it in the wrapper, pointed at the world's data folder.
+    private func runLocalInstaller(for s: Server, install i: Install) {
+        if s.dataPath.isEmpty {
+            chooseGameData(for: s)
+            guard let again = store.servers.first(where: { $0.name == s.name }), !again.dataPath.isEmpty else { return }
+            runLocalInstaller(for: again, install: i.forServer(again)); return
+        }
+        let panel = NSOpenPanel()
+        panel.title = "Installer for \(s.name)"
+        panel.message = "Pick \(s.name)'s Windows installer or launcher (.exe, or a .zip holding one). It runs inside the wrapper; when it asks where to install, use C:\\Games\\\(s.name) — that is \(s.dataPath)."
+        panel.canChooseDirectories = false; panel.canChooseFiles = true
+        panel.allowedContentTypes = [.exe, .zip]
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        panel.prompt = "Run in wrapper"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        runner.runLocalInstaller(url, in: i, dataPath: s.dataPath, name: s.name)
+    }
+
+    /// Where a world's own download page is, for when a direct installer link has gone stale.
+    static let homePages: [String: String] = [
+        "Eden": "https://edenxi.com", "FFEra": "https://ffera.com/login.php?guide=install",
+        "ValhallaXI": "https://valhalla.group/site/connect.html", "Gaia XI": "https://gaiaxi.com",
+        "CatsEyeXI": "https://catseyexi.com/download",
+    ]
 
     /// Get the world's client the way that world distributes it. Nothing here redistributes
     /// Square Enix data: each route runs or opens the server's own installer.
@@ -962,10 +1024,13 @@ struct ContentView: View {
             runner.installHorizon(into: i.gameDir)
         case .installerExe:
             guard let u = URL(string: s.installURL) else { return }
-            runner.runInstaller(from: u, in: i, dataPath: s.dataPath)
+            runner.installPageFallback = Self.homePages[s.name].flatMap(URL.init(string:))
+            runner.runInstaller(from: u, in: i, dataPath: s.dataPath, name: s.name)
+        case .retail:
+            runner.installRetail(for: s, in: i)
         case .website:
             if let u = URL(string: s.installURL) { NSWorkspace.shared.open(u) }
-            notice = "\(s.name)'s download page is open in your browser. When their installer has run, point Choose folder… at the folder with Ashita-cli.exe."
+            notice = "\(s.name)'s download page is open in your browser. Save their installer, then use Run installer… (Setup & Diagnostics) or install into \(s.dataPath.isEmpty ? "the folder you choose" : s.dataPath) and press ↻."
         case .none:
             notice = "\(s.name) publishes no client download this launcher knows about."
         }
@@ -996,6 +1061,10 @@ struct ContentView: View {
 
     private func play() {
         guard let i = active else { return }
+        if runner.busy {
+            notice = "An install or update is running in the wrapper. Play would stop it — wait for it to finish (or cancel it from Setup & Diagnostics)."
+            return
+        }
         notice = ""
         updateChecked = false
         Credentials.username = user

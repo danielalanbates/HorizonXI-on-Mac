@@ -16,18 +16,114 @@ struct Install: Identifiable, Hashable {
 
     var id: String { wrapper.path + "#" + prefixName }
 
+    /// A sibling prefix in the same wrapper where server installers run, so a running
+    /// download is never killed by Play's `wineserver -k` on the game prefix (and vice versa).
+    /// Created on first use with `wineboot -u` (~30 s, ~340 MB). Anything an installer writes to
+    /// *its* registry is irrelevant: the game prefix's registry is re-pointed at the resolved
+    /// SquareEnix folder on every launch (see GameRegistry).
+    static let installerPrefixName = "prefix-installers"
+    var installerPrefix: Install { Install(wrapper: wrapper, prefixName: Self.installerPrefixName) }
+
     /// The same wrapper and prefix, pointed at a world's own game folder.
     func forServer(_ s: Server) -> Install {
         var c = self
-        c.gameDirOverride = s.dataPath.isEmpty ? nil : URL(fileURLWithPath: s.dataPath)
+        c.gameDirOverride = s.dataPath.isEmpty ? nil : Self.resolveAshitaDir(URL(fileURLWithPath: s.dataPath))
+        c.dataRoot = s.dataPath.isEmpty ? nil : URL(fileURLWithPath: s.dataPath)
         return c
+    }
+
+    /// The folder the user chose (or the Download flow filled) for this world. The Ashita
+    /// folder is *inside* it somewhere: `gameDirOverride` is the resolved one.
+    var dataRoot: URL? = nil
+
+    // MARK: - Layout resolution
+    //
+    // Every server's installer lays the client out differently. HorizonXI puts Ashita-cli.exe
+    // and SquareEnix/ side by side in one folder; CatsEyeXI's launcher makes
+    // `<root>/catseyexi-client/Ashita/Ashita-cli.exe` next to `<root>/catseyexi-client/Game/
+    // SquareEnix`; Windows installers for the others land wherever they like under
+    // `C:\Games\<name>`. The user is asked for one folder, so the launcher has to find the two
+    // things it needs under it: the Ashita folder (config/boot, addons, bootloader live there)
+    // and the SquareEnix folder (FINAL FANTASY XI + PlayOnlineViewer, what the registry must
+    // name). Both searches are shallow (3 levels), skip the huge ROM trees, and are cached.
+
+    private static var ashitaCache: [String: URL] = [:]
+    private static var seCache: [String: URL] = [:]
+    private static let heavyDirs: Set<String> = ["SquareEnix", "ROM", "ROM2", "ROM3", "ROM4", "ROM5", "ROM6", "ROM7", "ROM8", "ROM9", "addons", "plugins", "polplugins", "resources", "sound", "sound2", "sound3", "sound4", "sound5", "sound6", "sound7", "sound8", "sound9", "docs", "logs", "screenshots", "downloads", "updates", "backups", "builds", "deps"]
+
+    /// First folder at or under `root` (depth ≤ 3) that holds Ashita-cli.exe. Falls back to
+    /// `root` itself, so a wrong choice still shows up as "missing Ashita-cli.exe" at that path.
+    static func resolveAshitaDir(_ root: URL) -> URL {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: root.appendingPathComponent("Ashita-cli.exe").path) { return root }
+        if let c = ashitaCache[root.path], fm.fileExists(atPath: c.appendingPathComponent("Ashita-cli.exe").path) { return c }
+        if let hit = find(under: root, depth: 3, where: { fm.fileExists(atPath: $0.appendingPathComponent("Ashita-cli.exe").path) }) {
+            ashitaCache[root.path] = hit
+            return hit
+        }
+        return root
+    }
+
+    /// The folder that holds `FINAL FANTASY XI` (and `PlayOnlineViewer`) for this world — what the
+    /// PlayOnline registry must name. Usually called `SquareEnix`, but CatsEyeXI's client puts both
+    /// straight under `catseyexi-client/Game/`, so the name is not relied on: any folder under the
+    /// world's data root with a `FINAL FANTASY XI` child counts, nearest to the Ashita folder first.
+    /// **Never looks above the data root** — a sibling world's SquareEnix (`~/Games/FFXI/…`) would
+    /// otherwise be picked up, which is exactly the wrong-client mistake this exists to prevent.
+    /// Falls back to `gameDir/SquareEnix` (the classic HorizonXI layout, also the no-root case).
+    static func resolveSquareEnix(gameDir: URL, root: URL?) -> URL {
+        let fm = FileManager.default
+        func ok(_ u: URL) -> Bool { fm.fileExists(atPath: u.appendingPathComponent("FINAL FANTASY XI").path) }
+        let direct = gameDir.appendingPathComponent("SquareEnix")
+        if ok(direct) { return direct }
+        if let c = seCache[gameDir.path], ok(c) { return c }
+        guard let root else { return direct }
+        // Nearest first: the Ashita folder's own parents (within the root), then anything under
+        // the root up to four levels down.
+        var p = gameDir
+        while p.path.hasPrefix(root.path), p.path != root.deletingLastPathComponent().path {
+            for c in [p, p.appendingPathComponent("SquareEnix"), p.appendingPathComponent("Game"), p.appendingPathComponent("Game/SquareEnix")] where ok(c) {
+                seCache[gameDir.path] = c; return c
+            }
+            if p.path == root.path { break }
+            p = p.deletingLastPathComponent()
+        }
+        if let hit = find(under: root, depth: 4, where: ok, descendIntoHeavy: ["SquareEnix"]) {
+            seCache[gameDir.path] = hit; return hit
+        }
+        return direct
+    }
+
+    /// Breadth-first directory search, bounded, that never walks into the game's ROM trees.
+    private static func find(under root: URL, depth: Int, where pred: (URL) -> Bool,
+                             descendIntoHeavy: Set<String> = []) -> URL? {
+        let fm = FileManager.default
+        var level: [URL] = [root]
+        for _ in 0...depth {
+            var next: [URL] = []
+            for dir in level {
+                if pred(dir) { return dir }
+                guard let kids = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else { continue }
+                for k in kids {
+                    let name = k.lastPathComponent
+                    if heavyDirs.contains(name) && !descendIntoHeavy.contains(name) {
+                        if pred(k) { return k }
+                        continue
+                    }
+                    if (try? k.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true { next.append(k) }
+                }
+            }
+            level = next
+            if level.isEmpty { break }
+        }
+        return nil
     }
 
     /// Windows-side path of `gameDir` for the wine command line: `C:\HorizonXI` for the classic
     /// location, `Z:\Users\…` (wine's whole-disk drive) for anything else.
     var gameDirWine: String {
         guard let o = gameDirOverride else { return "C:\\HorizonXI" }
-        return "Z:" + o.path.replacingOccurrences(of: "/", with: "\\")
+        return Self.winePath(o, driveC: driveC)
     }
 
     var sharedSupport: URL { wrapper.appendingPathComponent("Contents/SharedSupport") }
@@ -36,7 +132,14 @@ struct Install: Identifiable, Hashable {
     var prefix: URL { sharedSupport.appendingPathComponent(prefixName) }
     var driveC: URL { prefix.appendingPathComponent("drive_c") }
     var gameDir: URL { gameDirOverride ?? driveC.appendingPathComponent("HorizonXI") }
-    var squareEnix: URL { gameDir.appendingPathComponent("SquareEnix") }
+    var squareEnix: URL { Self.resolveSquareEnix(gameDir: gameDir, root: dataRoot) }
+    /// Windows-side path of `squareEnix`, for the registry.
+    var squareEnixWine: String { Self.winePath(squareEnix, driveC: driveC) }
+    static func winePath(_ u: URL, driveC: URL) -> String {
+        let p = u.standardizedFileURL.path, c = driveC.standardizedFileURL.path
+        if p.hasPrefix(c + "/") { return "C:" + String(p.dropFirst(c.count)).replacingOccurrences(of: "/", with: "\\") }
+        return "Z:" + p.replacingOccurrences(of: "/", with: "\\")
+    }
     var ashitaCLI: URL { gameDir.appendingPathComponent("Ashita-cli.exe") }
     var frameworks: URL { wrapper.appendingPathComponent("Contents/Frameworks") }
     var d3dMetal: URL { wrapper.appendingPathComponent("Contents/Frameworks/renderer/d3dmetal/external") }

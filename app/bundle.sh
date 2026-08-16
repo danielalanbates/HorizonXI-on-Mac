@@ -34,6 +34,7 @@ cp "$REPO/scripts/fix-wine-rpath.sh" "$APP/Contents/Resources/fix-wine-rpath.sh"
 cp "$REPO/scripts/lsb-server.sh"     "$APP/Contents/Resources/lsb-server.sh"
 cp "$REPO/scripts/update-client.sh"  "$APP/Contents/Resources/update-client.sh"
 cp "$REPO/scripts/catseye-launcher.sh" "$APP/Contents/Resources/catseye-launcher.sh"
+cp "$REPO/scripts/retail-client.sh"    "$APP/Contents/Resources/retail-client.sh"
 chmod +x "$APP/Contents/Resources/"*.sh
 
 # The Metal/DXVK renderer ships inside the app: Renderer.swift resolves these by name out of

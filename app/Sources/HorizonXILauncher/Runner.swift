@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 
 /// Runs the repair script and the game itself, streaming output back to the UI.
 @MainActor
@@ -10,6 +11,11 @@ final class Runner: ObservableObject {
 
     private var proc: Process?
     private var x87Proc: Process?
+    /// Executable Ashita boots the game in for the current launch (the boot profile's
+    /// `[ashita.boot] file`): horizon-loader.exe on HorizonXI, pol.exe on CatsEyeXI, xiloader.exe
+    /// elsewhere. Both the exit watcher and the x87 sidecar look for this, by name.
+    private var gameExe = "horizon-loader.exe"
+    static var currentGameExe = "horizon-loader.exe"
 
     /// Every FFXI graphics setting at max, 4K resolution. Registry keys documented in
     /// `[ffxi.registry]` of any Ashita boot .ini; mirrors `scripts/max4k.json`, which is the
@@ -25,12 +31,55 @@ final class Runner: ObservableObject {
     /// Raw stream text, which arrives mid-line and unbounded — a whole session of wine and Ashita
     /// output is megabytes, and SwiftUI re-lays-out the entire string on every change, so the cap
     /// matters for responsiveness as much as for memory.
+    /// Everything that reaches the log pane also goes to disk, so a failed launch can be read
+    /// after the fact (and pasted into a bug report) without scrolling a UI. Overwritten per
+    /// app run; the previous run is kept as launcher.log.1.
+    static let logFile: URL = {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("HorizonXI-on-Mac", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let f = dir.appendingPathComponent("launcher.log")
+        let prev = dir.appendingPathComponent("launcher.log.1")
+        try? FileManager.default.removeItem(at: prev)
+        try? FileManager.default.moveItem(at: f, to: prev)
+        FileManager.default.createFile(atPath: f.path, contents: nil)
+        return f
+    }()
+    private lazy var logHandle: FileHandle? = try? FileHandle(forWritingTo: Self.logFile)
+
+    private func tee(_ s: String) {
+        guard let h = logHandle, let d = s.data(using: .utf8) else { return }
+        h.seekToEndOfFile(); h.write(d)
+    }
+
+    /// The boot loader's verdict when a login is refused ("Failed to login. Invalid username or
+    /// password." / "…Account already logged in." / "…xiloader version mismatch…"). Every xiloader
+    /// fork prints one of these and then sits at an interactive menu that no window ever shows,
+    /// so the launcher would otherwise look hung. Surfaced to the UI and the loader is stopped.
+    @Published var loginFailure: String = ""
+    private var currentInstall: Install?
+
     func appendChunk(_ s: String) {
+        tee(s)
+        // Every xiloader fork prints one of these and drops to an interactive menu no window shows.
+        let failMarkers = ["Failed to login", "Bad json reply from remote", "Error from remote",
+                           "version mismatch", "xi_connect", "Account already logged in"]
+        if loginFailure.isEmpty, let hit = failMarkers.first(where: { s.contains($0) }),
+           let r = s.range(of: hit) {
+            let raw = String(s[r.lowerBound...]).split(whereSeparator: { $0.isNewline }).first.map(String.init) ?? hit
+            let clean = raw.trimmingCharacters(in: CharacterSet(charactersIn: " \u{1b}[m")).trimmingCharacters(in: .whitespaces)
+            loginFailure = hit == "Bad json reply from remote"
+                ? "The login server sent a reply this client could not read. Usually the wrong password, an account that does not exist, or a client-version mismatch."
+                : (clean.isEmpty ? hit : clean)
+            appendLine("!! login refused: \(loginFailure) — stopping the loader")
+            if let i = currentInstall { stop(i) }
+        }
         log += s
         if log.count > 200_000 { log = String(log.suffix(150_000)) }
     }
 
     func appendLine(_ s: String) {
+        tee(s.hasSuffix("\n") ? s : s + "\n")
         log += s.hasSuffix("\n") ? s : s + "\n"
         if log.count > 200_000 { log = String(log.suffix(150_000)) }
     }
@@ -103,39 +152,178 @@ final class Runner: ObservableObject {
         try? FileManager.default.createSymbolicLink(at: link, withDestinationURL: URL(fileURLWithPath: dataPath))
     }
 
-    /// Download a server's Windows installer and run it inside the prefix. The user drives the
-    /// installer's own UI; `dataPath` is pre-linked as `C:\Games\<name>` for it to install into.
-    func runInstaller(from url: URL, in install: Install, dataPath: String, name: String = "") {
+    /// Make sure the wrapper's installer prefix exists (see `Install.installerPrefix`). Slow the
+    /// first time only; runs off the main actor and calls back on it.
+    func ensureInstallerPrefix(_ install: Install, then: @escaping (Install) -> Void) {
+        let ip = install.installerPrefix
+        if FileManager.default.fileExists(atPath: ip.systemReg.path) { then(ip); return }
+        appendLine("==> creating \(ip.prefixName) (a second wine prefix for installers, so a download is never killed by Play) — about 30 s")
+        var env = ProcessInfo.processInfo.environment
+        env["WINEPREFIX"] = ip.prefix.path; env["WINEDEBUG"] = "-all"
+        env.removeValue(forKey: "DYLD_FALLBACK_LIBRARY_PATH"); env.removeValue(forKey: "DYLD_LIBRARY_PATH")
+        Task.detached {
+            let p = Process()
+            p.executableURL = ip.wine; p.arguments = ["wineboot", "-u"]; p.environment = env
+            p.standardOutput = Pipe(); p.standardError = Pipe()
+            try? p.run(); p.waitUntilExit()
+            let k = Process(); k.executableURL = ip.wineserver; k.arguments = ["-k"]; k.environment = ["WINEPREFIX": ip.prefix.path]
+            try? k.run(); k.waitUntilExit()
+            await MainActor.run { then(ip) }
+        }
+    }
+
+    /// Download a server's Windows installer and run it inside the *installer* prefix. The user
+    /// drives the installer's own UI; `dataPath` is pre-linked as `C:\Games\<name>` for it to
+    /// install into (and the same link is made in the game prefix, so a path the installer wrote
+    /// into a config file resolves at play time too).
+    func runInstaller(from url: URL, in gameInstall: Install, dataPath: String, name: String = "") {
         guard !busy, !running else { return }
         busy = true
         let nm = name.isEmpty ? url.deletingPathExtension().lastPathComponent : name
-        Self.linkGamesFolder(nm, to: dataPath, in: install)
-        let dl = install.driveC.appendingPathComponent("Installers", isDirectory: true)
+        Self.linkGamesFolder(nm, to: dataPath, in: gameInstall)
+        ensureInstallerPrefix(gameInstall) { [weak self] install in
+            guard let self else { return }
+            Self.linkGamesFolder(nm, to: dataPath, in: install)
+            self.runInstallerNow(from: url, in: install, name: nm)
+        }
+    }
+
+    private func runInstallerNow(from url: URL, in install: Install, name nm: String) {
+        // Installers are big (Eden's is 5.8 GB) and served from places that support ranges, so
+        // fetch with curl: resumable (-C -), retried, and its progress bar streams into the log.
+        // Saved next to the world's data rather than in the prefix -- that is where the space is.
+        let dl = install.driveC.appendingPathComponent("Games/\(nm)/installer-downloads", isDirectory: true)
         try? FileManager.default.createDirectory(at: dl, withIntermediateDirectories: true)
-        let exe = dl.appendingPathComponent(url.lastPathComponent.isEmpty ? "installer.exe" : url.lastPathComponent)
-        appendLine("==> downloading \(url.absoluteString)")
-        let task = URLSession.shared.downloadTask(with: url) { [weak self] tmp, _, err in
-            Task { @MainActor in
-                guard let self else { return }
-                guard let tmp, err == nil else {
-                    self.appendLine("!! download failed: \(err?.localizedDescription ?? "?")"); self.busy = false; return
-                }
-                try? FileManager.default.removeItem(at: exe)
-                do { try FileManager.default.moveItem(at: tmp, to: exe) } catch {
-                    self.appendLine("!! could not save installer: \(error.localizedDescription)"); self.busy = false; return
-                }
-                self.appendLine("==> running \(exe.lastPathComponent) in \(install.prefixName) — install into C:\\Games\\\(nm)")
-                var env = ProcessInfo.processInfo.environment
-                env["WINEPREFIX"] = install.prefix.path; env["WINEDEBUG"] = "-all"
-                env.removeValue(forKey: "DYLD_FALLBACK_LIBRARY_PATH"); env.removeValue(forKey: "DYLD_LIBRARY_PATH")
-                self.spawn(install.wine, args: ["Z:" + exe.path.replacingOccurrences(of: "/", with: "\\")],
-                           env: env, cwd: dl) { [weak self] code in
-                    self?.busy = false
-                    self?.appendLine("==> installer exited \(code)")
-                }
+        let file = dl.appendingPathComponent(Self.downloadName(for: url, world: nm))
+        appendLine("==> downloading \(url.absoluteString)\n    to \(file.path)")
+        spawn(URL(fileURLWithPath: "/usr/bin/curl"),
+              args: ["-fL", "--retry", "5", "--retry-delay", "3", "-C", "-", "--progress-bar",
+                     "-A", "FFXI-on-Mac", "-o", file.path, url.absoluteString],
+              env: [:], cwd: dl) { [weak self] code in
+            guard let self else { return }
+            // curl 33 = server refused the range because the file is already complete.
+            guard code == 0 || (code == 33 && FileManager.default.fileExists(atPath: file.path)) else {
+                self.appendLine("!! download failed (curl \(code)). If \(nm) has moved its installer, get it from their site and use Run installer….")
+                self.busy = false
+                if let page = self.installPageFallback { NSWorkspace.shared.open(page) }
+                return
+            }
+            self.appendLine("==> downloaded \(file.lastPathComponent)")
+            self.runDownloadedInstaller(file, in: install, name: nm)
+        }
+    }
+
+    /// Where to send the user if the direct download for the world dies (set by the caller).
+    var installPageFallback: URL? = nil
+
+    /// A sensible file name for a download whose URL may end in a query string (Google Drive).
+    static func downloadName(for url: URL, world: String) -> String {
+        let last = url.lastPathComponent
+        if !last.isEmpty, last != "/", last.contains(".") { return last }
+        return world.replacingOccurrences(of: " ", with: "") + "-installer.zip"
+    }
+
+    /// Unpack a zip if it is one, find the installer .exe, run it.
+    private func runDownloadedInstaller(_ file: URL, in install: Install, name nm: String) {
+        var exe = file
+        let isZip = file.pathExtension.lowercased() == "zip" || Self.looksLikeZip(file)
+        if isZip {
+            let out = file.deletingLastPathComponent().appendingPathComponent(file.deletingPathExtension().lastPathComponent + "-unpacked", isDirectory: true)
+            appendLine("==> unpacking \(file.lastPathComponent)")
+            try? FileManager.default.removeItem(at: out)
+            let d = Process(); d.executableURL = URL(fileURLWithPath: "/usr/bin/ditto"); d.arguments = ["-x", "-k", file.path, out.path]
+            d.standardOutput = Pipe(); d.standardError = Pipe()
+            try? d.run(); d.waitUntilExit()
+            guard d.terminationStatus == 0, let found = Self.firstExe(under: out) else {
+                appendLine("!! could not unpack \(file.lastPathComponent) or no .exe inside it"); busy = false; return
+            }
+            exe = found
+        }
+        launchInstaller(exe: exe, in: install, name: nm)
+    }
+
+    static func looksLikeZip(_ file: URL) -> Bool {
+        guard let h = try? FileHandle(forReadingFrom: file) else { return false }
+        defer { try? h.close() }
+        let d = h.readData(ofLength: 4)
+        return d.count == 4 && d[0] == 0x50 && d[1] == 0x4B
+    }
+
+    /// Run an installer the user already has on disk (their server's site, Discord, a USB stick)
+    /// inside the installer prefix. Zips are unpacked first and the first .exe inside is run.
+    func runLocalInstaller(_ file: URL, in gameInstall: Install, dataPath: String, name: String) {
+        guard !busy, !running else { return }
+        busy = true
+        Self.linkGamesFolder(name, to: dataPath, in: gameInstall)
+        ensureInstallerPrefix(gameInstall) { [weak self] install in
+            guard let self else { return }
+            Self.linkGamesFolder(name, to: dataPath, in: install)
+            self.runDownloadedInstaller(file, in: install, name: name)
+        }
+    }
+
+    static func firstExe(under dir: URL) -> URL? {
+        guard let e = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: nil) else { return nil }
+        var hits: [URL] = []
+        for case let u as URL in e where u.pathExtension.lowercased() == "exe" { hits.append(u) }
+        // Prefer a launcher/installer/setup name at the shallowest depth.
+        return hits.sorted { a, b in
+            let da = a.pathComponents.count, db = b.pathComponents.count
+            if da != db { return da < db }
+            let sa = a.lastPathComponent.lowercased(), sb = b.lastPathComponent.lowercased()
+            let ka = ["launcher", "install", "setup"].contains { sa.contains($0) }, kb = ["launcher", "install", "setup"].contains { sb.contains($0) }
+            if ka != kb { return ka }
+            return sa < sb
+        }.first
+    }
+
+    /// Start `exe` under wine in `install` and stream its output. `busy` clears when it exits.
+    private func launchInstaller(exe: URL, in install: Install, name nm: String) {
+        appendLine("==> running \(exe.lastPathComponent) in \(install.prefixName) — install into C:\\Games\\\(nm)")
+        var env = ProcessInfo.processInfo.environment
+        env["WINEPREFIX"] = install.prefix.path; env["WINEDEBUG"] = "-all"
+        env.removeValue(forKey: "DYLD_FALLBACK_LIBRARY_PATH"); env.removeValue(forKey: "DYLD_LIBRARY_PATH")
+        spawn(install.wine, args: [Install.winePath(exe, driveC: install.driveC)],
+              env: env, cwd: exe.deletingLastPathComponent()) { [weak self] code in
+            self?.busy = false
+            self?.appendLine("==> installer exited \(code)")
+        }
+    }
+
+    /// `scripts/retail-client.sh`: Square Enix's free client + PlayOnline update + Ashita/xiloader
+    /// (+ the world's patch/DATs) into the world's folder. Bring-your-own-retail worlds only.
+    func installRetail(for s: Server, in gameInstall: Install) {
+        guard !busy, !running else { return }
+        let dev = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("scripts/retail-client.sh")
+        guard let script = Bundle.main.url(forResource: "retail-client", withExtension: "sh")
+                ?? (FileManager.default.isExecutableFile(atPath: dev.path) ? dev : nil) else {
+            appendLine("!! retail-client.sh not found in the bundle"); return
+        }
+        busy = true
+        Self.linkGamesFolder(s.name, to: s.dataPath, in: gameInstall)
+        ensureInstallerPrefix(gameInstall) { [weak self] ip in
+            guard let self else { return }
+            Self.linkGamesFolder(s.name, to: s.dataPath, in: ip)
+            self.appendLine("==> retail client for \(s.name) into \(s.dataPath) (Square Enix's 7.7 GB download, then PlayOnline's update — leave this running)")
+            var env: [String: String] = [:]
+            env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin")
+            self.spawn(URL(fileURLWithPath: "/bin/zsh"),
+                       args: [script.path, ip.wrapper.path, ip.prefixName, s.dataPath, s.name],
+                       env: env, cwd: script.deletingLastPathComponent()) { [weak self] code in
+                self?.busy = false
+                self?.appendLine("==> retail install exited \(code)")
             }
         }
-        task.resume()
+    }
+
+    /// Stop whatever is running in the installer prefix.
+    func cancelInstaller(_ gameInstall: Install) {
+        let ip = gameInstall.installerPrefix
+        let k = Process(); k.executableURL = ip.wineserver; k.arguments = ["-k"]; k.environment = ["WINEPREFIX": ip.prefix.path]
+        try? k.run()
+        appendLine("==> installer prefix stopped")
     }
 
     /// Fresh HorizonXI client into `dir` via their published torrent + updates (update-client.sh install).
@@ -152,9 +340,18 @@ final class Runner: ObservableObject {
         }
     }
 
-    func runCatsEyeLauncher(_ install: Install, dataPath: String = "") {
-        Self.linkGamesFolder("CatsEyeXI", to: dataPath, in: install)
+    func runCatsEyeLauncher(_ gameInstall: Install, dataPath: String = "") {
+        Self.linkGamesFolder("CatsEyeXI", to: dataPath, in: gameInstall)
         guard !busy, !running else { return }
+        busy = true
+        ensureInstallerPrefix(gameInstall) { [weak self] ip in
+            self?.busy = false
+            Self.linkGamesFolder("CatsEyeXI", to: dataPath, in: ip)
+            self?.runCatsEyeLauncherNow(ip)
+        }
+    }
+
+    private func runCatsEyeLauncherNow(_ install: Install) {
         let dev = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("scripts/catseye-launcher.sh")
@@ -175,11 +372,17 @@ final class Runner: ObservableObject {
     func launch(_ install: Install, perf: PerfSettings, profile: String = "horizonxi.ini") {
         guard !running else { return }
         running = true
+        loginFailure = ""
+        currentInstall = install
         // The renderer lives in the prefix's registry and DLLs, not in the environment, so it has
         // to be written before the process starts — and after any wineserver holding the old copy
         // of the registry has exited.
         RendererSetup.apply(perf.renderer, to: install) { [weak self] in self?.appendLine($0) }
+        // Same moment, same reason: the registry has to name *this* world's SquareEnix folder.
+        GameRegistry.point(install) { [weak self] in self?.appendLine($0) }
         Self.cleanStaleWineSockets()
+        gameExe = Credentials.bootLoaderName(in: install, profile: profile) ?? "horizon-loader.exe"
+        Self.currentGameExe = gameExe
         Credentials.applyIniOverrides(perf.renderer.iniOverrides, to: install, profile: profile)
         // The local server is the one everything else here is a test against (see
         // docs/X87-WALL.md and scripts/max4k.json, which this mirrors) -- 4K, every graphics
@@ -239,7 +442,7 @@ final class Runner: ObservableObject {
     private static func gameIsRunning() -> Bool {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        p.arguments = ["-f", "horizon-loader.exe"]
+        p.arguments = ["-f", currentGameExe]
         p.standardOutput = Pipe()
         p.standardError = Pipe()
         guard (try? p.run()) != nil else { return false }
