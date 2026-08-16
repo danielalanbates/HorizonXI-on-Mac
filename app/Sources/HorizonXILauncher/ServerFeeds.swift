@@ -39,6 +39,12 @@ final class ServerFeeds: ObservableObject {
     @Published private(set) var lastRefresh: Date?
     /// Server name -> the addon list fetched from that server, if the fetch worked.
     @Published private(set) var fetchedAddonLists: [String: AddonPolicy] = [:]
+    /// Server name -> the retail client version its login server currently requires, read from
+    /// the server's own published settings (`Server.requiredClientURL`). Only present when the
+    /// fetch worked; the compiled-in `Server.requiredClient` is the fallback.
+    @Published private(set) var requiredClients: [String: String] = [:]
+    /// Newest HorizonXI marketing version per api.horizonxi.com/api/v1/launcher/install-game.
+    @Published private(set) var horizonLatest: String?
 
     private static var cacheURL: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -82,6 +88,41 @@ final class ServerFeeds: ObservableObject {
         fetchedAddonLists = lists
         lastRefresh = Date()
         saveCache(cacheable)
+
+        var required: [String: String] = [:]
+        for server in servers where !server.requiredClientURL.isEmpty {
+            if let url = URL(string: server.requiredClientURL),
+               let v = await fetchRequiredClient(from: url) { required[server.name] = v }
+        }
+        requiredClients = required
+        horizonLatest = await fetchHorizonLatest()
+    }
+
+    private func fetchHorizonLatest() async -> String? {
+        guard let url = URL(string: "https://api.horizonxi.com/api/v1/launcher/install-game") else { return nil }
+        var req = URLRequest(url: url); req.timeoutInterval = 12
+        req.setValue("FFXI-on-Mac launcher", forHTTPHeaderField: "User-Agent")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse, http.statusCode == 200,
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if let ups = o["updateData"] as? [[String: Any]], let last = ups.last,
+           let v = last["marketingVersion"] as? String { return v }
+        if let base = o["installData"] as? [String: Any],
+           let v = base["baseGameMarketingVersion"] as? String { return v }
+        return nil
+    }
+
+    /// Reads `CLIENT_VER = '30251204_1'` out of a LandSandBoat `login.lua`. Anything that does
+    /// not look like a retail patch id is ignored rather than trusted.
+    private func fetchRequiredClient(from url: URL) async -> String? {
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 12
+        req.setValue("FFXI-on-Mac launcher", forHTTPHeaderField: "User-Agent")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse, http.statusCode == 200,
+              let text = String(data: data, encoding: .utf8)
+        else { return nil }
+        return ClientVersion.parseClientVer(text)
     }
 
     private static func today() -> String {

@@ -74,6 +74,8 @@ struct ContentView: View {
     @State private var addonItems: [AddonSuite.Item] = []
     @State private var addonWarning = ""
     @State private var notice = ""
+    /// One update attempt per Play press chain; a second Play retries.
+    @State private var updateChecked = false
     @State private var scanning = false
     @State private var showSetup = false
 
@@ -180,56 +182,29 @@ struct ContentView: View {
                 }
             }
 
-            Menu {
-                ForEach(store.ordered) { s in
-                    Button {
-                        store.select(s)
-                    } label: {
-                        if s.era.isEmpty { Text(s.name) }
-                        else { Text("\(s.name)  ·  \(s.era)") }
-                    }
-                }
-                Divider()
-                Button("Add a server…") { newServer = true }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "diamond.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Vana.crystal)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(store.selected?.name ?? "Choose a world")
-                            .font(.system(size: 14, weight: .semibold, design: .serif))
-                            .foregroundStyle(Vana.text)
-                            .lineLimit(1)
-                        if let era = store.selected?.era, !era.isEmpty {
-                            Text(era).font(.caption2).foregroundStyle(Vana.muted).lineLimit(1)
+            // The styled row is drawn here and the Menu sits on top of it with an invisible,
+            // full-size label. A macOS `Menu` with `.borderlessButton` renders a custom label as
+            // bare text -- the pill, background and border this row used to declare on the label
+            // never appeared, which is why the world name did not look clickable.
+            ZStack {
+                worldRow
+                Menu {
+                    ForEach(store.ordered) { s in
+                        Button { store.select(s) } label: {
+                            if s.era.isEmpty { Text(s.name) }
+                            else { Text("\(s.name)  ·  \(s.era)") }
                         }
                     }
-                    Spacer(minLength: 4)
-                    // A filled capsule reads as a control at a glance, the way a native pop-up
-                    // button's chrome does; the plain chevron this replaced was easy to mistake
-                    // for a static label instead of something to click.
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Color.black.opacity(0.85))
-                        .frame(width: 20, height: 20)
-                        .background(Circle().fill(worldHover ? Vana.crystal : Vana.gold))
+                    Divider()
+                    Button("Add a server…") { newServer = true }
+                } label: {
+                    Rectangle().fill(Color.white.opacity(0.001))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .padding(.horizontal, 10).padding(.vertical, 9)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8)
-                    .fill(worldHover ? Color.white.opacity(0.10) : Color.black.opacity(0.32)))
-                .overlay(RoundedRectangle(cornerRadius: 8)
-                    .stroke(worldHover ? Vana.crystal : Vana.crystalDim.opacity(0.7),
-                            lineWidth: worldHover ? 1.5 : 1))
-                .contentShape(Rectangle())
-                .onHover { hovering in
-                    worldHover = hovering
-                    if hovering { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() }
-                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
+            .fixedSize(horizontal: false, vertical: true)
 
             if let s = store.selected, !s.verified {
                 VStack(alignment: .leading, spacing: 5) {
@@ -705,6 +680,9 @@ struct ContentView: View {
     // MARK: - Right: account + play
 
     private var sidebar: some View {
+        // Scrolls rather than clips: with two prefixes found the install picker appears, and
+        // together with a long notice the column outgrew a 632pt window and lost its top edge.
+        ScrollView(.vertical, showsIndicators: false) {
         VStack(alignment: .leading, spacing: 14) {
             serverPicker
 
@@ -824,6 +802,8 @@ struct ContentView: View {
             }
         }
         .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        }
         .background(Vana.panel)
     }
 
@@ -857,6 +837,47 @@ struct ContentView: View {
         }
     }
 
+    /// The visible world picker row (see the ZStack in the sidebar for why it is separate).
+    private var worldRow: some View {
+                HStack(spacing: 8) {
+                    Image(systemName: "diamond.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Vana.crystal)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(store.selected?.name ?? "Choose a world")
+                            .font(.system(size: 14, weight: .semibold, design: .serif))
+                            .foregroundStyle(Vana.text)
+                            .lineLimit(1)
+                        if let era = store.selected?.era, !era.isEmpty {
+                            Text(era).font(.caption2).foregroundStyle(Vana.muted).lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 4)
+                    // Say it in words. The chevron-in-a-circle this replaced still read as
+                    // decoration to a first-time user; a labelled gold pill does not.
+                    HStack(spacing: 4) {
+                        Text("CHANGE WORLD").font(.system(size: 9, weight: .bold)).tracking(1)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundStyle(Color.black.opacity(0.85))
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(Capsule().fill(worldHover ? Vana.crystal : Vana.gold))
+                }
+                .padding(.horizontal, 10).padding(.vertical, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 8)
+                    .fill(worldHover ? Color.white.opacity(0.10) : Color.black.opacity(0.32)))
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .stroke(worldHover ? Vana.crystal : Vana.crystalDim.opacity(0.7),
+                            lineWidth: worldHover ? 1.5 : 1))
+                .contentShape(Rectangle())
+                .onHover { hovering in
+                    worldHover = hovering
+                    if hovering { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() }
+                }
+    }
+
     private var playButton: some View {
         Button(action: play) {
             Text(runner.running ? "RUNNING" : "PLAY")
@@ -883,6 +904,7 @@ struct ContentView: View {
     private func play() {
         guard let i = selected else { return }
         notice = ""
+        updateChecked = false
         Credentials.username = user
         Credentials.remember = remember
         if remember { Credentials.savePassword(pass, for: user) }
@@ -933,6 +955,35 @@ struct ContentView: View {
         // The client was installed by HorizonXI and carries their logo in its own data. On any
         // other world, show the stock title screen instead. See Branding.swift.
         Branding.apply(stockBranding: Branding.wantsStockBranding(server), to: i)
+
+        // Pre-game version check. The login server does this anyway and answers "The game's
+        // data has been updated" — better to say so here, name the versions, and (for HorizonXI,
+        // whose updates are public) fix it before launching.
+        let installedVer = ClientVersion.installed(in: i)
+        let requiredVer = feeds.requiredClients[server.name] ?? server.requiredClient
+        if let have = installedVer, !requiredVer.isEmpty, ClientVersion.isOlder(have, than: requiredVer) {
+            notice = "\(server.name) needs client \(requiredVer) or newer; this install is at "
+                   + "\(have). Its login server will refuse with “The game's data has been updated”. "
+                   + (server.name == "CatsEyeXI"
+                      ? "Only CatsEyeXI's own launcher can fetch their client (private storage) — "
+                        + "see docs/CLIENT-UPDATES.md."
+                      : "Update the client first.")
+            runner.appendLine("!! version check: \(server.name) requires \(requiredVer), installed \(have)")
+            return
+        }
+        // HorizonXI publishes its updates; if this install is behind, apply them now, then play.
+        // Never done for other worlds: their zips are HorizonXI's files.
+        if server.name == "HorizonXI", !updateChecked,
+           let hv = ClientVersion.horizonVersion(in: i), let latest = feeds.horizonLatest,
+           hv != latest {
+            updateChecked = true
+            notice = "HorizonXI is at \(latest), this install is \(hv) — updating first (torrent; see log)."
+            runner.updateHorizon(i) { ok in
+                if ok { launchClient(i, server: server) }
+                else { notice = "The HorizonXI update did not finish — press Play again to resume it, or use HorizonXI's own launcher." }
+            }
+            return
+        }
 
         if !user.isEmpty, !pass.isEmpty {
             if !Credentials.apply(user: user, password: pass, to: i,

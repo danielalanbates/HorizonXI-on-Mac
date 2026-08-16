@@ -61,6 +61,34 @@ final class Runner: ObservableObject {
         }
     }
 
+    /// `scripts/update-client.sh` ships next to install.sh in the bundle.
+    static func updateScript() -> URL? {
+        if let u = Bundle.main.url(forResource: "update-client", withExtension: "sh") { return u }
+        let dev = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("scripts/update-client.sh")
+        return FileManager.default.isExecutableFile(atPath: dev.path) ? dev : nil
+    }
+
+    /// Apply every pending HorizonXI game update (torrent, so it can take a while), then report.
+    func updateHorizon(_ install: Install, done: @escaping (Bool) -> Void) {
+        guard !busy, !running, let script = Self.updateScript() else {
+            appendLine("!! update-client.sh not found in the bundle"); done(false); return
+        }
+        busy = true
+        appendLine("==> updating HorizonXI game files in \(install.gameDir.path)")
+        var env: [String: String] = [:]
+        // aria2c comes from Homebrew; a bundled app's PATH does not include it.
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin")
+        spawn(URL(fileURLWithPath: "/bin/zsh"),
+              args: [script.path, "horizon", install.gameDir.path],
+              env: env, cwd: script.deletingLastPathComponent()) { [weak self] code in
+            self?.busy = false
+            self?.appendLine("==> update exited \(code)")
+            done(code == 0)
+        }
+    }
+
     func launch(_ install: Install, perf: PerfSettings, profile: String = "horizonxi.ini") {
         guard !running else { return }
         running = true

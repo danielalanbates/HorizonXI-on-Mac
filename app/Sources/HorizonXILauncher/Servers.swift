@@ -27,16 +27,25 @@ struct Server: Codable, Identifiable, Hashable {
     /// LandSandBoat as well: see `LocalServer` and `scripts/lsb-server.sh`. Optional in the
     /// decoder so a `servers.json` written by an older build still loads.
     var local: Bool = false
+    /// Where this server publishes the retail client version it insists on (its LandSandBoat
+    /// `login.lua`, `CLIENT_VER`). Blank when it publishes nothing; the pre-game check then only
+    /// has the compiled-in `requiredClient` snapshot to go on.
+    var requiredClientURL: String = ""
+    /// Retail patch level (e.g. `30251204_1`) the login server rejects anything older than with
+    /// "The game's data has been updated". Snapshot; refreshed from `requiredClientURL` on start.
+    var requiredClient: String = ""
 
     // A hand-written decoder because the synthesised one treats a missing key as an error rather
     // than as "use the default". `servers.json` on disk was written by whichever build the user
     // had before, so every field added since then is missing from it — and a decode failure here
     // throws the file away and silently resets the login hosts they typed in.
     init(name: String, host: String, bootProfile: String, verified: Bool, note: String,
-         era: String = "", population: Int = 0, pinned: Bool = false, local: Bool = false) {
+         era: String = "", population: Int = 0, pinned: Bool = false, local: Bool = false,
+         requiredClientURL: String = "", requiredClient: String = "") {
         self.name = name; self.host = host; self.bootProfile = bootProfile
         self.verified = verified; self.note = note; self.era = era
         self.population = population; self.pinned = pinned; self.local = local
+        self.requiredClientURL = requiredClientURL; self.requiredClient = requiredClient
     }
 
     init(from decoder: Decoder) throws {
@@ -50,6 +59,14 @@ struct Server: Codable, Identifiable, Hashable {
         population  = try c.decodeIfPresent(Int.self,    forKey: .population) ?? 0
         pinned      = try c.decodeIfPresent(Bool.self,   forKey: .pinned) ?? false
         local       = try c.decodeIfPresent(Bool.self,   forKey: .local) ?? false
+        requiredClientURL = try c.decodeIfPresent(String.self, forKey: .requiredClientURL) ?? ""
+        requiredClient    = try c.decodeIfPresent(String.self, forKey: .requiredClient) ?? ""
+        // Older servers.json files predate the version check; give the built-in entry's values
+        // back to a server the user has not renamed, so the check works without a reset.
+        if requiredClientURL.isEmpty, requiredClient.isEmpty,
+           let b = Server.builtins.first(where: { $0.name == name }) {
+            requiredClientURL = b.requiredClientURL; requiredClient = b.requiredClient
+        }
     }
 
     /// Ranking and population from nostalgic.gg's live-tracked FFXI private-server list
@@ -73,7 +90,13 @@ struct Server: Codable, Identifiable, Hashable {
         Server(name: "CatsEyeXI", host: "server.catseyexi.com", bootProfile: "catseyexi.ini",
                verified: false,
                note: "Login host from CatsEyeXI's own connect page. Untested by this project.",
-               era: "Custom content · 75 cap", population: 2722),
+               era: "Custom content · 75 cap", population: 2722,
+               // CatsEyeXI's server settings are public; CLIENT_VER there is what its login
+               // server enforces (VER_LOCK = 2, "this version or newer"). 30251204_1 as of
+               // 2026-08-15. HorizonXI's client was at 30251101_2 that day, which is exactly
+               // why logging into CatsEye from a HorizonXI install fails.
+               requiredClientURL: "https://raw.githubusercontent.com/CatsAndBoats/catseyexi/base/settings/default/login.lua",
+               requiredClient: "30251204_1"),
         Server(name: "Eden", host: "play.edenxi.com", bootProfile: "eden.ini", verified: false,
                note: "Login host from Eden's own new-player wiki. Untested by this project.",
                era: "Classic · 75 cap", population: 1925),

@@ -32,6 +32,7 @@ cp "$BIN" "$APP/Contents/MacOS/FFXI-on-Mac"
 cp "$REPO/scripts/install.sh"        "$APP/Contents/Resources/install.sh"
 cp "$REPO/scripts/fix-wine-rpath.sh" "$APP/Contents/Resources/fix-wine-rpath.sh"
 cp "$REPO/scripts/lsb-server.sh"     "$APP/Contents/Resources/lsb-server.sh"
+cp "$REPO/scripts/update-client.sh"  "$APP/Contents/Resources/update-client.sh"
 chmod +x "$APP/Contents/Resources/"*.sh
 
 # The Metal/DXVK renderer ships inside the app: Renderer.swift resolves these by name out of
