@@ -72,7 +72,8 @@ final class Runner: ObservableObject {
 
     /// Apply every pending HorizonXI game update (torrent, so it can take a while), then report.
     func updateHorizon(_ install: Install, done: @escaping (Bool) -> Void) {
-        guard !busy, !running, let script = Self.updateScript() else {
+        guard !busy, !running else { appendLine("!! something else is running in the wrapper — try again when it finishes"); done(false); return }
+        guard let script = Self.updateScript() else {
             appendLine("!! update-client.sh not found in the bundle"); done(false); return
         }
         busy = true

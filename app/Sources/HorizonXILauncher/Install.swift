@@ -44,7 +44,9 @@ struct Install: Identifiable, Hashable {
 
     /// Whether the client is actually in this prefix. A wrapper with wine but no game is the
     /// normal state right after first-run setup, and the UI has to be able to say so.
-    var hasGame: Bool { FileManager.default.fileExists(atPath: gameDir.path) }
+    /// "Has the game" means Ashita-cli.exe is there, not merely that the folder exists — the
+    /// folder is created the moment the user picks a location, long before anything is in it.
+    var hasGame: Bool { FileManager.default.fileExists(atPath: ashitaCLI.path) }
 
     /// Volume the wrapper lives on — the usual failure is that it simply is not mounted.
     var volume: URL? {

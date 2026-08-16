@@ -120,6 +120,9 @@ struct ContentView: View {
         }
         .onChange(of: store.selectedID) { _ in
             if store.selected?.local == true { local.refresh() }
+            // The preflight checks are per world now (each has its own game folder): CatsEye's
+            // "no client" verdict must not keep Play grey after switching back to HorizonXI.
+            recheck()
         }
         // Discovery walks /Volumes, and an external drive can make that take tens of seconds.
         // Doing it on the main thread means the window never appears at all — which looked
@@ -187,29 +190,24 @@ struct ContentView: View {
                 }
             }
 
-            // The styled row is drawn here and the Menu sits on top of it with an invisible,
-            // full-size label. A macOS `Menu` with `.borderlessButton` renders a custom label as
-            // bare text -- the pill, background and border this row used to declare on the label
-            // never appeared, which is why the world name did not look clickable.
-            ZStack {
-                worldRow
-                Menu {
-                    ForEach(store.ordered) { s in
-                        Button { store.select(s) } label: {
-                            if s.era.isEmpty { Text(s.name) }
-                            else { Text("\(s.name)  ·  \(s.era)") }
-                        }
+            // `.borderlessButton` renders a custom Menu label as bare text (no pill, no border,
+            // no hover), which is why the world name never looked clickable. A plain-styled
+            // button menu draws the label exactly as declared.
+            Menu {
+                ForEach(store.ordered) { s in
+                    Button { store.select(s) } label: {
+                        if s.era.isEmpty { Text(s.name) }
+                        else { Text("\(s.name)  ·  \(s.era)") }
                     }
-                    Divider()
-                    Button("Add a server…") { newServer = true }
-                } label: {
-                    Rectangle().fill(Color.white.opacity(0.001))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
+                Divider()
+                Button("Add a server…") { newServer = true }
+            } label: {
+                worldRow
             }
-            .fixedSize(horizontal: false, vertical: true)
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
 
             if let s = store.selected, !s.verified {
                 VStack(alignment: .leading, spacing: 5) {
@@ -766,6 +764,13 @@ struct ContentView: View {
                     HStack(spacing: 8) {
                         Button("Repair") { if let i = active { runner.repair(i) } }
                             .disabled(runner.busy)
+                        if store.selected?.name == "HorizonXI" {
+                            Button("Update HorizonXI…") {
+                                if let i = active { runner.updateHorizon(i) { _ in recheck() } }
+                            }
+                            .disabled(runner.busy)
+                            .help("Fetches HorizonXI's own updates (torrent) into this install. Not required to play.")
+                        }
                         if store.selected?.name == "CatsEyeXI" {
                             Button("CatsEyeXI installer…") { if let i = active { runner.runCatsEyeLauncher(i) } }
                                 .disabled(runner.busy)
@@ -1053,18 +1058,13 @@ struct ContentView: View {
             runner.appendLine("!! version check: \(server.name) requires \(requiredVer), installed \(have)")
             return
         }
-        // HorizonXI publishes its updates; if this install is behind, apply them now, then play.
-        // Never done for other worlds: their zips are HorizonXI's files.
-        if server.name == "HorizonXI", !updateChecked,
-           let hv = ClientVersion.horizonVersion(in: i), let latest = feeds.horizonLatest,
-           hv != latest {
-            updateChecked = true
-            notice = "HorizonXI is at \(latest), this install is \(hv) — updating first (torrent; see log)."
-            runner.updateHorizon(i) { ok in
-                if ok { launchClient(i, server: server) }
-                else { notice = "The HorizonXI update did not finish — press Play again to resume it, or use HorizonXI's own launcher." }
-            }
-            return
+        // HorizonXI publishes its updates, but being behind is not a reason to refuse Play:
+        // HorizonXI's login server accepts this client as-is (verified daily), and the torrent
+        // fetch can take an hour. Mention it and carry on; the update itself is a button
+        // (Setup & Diagnostics › Update HorizonXI…) and runs only when nothing else is.
+        if server.name == "HorizonXI",
+           let hv = ClientVersion.horizonVersion(in: i), let latest = feeds.horizonLatest, hv != latest {
+            runner.appendLine("i  HorizonXI \(latest) is out; this install is \(hv). Update from Setup & Diagnostics when convenient.")
         }
 
         if !user.isEmpty, !pass.isEmpty {
