@@ -70,7 +70,16 @@ Realistic pathways, in order:
    button in Setup & Diagnostics when CatsEyeXI is selected). Self-contained .NET 8 WPF starts in
    the prefix; hardware WPF draws a blank white window, so the script sets
    `HKCU\Software\Microsoft\Avalon.Graphics\DisableHWAcceleration=1` and then the install
-   wizard renders ("Choose your installation path: C:\Games\CatsEyeXI"). Not yet done: clicking
+   wizard renders ("Choose your installation path: C:\Games\CatsEyeXI"). **Blocker found
+   2026-08-15 evening:** the wizard's *Continue* button is inert under wine — synthetic clicks
+   that demonstrably work on the same window (the path box opens its Select Folder dialog, OK/
+   Cancel close it) do nothing on Continue, no window change, no files, nothing on stderr. Best
+   guess: its handler does a Windows-only check first (free-space via WMI `Win32_LogicalDisk`, or
+   `Directory` ACL probing) that throws under wine and is swallowed. Also: the wine process never
+   becomes frontmost via AppleScript and exposes no AX windows, so it can't be driven by AX. To
+   dig further run it with `WINEDEBUG=+seh,+ole,+wbemprox` and read the log. `C:\Games\CatsEyeXI`
+   was symlinked to `/Volumes/x10/Software/FFXI/CatsEyeXI` (527 GB free) for the attempt; the
+   internal disk (14 GB free) cannot hold a second 27 GB client. Not yet done: clicking
    through a full install (their client is a full ~27 GB download; this Mac had 15 GB free), and
    pointing `Install`/`Runner` at `C:\Games\CatsEyeXI\...\Ashita` instead of `C:\HorizonXI` —
    `Install.gameDir` is still hard-wired, so a per-server game dir is the next code change.
