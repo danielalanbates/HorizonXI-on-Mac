@@ -89,6 +89,27 @@ final class Runner: ObservableObject {
         }
     }
 
+    /// Run CatsEyeXI's own launcher inside the prefix (scripts/catseye-launcher.sh). Their
+    /// client only comes from that launcher; running it under wine is the whole integration.
+    func runCatsEyeLauncher(_ install: Install) {
+        guard !busy, !running else { return }
+        let dev = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("scripts/catseye-launcher.sh")
+        guard let script = Bundle.main.url(forResource: "catseye-launcher", withExtension: "sh")
+                ?? (FileManager.default.isExecutableFile(atPath: dev.path) ? dev : nil) else {
+            appendLine("!! catseye-launcher.sh not found in the bundle"); return
+        }
+        busy = true
+        appendLine("==> CatsEyeXI launcher in \(install.prefixName)")
+        spawn(URL(fileURLWithPath: "/bin/zsh"),
+              args: [script.path, install.wrapper.path, install.prefixName],
+              env: [:], cwd: script.deletingLastPathComponent()) { [weak self] code in
+            self?.busy = false
+            self?.appendLine("==> CatsEyeXI launcher exited \(code)")
+        }
+    }
+
     func launch(_ install: Install, perf: PerfSettings, profile: String = "horizonxi.ini") {
         guard !running else { return }
         running = true

@@ -92,11 +92,71 @@ maintenance mode. This project redistributes no Square Enix data at all.
 Stuck? Open **Setup & Diagnostics** in the app. Every check names the exact file or setting it
 couldn't find, and **Repair** re-runs the whole setup for you.
 
-Prefer doing it by hand, or troubleshooting the wrapper the app built? The old click-by-click
-Homebrew/Sikarugir Creator walkthrough still works and is kept in
-[docs/SETUP.md](docs/SETUP.md#installing-wine-by-hand) for that case.
+**"FFXI on Mac would like access to Developer Tools"** — you may see this macOS prompt the first
+time the app starts Wine. It is Apple's wording for *"this app wants to run a program that
+isn't from an identified developer"*: the Wine binaries come from Sikarugir's GitHub releases and
+are ad-hoc signed, not notarised, so macOS asks before letting a notarised app run them. Allow
+it. The app doesn't touch Xcode or anything else under that heading; the permission is exactly
+"may run Wine". Terminal shows the same prompt for the same reason.
 
-Longer walkthrough: [`docs/SETUP.md`](docs/SETUP.md).
+### Doing it by hand
+
+If the buttons fail, or you want to see each piece, this is everything the app does. Ten minutes,
+mostly downloads. Everything below is free and open source; the only non-free thing involved is
+the game client, which comes from your server.
+
+1. **Rosetta 2** (FFXI is a 32-bit Windows game; Apple Silicon needs the translation layer).
+   In Terminal (Applications → Utilities):
+   ```sh
+   softwareupdate --install-rosetta --agree-to-license
+   ```
+2. **Homebrew**, if you don't have it:
+   ```sh
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+3. **Sikarugir** (Wine for macOS, LGPL — the successor to Wineskin; *not* `sikarugir.com`, which
+   is unrelated to the real project):
+   ```sh
+   brew trust Sikarugir-App/sikarugir
+   brew install --cask Sikarugir-App/sikarugir/sikarugir
+   ```
+4. **Make the wrapper.** Open *Sikarugir Creator* → under *No engine selected* click **Change** →
+   pick **`WS12WineSikarugir10.0_6`** (the build this project is tested on; nothing with `CX` in
+   the name, those are CrossOver-derived) → wait for its download arrow to vanish, click the name
+   again → **Create** → name it `FFXI`, keep the default location. Result:
+   `~/Applications/Sikarugir/FFXI.app` (~1.4 GB, empty Windows drive inside).
+5. **Put the game in it.** Either double-click `FFXI.app` → **Install Software** → your server's
+   Windows installer `.exe` and let it run; or drag an existing `HorizonXI` folder from a Windows
+   PC into `FFXI.app/Contents/SharedSupport/prefix/drive_c/` (right-click the app → *Show Package
+   Contents*). HorizonXI's installer pulls ~9.4 GB by torrent and unpacks to ~27 GB.
+6. **Metal renderer (optional but recommended).** The app's **Renderer** menu does this for you;
+   by hand, copy `vendor/d3d8to9.dll` as `d3d8.dll` and `vendor/dxvk-1.10.3-x32-d3d9-horizonxi.dll`
+   as `d3d9.dll` into both `drive_c/HorizonXI/` and `drive_c/HorizonXI/SquareEnix/FINAL FANTASY XI/`,
+   then in the wrapper: `wine reg add "HKCU\Software\Wine\DllOverrides" /v "*d3d8" /d native /f`
+   and the same for `*d3d9`. Details: [`scripts/install.sh`](scripts/install.sh) is the exact
+   sequence Repair runs.
+7. **Register the game's COM servers** (Repair does this too):
+   `wine regsvr32 /s "C:\HorizonXI\SquareEnix\FINAL FANTASY XI\FFXi.dll"` and likewise
+   `FFXiMain.dll`, `FFXiVersions.dll`, and
+   `"C:\HorizonXI\SquareEnix\PlayOnlineViewer\viewer\com\polcore.dll"`.
+8. Open **FFXI on Mac**; it finds the wrapper. If not, **Setup & Diagnostics** names what's missing.
+
+### Other worlds: CatsEyeXI, Eden, and friends
+
+Pick the world from the **CHANGE WORLD** menu; the app writes that server's login host into its own
+Ashita boot profile and keeps your account per world.
+
+Two things to know:
+
+- **Client version.** Each server insists on a minimum retail patch level of the FFXI client and
+  answers an older one with *"The game's data has been updated. Please update to continue."* The
+  app checks this before Play and tells you both numbers. HorizonXI's own updates are public and
+  the app applies them (torrent — can be slow); other servers ship theirs only through their own
+  launcher.
+- **CatsEyeXI.** Their client comes only from their launcher, so the app runs *their* launcher
+  inside the wrapper: **Setup & Diagnostics → CatsEyeXI installer…**. It opens CatsEye's own
+  install/update window (defaults to `C:\Games\CatsEyeXI`); let it finish, then Play. Verified
+  to open and render on 2026-08-15; a full install through it has not been run here yet.
 
 ## Addons
 

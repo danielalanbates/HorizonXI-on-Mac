@@ -754,6 +754,11 @@ struct ContentView: View {
                     HStack(spacing: 8) {
                         Button("Repair") { if let i = selected { runner.repair(i) } }
                             .disabled(runner.busy)
+                        if store.selected?.name == "CatsEyeXI" {
+                            Button("CatsEyeXI installer…") { if let i = selected { runner.runCatsEyeLauncher(i) } }
+                                .disabled(runner.busy)
+                                .help("Runs CatsEyeXI's own launcher inside the wrapper to install or update their client (their storage is private, so only their launcher can fetch it).")
+                        }
                         // Also reachable when an install already exists: a wrapper can be
                         // broken past what Repair fixes, and rebuilding a fresh one beside it
                         // is faster than diagnosing wine by hand.
@@ -965,8 +970,7 @@ struct ContentView: View {
             notice = "\(server.name) needs client \(requiredVer) or newer; this install is at "
                    + "\(have). Its login server will refuse with “The game's data has been updated”. "
                    + (server.name == "CatsEyeXI"
-                      ? "Only CatsEyeXI's own launcher can fetch their client (private storage) — "
-                        + "see docs/CLIENT-UPDATES.md."
+                      ? "Open Setup & Diagnostics › CatsEyeXI installer… to update it with their own launcher."
                       : "Update the client first.")
             runner.appendLine("!! version check: \(server.name) requires \(requiredVer), installed \(have)")
             return

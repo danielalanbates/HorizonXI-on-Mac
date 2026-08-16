@@ -66,8 +66,14 @@ Realistic pathways, in order:
    `C:\catseyexi\catseyexi-client\`, then copy that folder into the wine prefix as a *second*
    game dir. Needs `Install` to support a per-server game directory (today it is hard-wired to
    `drive_c/HorizonXI`). Their `Ashita/polplugins/DATs/catseyexi` overlay must ride along.
-2. **Run their launcher under wine** in the prefix (self-contained .NET 8; WPF under D3DMetal
-   is a gamble). If it works it also keeps itself current.
+2. **Run their launcher under wine** — **WORKS as of 2026-08-15** (`scripts/catseye-launcher.sh`,
+   button in Setup & Diagnostics when CatsEyeXI is selected). Self-contained .NET 8 WPF starts in
+   the prefix; hardware WPF draws a blank white window, so the script sets
+   `HKCU\Software\Microsoft\Avalon.Graphics\DisableHWAcceleration=1` and then the install
+   wizard renders ("Choose your installation path: C:\Games\CatsEyeXI"). Not yet done: clicking
+   through a full install (their client is a full ~27 GB download; this Mac had 15 GB free), and
+   pointing `Install`/`Runner` at `C:\Games\CatsEyeXI\...\Ashita` instead of `C:\HorizonXI` —
+   `Install.gameDir` is still hard-wired, so a per-server game dir is the next code change.
 3. **Retail PlayOnline updater** (`pol.exe` file check) — needs a live SE account to reach the
    FFXI update step; not usable for private-server players.
 
