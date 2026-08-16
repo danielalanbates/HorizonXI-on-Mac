@@ -140,3 +140,26 @@ Code added this session:
    GUI steps that need automating.
 4. Consider notarizing the .app (currently Developer-ID signed but `spctl` rejects = unnotarized;
    the x87sidecar entitlements are the usual snag — see `docs/dev` notes).
+
+### 2026-08-16 16:15 — GitHub auto-updater
+
+`Updater.swift` + `updateBanner` in `App.swift`. On launch (and every 6 h, and on re-activate) it
+hits `api.github.com/repos/danielalanbates/HorizonXI-on-Mac/releases/latest`, and if `tag_name`
+is a higher dotted version than `CFBundleShortVersionString` it **auto-downloads** that release's
+`.dmg`, mounts it (`hdiutil`), stages the `.app` into `App Support/HorizonXI-on-Mac/updates/
+staged-<ver>/`, strips quarantine (`/usr/bin/xattr -dr` — note the Homebrew python `xattr` in PATH
+lacks `-r`, so the absolute path matters), detaches, and shows a gold "Update <ver> is ready —
+Restart" banner. It never applies the update itself; **Restart** writes a detached zsh helper that
+waits for the app's pid to exit, `ditto`s the staged bundle over the running one, strips
+quarantine, relaunches, and cleans up.
+
+Verified end-to-end by stamping a scratch build as 2.5: it saw live v2.6, downloaded, mounted, and
+staged a signature-valid `FFXI-on-Mac.app`; the swap helper was tested on dummy bundles
+(OLD→NEW). Not driven through the actual Restart on the live app (would downgrade to the older 2.6
+release, which predates this code) and the GUI banner wasn't screenshotted (Mac was locked).
+
+**Release coherence:** bumped `bundle.sh` to 2.7 / build 8. The updater compares versions, so the
+next release's tag must exceed the installed `CFBundleShortVersionString` or it would offer itself
+in a loop — `scripts/package.sh` reads the version from the bundle, so cut the release as **v2.7**
+(`HXI_SIGN_ID=<hash> ./scripts/package.sh` → notarized `dist/FFXI-on-Mac-2.7.dmg` →
+`gh release create v2.7 …`). `/Applications` reinstalled as 2.7 so it won't offer the older 2.6.

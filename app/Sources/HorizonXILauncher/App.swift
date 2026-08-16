@@ -62,6 +62,7 @@ struct ContentView: View {
     @StateObject private var store = ServerStore()
     @StateObject private var local = LocalServer()
     @StateObject private var feeds = ServerFeeds()
+    @StateObject private var updater = Updater()
     @State private var bannerIndex = 0
     @State private var worldHover = false
     @State private var forceSetup = false
@@ -155,6 +156,9 @@ struct ContentView: View {
             // Pick up each server's own published addon list, so the app's compiled-in snapshot
             // does not go stale between releases. Silent on failure -- offline must still launch.
             await feeds.refreshAsync(servers: store.servers)
+            // Check GitHub Releases and, if there is a newer build, download it automatically.
+            // The update is only *applied* when the user presses Restart (updateBanner).
+            updater.start()
         }
     }
 
@@ -174,6 +178,7 @@ struct ContentView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(3.5)
                     .foregroundStyle(Vana.gold)
+                updateBanner
                 newsBanner
             }
             .padding(.horizontal, 34).padding(.top, 34).padding(.bottom, 20)
@@ -283,6 +288,44 @@ struct ContentView: View {
     /// invented to fill the space.** No FFXI private server publishes a news feed a launcher can
     /// read (see `ServerFeeds` for what was checked), so there are no headlines to rotate; the
     /// moment one does, fetched items appear here first and are marked as such.
+    /// Shown only when an update has finished downloading and is staged: one line and a Restart
+    /// button. While a download is in flight it shows quiet progress; otherwise it renders nothing,
+    /// so the normal launcher is undisturbed.
+    @ViewBuilder private var updateBanner: some View {
+        switch updater.state {
+        case .ready(let release):
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.down.circle.fill").foregroundStyle(Vana.gold)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Update \(release.version) is ready").font(.caption).foregroundStyle(Vana.text)
+                    Text("Restart to finish installing it.").font(.caption2).foregroundStyle(Vana.muted)
+                }
+                Spacer()
+                Button("Restart") { updater.restartToUpdate() }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Vana.gold.opacity(0.12)))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Vana.gold.opacity(0.35), lineWidth: 1))
+            .padding(.top, 6)
+        case .downloading(let frac):
+            HStack(spacing: 8) {
+                ProgressView(value: frac).frame(width: 120)
+                Text("Downloading update… \(Int(frac * 100))%").font(.caption2).foregroundStyle(Vana.muted)
+            }.padding(.top, 6)
+        case .staging:
+            Text("Preparing update…").font(.caption2).foregroundStyle(Vana.muted).padding(.top, 6)
+        case .failed(let msg):
+            // Only worth showing when it is about an update that exists, not routine offline noise.
+            if msg.contains("available") {
+                Text(msg).font(.caption2).foregroundStyle(Vana.ember)
+                    .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
+            }
+        case .idle, .checking:
+            EmptyView()
+        }
+    }
+
     @ViewBuilder
     private var newsBanner: some View {
         let items = feeds.bannerItems(for: store.selected, policy: addonPolicy)
