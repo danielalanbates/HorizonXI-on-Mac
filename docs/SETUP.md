@@ -3,6 +3,24 @@
 No Terminal, for most people. Three things have to be on your Mac, and the launcher tells you
 which one is missing at any moment — and builds one of the three for you.
 
+## Do not update the client unless you have to
+
+**Being a version or two behind is normal, and the game plays fine.** HorizonXI's login server
+accepts a slightly older client; the launcher says so in the log and lets you Play.
+
+Only use **Setup & Diagnostics › Update HorizonXI…** when the world has actually published an
+update *and* the game is turning you away — the login server answers "The game's data has been
+updated" and refuses the connection. That is the signal. Nothing else is.
+
+Why the caution: the update is a multi-hour BitTorrent fetch that rewrites files inside a
+working install. If it stalls part-way the client is left mid-update, which is a worse problem
+than being one version behind. The launcher keeps the renderer DLLs and the x87 loader across an
+update, but it cannot un-break a half-applied one.
+
+The same rule applies to CatsEyeXI (their client can only be updated by their own launcher) and
+to the bring-your-own-retail worlds.
+
+
 ## What you need
 
 | Piece | Where it comes from | Roughly |

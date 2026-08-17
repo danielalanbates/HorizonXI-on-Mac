@@ -840,7 +840,15 @@ struct ContentView: View {
                                 if let i = active { runner.updateHorizon(i) { _ in recheck() } }
                             }
                             .disabled(runner.busy)
-                            .help("Fetches HorizonXI's own updates (torrent) into this install. Not required to play.")
+                            .help("""
+                                Only press this when HorizonXI have actually published an \
+                                update and the game is refusing to let you in. It is not \
+                                routine maintenance: it rewrites files in a working install, \
+                                takes an hour or more over BitTorrent, and can leave the \
+                                client mid-update if it stalls. A working install does not \
+                                need it. Play stays available either way — HorizonXI's login \
+                                server accepts an install that is a version or two behind.
+                                """)
                         }
                         if store.selected?.name == "CatsEyeXI" {
                             Button("CatsEyeXI installer…") { if let i = active, let s = store.selected { runner.runCatsEyeLauncher(i, dataPath: s.dataPath) } }
@@ -862,6 +870,20 @@ struct ContentView: View {
                         Button("Install wine…") { showSetup = true }
                     }
                     .padding(.top, 4)
+
+                    // Said out loud, not just in a tooltip. Chasing client updates that the
+                    // game does not need is a good way to break a working install: the fetch
+                    // is a multi-hour torrent, it rewrites files in place, and a stall leaves
+                    // the client half-updated. Being a version behind is normal and playable.
+                    Text("Don't update the client unless the world has actually published an "
+                       + "update and the game is turning you away. A working install does not "
+                       + "need one — being a version or two behind is normal, and Play still "
+                       + "works. Updating rewrites a working install over a multi-hour "
+                       + "download.")
+                        .font(.caption2)
+                        .foregroundStyle(Vana.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
                 }
                 .font(.caption)
                 .foregroundStyle(Vana.muted)
@@ -1181,7 +1203,10 @@ struct ContentView: View {
         // (Setup & Diagnostics › Update HorizonXI…) and runs only when nothing else is.
         if server.name == "HorizonXI",
            let hv = ClientVersion.horizonVersion(in: i), let latest = feeds.horizonLatest, hv != latest {
-            runner.appendLine("i  HorizonXI \(latest) is out; this install is \(hv). Update from Setup & Diagnostics when convenient.")
+            runner.appendLine("i  HorizonXI \(latest) is published; this install is \(hv). "
+                              + "You do not need to do anything: the login server accepts this "
+                              + "client and the game plays normally. Only run Setup & Diagnostics "
+                              + "\u{203A} Update HorizonXI\u{2026} if you are actually turned away.")
         }
 
         if !user.isEmpty, !pass.isEmpty {
