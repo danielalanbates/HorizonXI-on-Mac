@@ -102,6 +102,8 @@ final class Runner: ObservableObject {
         }
         busy = true
         appendLine("==> repairing \(install.wrapper.path) [\(install.prefixName)]")
+        // Cheap, local, and the difference between "logs in then quits" and a playable game.
+        Sandbox.repair(install) { [weak self] in self?.appendLine($0) }
         spawn(URL(fileURLWithPath: "/bin/zsh"),
               args: [script.path, install.wrapper.path, install.prefixName],
               env: [:], cwd: script.deletingLastPathComponent()) { [weak self] code in
@@ -377,6 +379,9 @@ final class Runner: ObservableObject {
         // The renderer lives in the prefix's registry and DLLs, not in the environment, so it has
         // to be written before the process starts — and after any wineserver holding the old copy
         // of the registry has exited.
+        // A wrapper that has been copied or moved still has its dylib links aimed at the old
+        // copy; fix that before anything tries to load one. See relinkStrayDylibs.
+        RendererSetup.relinkStrayDylibs(install) { [weak self] in self?.appendLine($0) }
         RendererSetup.apply(perf.renderer, to: install) { [weak self] in self?.appendLine($0) }
         // Same moment, same reason: the registry has to name *this* world's SquareEnix folder.
         GameRegistry.point(install) { [weak self] in self?.appendLine($0) }
@@ -384,6 +389,12 @@ final class Runner: ObservableObject {
         gameExe = Credentials.bootLoaderName(in: install, profile: profile) ?? "horizon-loader.exe"
         Self.currentGameExe = gameExe
         Credentials.applyIniOverrides(perf.renderer.iniOverrides, to: install, profile: profile)
+        // Launching with Sandbox loaded and its interface bypass off produces the worst failure
+        // this project has: a clean login followed by a silent exit, no window, no error. Put it
+        // back rather than letting the user hit that. See Sandbox.swift.
+        if Sandbox.isBroken(install, profile: profile) {
+            Sandbox.repair(install) { [weak self] in self?.appendLine($0) }
+        }
         // The local server is the one everything else here is a test against (see
         // docs/X87-WALL.md and scripts/max4k.json, which this mirrors) -- 4K, every graphics
         // setting maxed. Never applied to a live server profile: that would silently change

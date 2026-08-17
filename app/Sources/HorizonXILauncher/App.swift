@@ -1245,7 +1245,8 @@ struct ContentView: View {
 
     private func recheckAsync() async {
         guard let i = active else { checks = []; return }
-        checks = await Task.detached(priority: .userInitiated) { Preflight.run(i) }.value
+        let profile = store.selected?.bootProfile ?? "horizonxi.ini"
+        checks = await Task.detached(priority: .userInitiated) { Preflight.run(i, profile: profile) }.value
     }
 
     /// Open the panel on whatever the profile actually says, not on this app's last write —

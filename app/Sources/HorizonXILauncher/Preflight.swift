@@ -12,7 +12,7 @@ struct Check: Identifiable {
 
 enum Preflight {
 
-    static func run(_ install: Install) -> [Check] {
+    static func run(_ install: Install, profile: String = "horizonxi.ini") -> [Check] {
         let fm = FileManager.default
         var out: [Check] = []
 
@@ -101,6 +101,19 @@ enum Preflight {
             .appendingPathComponent("PlayOnlineViewer/viewer/com/polcore.dll")
         add("polcore", "polcore.dll", fm.fileExists(atPath: polcore.path),
             "present", "missing \(polcore.path)", warnOnly: true)
+
+        // The single setting that silently kills the game: Sandbox's patch.ver interface-id
+        // bypass. Off + sandbox loaded == "Successfully logged in", then exit two seconds later,
+        // with no window and no error anywhere. See Sandbox.swift for the measured table.
+        let sbOn = Sandbox.isEnabled(in: install, profile: profile)
+        let sbBypass = Sandbox.interfaceBypass(install)
+        if sbOn {
+            add("sandbox", "Sandbox interface bypass", sbBypass != false,
+                sbBypass == nil ? "not set — Ashita's default (on) applies" : "on",
+                "off, while the Sandbox POL plugin is loaded — the game will log in and then "
+                + "exit about two seconds later with no error. Run Repair, or set "
+                + "use_interface_bypass = 1 in config/sandbox/sandbox.ini.")
+        }
 
         add("d3dmetal", "D3DMetal renderer", fm.fileExists(atPath: install.d3dMetal.path),
             install.d3dMetal.path,

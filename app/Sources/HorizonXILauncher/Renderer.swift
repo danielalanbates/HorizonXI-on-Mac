@@ -211,10 +211,42 @@ enum RendererSetup {
         let link = i.sharedSupport.appendingPathComponent("wine/lib/libMoltenVK.dylib")
         let cx = i.wrapper.appendingPathComponent("Contents/Frameworks/moltenvkcx/libMoltenVK.dylib")
         let stock = i.wrapper.appendingPathComponent("Contents/Frameworks/libMoltenVK.dylib")
-        let target = toCX ? cx : stock
+        let target = toCX && fm.fileExists(atPath: cx.path) ? cx : stock
         guard fm.fileExists(atPath: target.path) else { return }
         try? fm.removeItem(at: link)
         try? fm.createSymbolicLink(at: link, withDestinationURL: target)
+    }
+
+    /// Every dylib in `wine/lib` is a symlink into the wrapper's own `Contents/Frameworks`.
+    /// Copying or moving a wrapper with `cp -R`/`rsync` preserves those symlinks *verbatim*, so
+    /// all 94 of them keep pointing at the **old** location. While the old copy is still on a
+    /// mounted disk nothing looks wrong -- and then the day it is unplugged or deleted, wine
+    /// stops loading. Worse, `libMoltenVK.dylib` silently keeps resolving to the previous
+    /// wrapper's MoltenVK rather than this one's, which is a renderer difference, not a
+    /// missing file.
+    ///
+    /// Re-point anything that escapes this wrapper at the matching file inside it.
+    /// Returns the number of links repaired.
+    @discardableResult
+    static func relinkStrayDylibs(_ i: Install, log: (String) -> Void = { _ in }) -> Int {
+        let fm = FileManager.default
+        let libDir = i.sharedSupport.appendingPathComponent("wine/lib")
+        let frameworks = i.wrapper.appendingPathComponent("Contents/Frameworks")
+        guard let kids = try? fm.contentsOfDirectory(atPath: libDir.path) else { return 0 }
+        var fixed = 0
+        for name in kids where name.hasSuffix(".dylib") {
+            let link = libDir.appendingPathComponent(name)
+            guard let dest = try? fm.destinationOfSymbolicLink(atPath: link.path) else { continue }
+            // Already inside this wrapper: leave it alone.
+            guard !dest.hasPrefix(i.wrapper.path) else { continue }
+            let local = frameworks.appendingPathComponent(name)
+            guard fm.fileExists(atPath: local.path) else { continue }
+            try? fm.removeItem(at: link)
+            guard (try? fm.createSymbolicLink(at: link, withDestinationURL: local)) != nil else { continue }
+            fixed += 1
+        }
+        if fixed > 0 { log("wrapper: re-pointed \(fixed) dylib links that still referenced the previous copy") }
+        return fixed
     }
 
     // MARK: - The DXT fix
