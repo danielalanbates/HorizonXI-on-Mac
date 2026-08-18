@@ -1,0 +1,42 @@
+/load winefix
+
+# --HORIZON_PLUGINS_START--
+/load Addons
+#/load HardwareMouse
+/load Deeps
+/load Minimap
+/load Nameplate
+/load PacketFlow
+/load Sequencer
+/load Thirdparty
+# --HORIZON_PLUGINS_STOP--
+# --HORIZON_ADDONS_START--
+/addon load mousediag
+/addon load friendlist
+/addon load allmaps
+/addon load chains
+/addon load chatmon
+/addon load checker
+/addon load clock
+/addon load distance
+/addon load fastswap
+/addon load filterless
+/addon load fps
+/addon load HXUI
+/addon load instantah
+/addon load links
+/addon load macrofix
+/addon load mipmap
+/addon load mobdb
+/addon load nocombat
+/addon load nolock
+/addon load nomount
+/addon load petinfo
+/addon load recast
+/addon load timers
+/addon load tparty
+/addon load tTimers
+# --HORIZON_ADDONS_STOP--
+
+/wait 3
+/ambient 255 255 255

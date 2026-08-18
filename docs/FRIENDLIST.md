@@ -1,0 +1,254 @@
+# Friend list without PlayOnline
+
+The retail FFXI friend list is a PlayOnline Viewer feature. The client still ships the
+commands — `/befriend`, `/friendlist`, `/flist`, `/blacklist`, `/blist`, `/search`,
+`/sea` are all present as literal strings in `FFXiMain.dll` (around offsets 183088 and
+184480) — but on a private server the PlayOnline half of that conversation does not
+exist, so the feature is dead.
+
+`addons/friendlist/friendlist.lua` reimplements it entirely client-side. **No server
+changes and no private server are involved.** LandSandBoat is used here only as a local
+*test bed*, never as part of the implementation.
+
+## How it works
+
+1. **Commands.** Ashita intercepts `/befriend` and `/friendlist` / `/flist` before they
+   reach the server and blocks them. The names are identical to the originals, taken
+   from the client binary, so people use the commands they already know.
+2. **The handshake.** Friend requests ride on ordinary `/tell`, tagged
+   (`<FLREQ>`, `<FLACK>`, `<FLNAK>`, `<FLDEL>`) with the marker stripped from the chat
+   log before you see it. This preserves the mutual-consent flow of the original: you
+   ask, they accept.
+3. **Presence.** A tagged `<FLPING>` tell, answered by `<FLPONG>`.
+
+The list is a plain text file per character under `addons/friendlist/data/`.
+
+## Presence: why not /sea
+
+`/sea` was the obvious idea and it is **wrong**. Search results travel on a separate
+encrypted binary connection to the search server (`src/search/` in LandSandBoat —
+blowfish + md5, `SearchPacket`) and are rendered into the client's own Search panel.
+**They never appear as chat text**, so there is nothing for an addon to parse. An
+earlier version of this addon scraped chat for `/sea` output; that could never have
+worked.
+
+What *does* produce chat text is a failed tell. The server answers a tell aimed at an
+absent player with standard message **125** — "Your tell was not received. The recipient
+is currently away." (`src/map/enums/msg_std.h:58`, sent from
+`src/world/ipc_server.cpp:438`).
+
+So presence is: ping a friend with a tagged tell and watch for that reply. The reply
+means offline; no reply means the tell was delivered, which means online. A friend who
+also runs the addon answers with `<FLPONG>`, which marks them online immediately.
+
+**Caveat:** a friend *not* running this addon will see the raw tag text arrive as a
+tell. Hence the deliberately slow poll (one query per 3s, full sweep every 60s).
+
+## Commands
+
+    /befriend <name>            Send a friend request.
+    /friendlist                 Toggle the friend list window.
+    /flist                      Same.
+    /friendlist add <name>      Send a friend request.
+    /friendlist delete <name>   Remove a friend.  (del / remove also accepted)
+    /friendlist accept <name>   Accept a pending request.
+    /friendlist decline <name>  Decline a pending request.
+    /friendlist refresh         Poll presence now.
+    /friendlist selftest        Run the built-in end-to-end test.
+    /friendlist simulate <name> <REQ|ACK|NAK|DEL|PING|PONG>
+
+## Verification status
+
+**Verified live in the running client, 2026-08-17** — both against HorizonXI and against
+the local LandSandBoat server. Screenshots: `friendlist-in-game.png`,
+`friendlist-after-add-remove.png`.
+
+- Addon loads clean and creates its per-character data file.
+- `/friendlist selftest` — **11/11 PASS** inside the running game: inbound request
+  creates a pending entry; accept promotes pending to friend; friend written to disk;
+  friend survives reload from disk; delete removes the friend; removal persisted;
+  remote delete drops the friend; decline clears the pending request; pong marks a
+  friend online; an offline reply is attributed to the pinged friend; offline reply
+  marks the friend offline.
+- `/befriend Kiyoko` through the real command path produced
+  "A friend request has been sent to Kiyoko."
+- The Friend List window renders in game with friends, online markers, and a pending
+  request with Accept / Decline buttons.
+- `/friendlist accept` and `/friendlist delete` both changed the window and the on-disk
+  file as expected.
+
+**Verified live IN WORLD against the local LandSandBoat server** (character `Test`,
+Southern San d'Oria) — screenshots `friendlist-in-world.png`,
+`friendlist-live-presence.png`:
+
+- A tagged tell round-trips through a real server: `>>Test : <FLPING>` went out and
+  `Test>> <FLPING>` came back in. The handshake transport works for real, not just in
+  the state machine.
+- **Offline detection**: pinging an absent player produced the real server reply
+  "Your tell was not received. The recipient is either offline or changing areas."
+  and the friend was marked offline.
+- **Online detection**: a delivered ping (no error reply) marked the friend online.
+- The window showed "2 friends, 1 online" with correct per-friend markers.
+
+Note the live wording is "either offline or changing areas", NOT the "currently away"
+in the LandSandBoat source comment. The parser matches on `tell was not received`, which
+covers both — but do not tighten it to the source-comment wording.
+
+### Bug found by live testing
+
+The first in-world run revealed that both directions of a tell carry the tag and the
+original regex matched both:
+
+    outgoing echo :  ">>Name : <FLREQ>"
+    incoming tell :  "Name>><FLREQ>"
+
+So sending a friend request made the addon read our own outgoing request as an incoming
+one from the person we had just asked, creating a phantom pending entry. Fixed by
+rejecting lines starting with `>>` and anchoring the incoming match to `Name>>`. This is
+exactly the class of bug that only shows up in world.
+
+### Verified with TWO real clients (the full test)
+
+Two clients at 800x600 against local LandSandBoat, two separate accounts and characters
+(`Test` on lsbtest, `Buddy` on lsbtest2), both in Southern San d'Oria and visible to each
+other in game. Screenshots `friendlist-two-clients-test.png`,
+`friendlist-two-clients-buddy.png`.
+
+- `/befriend Buddy` on Test -> Buddy sees "Test would like to add you to their friend
+  list. Use /friendlist accept Test or /friendlist decline Test." The tag never appears
+  in either chat log.
+- `/friendlist accept Test` on Buddy -> Buddy: "Test has been added to your friend
+  list." Test: "Buddy has accepted your friend request." Both data files persisted
+  (`test.txt` -> `friend Buddy`, `buddy.txt` -> `friend Test`).
+- Presence ping/pong crossed both ways (`Test>> <FLPONG>` and `Buddy>> <FLPONG>`), and
+  **both windows showed "1 friend, 1 online"** with the other player green.
+- `/friendlist delete Buddy` on Test -> Test: "Buddy has been removed from your friend
+  list." Buddy: "Test has removed you from their friend list." Both lists emptied.
+
+That is the complete original feature — add, mutual consent, presence, remove — working
+between two real players with no PlayOnline and no server-side support.
+
+### Second bug found by two-client testing
+
+Incoming tells arrive wrapped in colour/control bytes, so `"Name>><TAG>"` never matched
+an anchored pattern — the request was delivered by the server but silently ignored by the
+receiving addon. Fixed by stripping everything outside printable ASCII before matching.
+Single-client testing could not have found this, because the self-tell path and the
+outgoing echo both looked fine.
+
+### Running two clients on 8 GB
+
+Drop the resolution first: `[ffxi.registry]` `0001`/`0002` and `0037`/`0038` to 800x600
+and `0003`/`0004` to 1024. Even then this machine sat at ~70-150 MB free with ~700 MB of
+swap headroom, so close other apps first and watch `vm.swapusage`.
+
+Each client needs its own command channel or they both eat the same file. `mousediag`
+reads `cmd<FLCLIENT>.txt` and logs to `mousediag<FLCLIENT>.log`, so launching the second
+client with `FLCLIENT=2` in the environment keeps them independent. Boot config for the
+second account is `lsb2.ini`.
+
+A second character was made by cloning the first in SQL. Note `chars` has a BEFORE INSERT
+trigger that auto-creates the child rows (`char_equip`, `char_exp`, `char_jobs`, ...), so
+insert into `chars` FIRST and only then copy `char_look` / `char_stats` / `char_skills` /
+`char_jobs`. Pre-inserting the child rows makes the trigger collide with a confusing
+"Duplicate entry for key PRIMARY" on a table that visibly has no such row.
+
+## Why the NATIVE in-game menu cannot be populated (investigated 2026-08-17)
+
+Daniel's goal was menu integration — making the game's own Friend List menu work, not an
+overlay. Findings:
+
+**The native menu renders fine on a private server.** Opening it shows "No friends
+registered." rather than erroring, so the UI is intact and client-side. Only the data is
+absent.
+
+**There is no friend-list packet in the FFXI world protocol.** LandSandBoat implements the
+protocol comprehensively and has `GP_CLI_COMMAND_BLACK_LIST` and
+`GP_CLI_COMMAND_BLACK_EDIT` — the blacklist IS a world-protocol feature. There is no
+friend equivalent. The one friend-named packet, `GP_CLI_COMMAND_FRIENDPASS` (0x01B), is
+the *world pass* (inviting a friend to buy the game), unrelated to the friend list.
+
+This is the crux: **no server can populate that menu through the game connection, because
+the packet does not exist.** It is not that LandSandBoat failed to implement it. The
+friend list is PlayOnline Viewer functionality delivered over PlayOnline's own channel.
+
+**No client-side storage either.** `SquareEnix/FINAL FANTASY XI/USER/` holds macros and
+per-character config; there is no friend-list file. The data is memory-only at runtime.
+
+**Ashita offers no handle on it.** The SDK exposes IPlayer, IParty, IInventory, ITarget,
+IRecast and friends — there is no menu interface and no friend structure, and no offsets
+ship for one.
+
+### What populating the native menu would actually require
+
+Writing directly into the in-memory structure that `menu friend` reads. That is a static
+reverse-engineering project against FFXiMain.dll, made harder than usual because **there
+is no way to observe a populated state to diff against** — nothing can fill that menu
+without PlayOnline, so the usual find-the-struct-by-comparison technique is unavailable.
+It would mean disassembling the menu's draw/populate path.
+
+Possible in principle. Not a code fix, and not a small job.
+
+### What exists instead
+
+The addon draws its own Friend List window. It is a genuinely working friend list — add,
+mutual consent, presence, remove, all verified between two real clients — but it is an
+overlay, not the native menu. Making it *look* like the native menu (FFXI frame art,
+fonts, colours) is achievable and would satisfy "looks just like it"; making the built-in
+menu itself light up is the reverse-engineering project above.
+
+## 2026-08-17 — switched to Tanyrus/FFXIFriendList (server-backed)
+
+Daniel chose to use **Tanyrus/FFXIFriendList** (GPL-3.0, Ashita v4 Lua, hosted backend
+`api2.horizonfriendlist.com`) instead of our tell-based `friendlist` addon. Our addon is no
+longer loaded from `scripts/default.txt` (backup `default.txt.bak-tanyrus`); the code stays
+in `addons/friendlist/` for reference.
+
+`addons/FFXIFriendList/` in this repo is upstream `main` (2026-06-12) plus three compat
+patches, all needed on the Ashita 4.3 / imgui 1.9x that HorizonXI ships since 2026-08-02
+(upstream issue #18 "Addon Crashing on Ashita 4.3" is open with no fix):
+
+1. `FFXIFriendList.lua` — `imgui.BeginChild(id, size, bool)` → shim converts the boolean to
+   the new `child_flags` int (was a sol "no matching function" Lua error).
+2. `app/ui/FontManager.lua` — `M.get()` returns nil, so nothing pushes atlas fonts by index
+   (`io.Fonts.Fonts[n]` is not valid under the new dynamic-font imgui).
+3. `libs/icons.lua` — `M.GetIcon()` returns nil, so `imgui.Image/ImageButton` with the legacy
+   signatures are never called; every icon falls back to text.
+4. `FFXIFriendList.lua` — `jit.off()`. The remaining crash was
+   `EXCEPTION_ACCESS_VIOLATION` at `Addons.dll+0xA0761A`, which disassembles to LuaJIT's
+   `lj_mcode_patch` walking a NULL MCode-area chain (`mov (%esi),%esi … mov 0x4(%esi),%ecx`
+   then `VirtualProtect`). It fired on the first draw after load, roughly 3 times out of 4,
+   and never after `jit.off()`. Note: when the Addons plugin catches that AV it can unload
+   *every* addon (and once the plugin itself), which also kills the `mousediag` command
+   channel — recover with `/load addons` typed by keyboard.
+
+Verified live 2026-08-17 with two clients (Test / Buddy) on the local LandSandBoat server,
+addon loaded per client as `FFXIFriendList` and a patched copy `FFXIFriendList2` (its
+config dir renamed so the two clients get separate accounts/API keys):
+`/befriend Buddy` → "Friend request sent" → `/fl accept Test` on Buddy → both lists show
+the other with the green online marker (`tanyrus-friendlist-test.png`,
+`tanyrus-friendlist-buddy.png`) → `/fl block Test` on Buddy removed the friendship on
+Test's list live (`tanyrus-friendlist-after-block.png`) → `/fl unblock`, re-request,
+`/fl deny Test` all echoed correctly. Quirk seen: `/fl unblock Test` printed
+"test was not blocked" although `/fl blocked` had listed Test.
+
+Caveats: the realm list on his backend is Horizon/Eden only, so a private-server character
+registers under the Horizon realm on his hosted DB. Friend removal is UI-only (right-click
+context menu) — there is no `/fl remove`. `scripts/twoclient.py` launches/drives client 1
+or 2 (`launch N`, `cmd N "<chat cmd>"`, `shot N file`); mousediag's cmd channel now also
+evaluates lines prefixed `LUA `.
+
+### Update, same day — proper fixes, fork + upstream PR
+
+The blunt "disable fonts / disable icons" patches above were replaced by version-aware
+fixes (probe `imgui.ImageWithBg ~= nil` → ImGui >= 1.91): BeginChild shim, new
+`Image`/`ImageButton` signatures in `libs/icons.lua`, and `jit.off()`. Icons and toolbar
+now render correctly on Ashita 4.3. Fonts were left untouched (PushFont is pcall'd upstream
+and did not crash once the JIT was off).
+
+- Fork (what to submit to HorizonXI for addon approval): https://github.com/danielalanbates/FFXIFriendList — branch `ashita-4.3-compat`
+- Upstream PR: https://github.com/Tanyrus/FFXIFriendList/pull/19 (fixes their #18)
+- `addons/FFXIFriendList/` in this repo now mirrors that branch exactly.
+- Our old tell-based addon is archived at `archive/friendlist-tell-addon-2026-08-17/`
+  (and `addons-archive/friendlist` in the live prefix). `FFXIFriendList2` in the live prefix
+  is only the two-client test copy (older blunt patches) — delete or resync before relying on it.
