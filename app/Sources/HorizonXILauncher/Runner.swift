@@ -402,6 +402,9 @@ final class Runner: ObservableObject {
         if profile == "lsb.ini" {
             Credentials.applyIniOverrides(Self.max4KRegistry, to: install, profile: profile)
         }
+        // Every launch: make sure no addon can take the LuaJIT trace-patch fault that Ashita 4.3
+        // hits on this Mac (see LuaJITGuard). Idempotent, so this is cheap after the first run.
+        LuaJITGuard.apply(install) { [weak self] in self?.appendLine($0) }
         appendLine("==> launching \(profile)")
         var env = perf.environment(for: install)
         for (k, v) in X87Sidecar.requiredEnvironment { env[k] = v }

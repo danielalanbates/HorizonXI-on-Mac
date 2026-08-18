@@ -79,6 +79,7 @@ struct ContentView: View {
     @State private var graphics = GraphicsSettings.load()
     @State private var showAddons = false
     @State private var addonItems: [AddonSuite.Item] = []
+    @State private var installingExtra = ""
     @State private var addonWarning = ""
     @State private var notice = ""
     /// One update attempt per Play press chain; a second Play retries.
@@ -428,6 +429,47 @@ struct ContentView: View {
             if !addonWarning.isEmpty {
                 Text(addonWarning).font(.caption2).foregroundStyle(Vana.ember)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Extras this project can fetch for the local world. Never shown for a live server
+            // — nothing here is on any published approved list.
+            if case .unrestricted = addonPolicy, let i = active {
+                ForEach(LocalWorldAddons.all, id: \.name) { e in
+                    if !LocalWorldAddons.isInstalled(e, in: i) {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(e.title).font(.caption).bold()
+                                Text(e.blurb).font(.caption2).foregroundStyle(Vana.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            Button(installingExtra == e.name ? "Installing…" : "Get") {
+                                installingExtra = e.name
+                                Task {
+                                    let ok = await LocalWorldAddons.install(e, into: i) { line in
+                                        Task { @MainActor in runner.appendLine(line) }
+                                    }
+                                    await MainActor.run {
+                                        installingExtra = ""
+                                        if ok {
+                                            addonItems = AddonSuite.scan(i)
+                                            if let idx = addonItems.firstIndex(where: {
+                                                !$0.isPlugin && $0.name.lowercased() == e.name }) {
+                                                addonItems[idx].enabled = true
+                                            }
+                                            notice = "\(e.title) installed — press Apply to load it next Play."
+                                        } else {
+                                            notice = "\(e.title) could not be installed; see the log."
+                                        }
+                                    }
+                                }
+                            }
+                            .disabled(!installingExtra.isEmpty)
+                        }
+                        .padding(8)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Vana.panel.opacity(0.6)))
+                    }
+                }
             }
 
             List {
