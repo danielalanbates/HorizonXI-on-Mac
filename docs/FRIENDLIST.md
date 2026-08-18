@@ -252,3 +252,18 @@ and did not crash once the JIT was off).
 - Our old tell-based addon is archived at `archive/friendlist-tell-addon-2026-08-17/`
   (and `addons-archive/friendlist` in the live prefix). `FFXIFriendList2` in the live prefix
   is only the two-client test copy (older blunt patches) — delete or resync before relying on it.
+
+## GM Tools (SQLCommit/GMTools) — 2026-08-18
+
+Installed `addons/gmtools` (MIT, v1.0.4, built for Ashita 4.3) for the local LSB server: `/gm`
+opens an ImGui browser of 184 `!` commands (Teleport/Character/Skills/Items/Status/Mobs/World/
+Quests/Admin/Reload/Debug), item search by name, favorites, presets, per-job gear loadouts.
+Rendered first try; but the same LuaJIT fault as FFXIFriendList (`Addons.dll+0xA0761A`,
+`lj_mcode_patch`) fired on `/gm gear WAR` and unloaded it. One line fixes it — `jit.off()` after
+`require 'common'` in `gmtools.lua` (patched copy in this repo). Verified after the patch:
+`/gm gear WAR` gave 18 items (inventory 7→24), `!setplayerlevel 75` via chat took effect
+(char_stats.mlvl=75). Requires `chars.gmlevel` (Test/Buddy = 99). LSB prints "Lost key item: ."
+after each `!additem` — server-side quirk, harmless.
+
+**Pattern worth remembering:** on this Ashita 4.3 + Wine/Rosetta stack, *any* Lua addon that gets
+hot enough to JIT can hit that fault; `jit.off()` at the top of the entry file is the fix.
