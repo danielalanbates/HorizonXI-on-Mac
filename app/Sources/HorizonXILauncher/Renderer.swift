@@ -334,7 +334,20 @@ enum RendererSetup {
         p.environment = ["WINEPREFIX": i.prefix.path]
         try? p.run()
         p.waitUntilExit()
-        Thread.sleep(forTimeInterval: 1.5)
+        // `-k` only *sends* the kill; the server then flushes the registry and exits on its own
+        // time. A fixed 1.5 s covered that on the SSD, but after the wrapper moved to the x10
+        // (spinning disk) the flush can outlive it — and a game spawned while the old server is
+        // still dying gets torn down with it about a second after login ("Closing…", every
+        // world, 2026-08-19). `wineserver -w` blocks until the server has actually terminated.
+        let w = Process()
+        w.executableURL = i.wineserver
+        w.arguments = ["-w"]
+        w.environment = ["WINEPREFIX": i.prefix.path]
+        try? w.run()
+        // Bounded, so a wedged server cannot hang the launcher forever.
+        let deadline = Date().addingTimeInterval(30)
+        while w.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
+        if w.isRunning { w.terminate() }
     }
 
     private static func reg(_ i: Install, add key: String, name: String, type: String, data: String) {

@@ -408,7 +408,15 @@ final class Runner: ObservableObject {
         appendLine("==> launching \(profile)")
         var env = perf.environment(for: install)
         for (k, v) in X87Sidecar.requiredEnvironment { env[k] = v }
-        spawn(install.wine,
+        // Spawned through a shell with a *file* redirect, not Foundation.Process pipes.
+        // 2026-08-19: after the wrapper moved to the x10, every game launched the old way died
+        // one second after "Connected to server!" — while a byte-identical spawn (same exe,
+        // args, cwd, and the full 58-variable environment, verified via last-spawn.txt) from a
+        // shell with stdout on a file ran to character select every single time. Sidecar off,
+        // wineserver stopped, strays killed — the only surviving difference was how Foundation
+        // wires the child. So launch the way that demonstrably works and tail the file for the
+        // log pane.
+        spawnViaShell(install.wine,
               args: [install.gameDirWine + "\\Ashita-cli.exe", profile],
               env: env,
               cwd: install.gameDir) { [weak self] code in
@@ -473,6 +481,13 @@ final class Runner: ObservableObject {
     /// because Ashita-cli connects to whatever socket file it finds rather than starting fresh.
     /// This app is the only wine user on the machine, so clearing all of them here is safe.
     private static func cleanStaleWineSockets() {
+        // Only when no wineserver is alive: deleting the socket dir of a *live* server (one the
+        // user's own manual wine session started, say) orphans every process attached to it.
+        let chk = Process()
+        chk.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        chk.arguments = ["-x", "wineserver"]
+        chk.standardOutput = Pipe(); chk.standardError = Pipe()
+        if (try? chk.run()) != nil { chk.waitUntilExit(); if chk.terminationStatus == 0 { return } }
         let dir = URL(fileURLWithPath: "/tmp/.wine-\(getuid())")
         guard let kids = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
         else { return }
@@ -492,6 +507,52 @@ final class Runner: ObservableObject {
         try? k.run()
     }
 
+    /// See the call site in `launch`: the game must be started the way a shell starts it.
+    /// stdout/stderr go to a temp file that a DispatchSource tails into the log pane, so the
+    /// child never holds a Foundation pipe. The tail keeps reading until the file stops growing
+    /// *and* the game is gone, because horizon-loader outlives the injector this spawns.
+    private func spawnViaShell(_ exe: URL, args: [String], env: [String: String], cwd: URL,
+                               done: @escaping (Int32) -> Void) {
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ffxi-on-mac-game-\(getpid()).log")
+        FileManager.default.createFile(atPath: out.path, contents: nil)
+        let quoted = ([exe.path] + args).map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+            .joined(separator: " ")
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "exec \(quoted) >> '\(out.path)' 2>&1"]
+        p.currentDirectoryURL = cwd
+        var e = ProcessInfo.processInfo.environment
+        for (k, v) in env { e[k] = v }
+        p.environment = e
+        p.terminationHandler = { pr in
+            Task { @MainActor in done(pr.terminationStatus) }
+        }
+        // Tail the file: poll is plenty (the pane is human-read), and unlike a pipe it cannot
+        // block the writer.
+        let handle = try? FileHandle(forReadingFrom: out)
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.schedule(deadline: .now() + 0.3, repeating: 0.3)
+        timer.setEventHandler { [weak self] in
+            guard let d = try? handle?.read(upToCount: 1 << 16), !d.isEmpty,
+                  let s = String(data: d, encoding: .utf8) else { return }
+            Task { @MainActor in self?.appendChunk(s) }
+        }
+        timer.resume()
+        tailTimer?.cancel()
+        tailTimer = timer
+        do {
+            try p.run()
+            proc = p
+        } catch {
+            appendLine("!! failed to start \(exe.path): \(error.localizedDescription)")
+            timer.cancel()
+            done(-1)
+        }
+    }
+
+    private var tailTimer: DispatchSourceTimer?
+
     private func spawn(_ exe: URL, args: [String], env: [String: String], cwd: URL,
                        done: @escaping (Int32) -> Void) {
         let p = Process()
@@ -501,7 +562,6 @@ final class Runner: ObservableObject {
         var e = ProcessInfo.processInfo.environment
         for (k, v) in env { e[k] = v }
         p.environment = e
-
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = pipe
