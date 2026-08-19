@@ -200,3 +200,26 @@ Wings-Era). Those generated credentials, not the website login, go in the launch
 Launcher change (32eb3c8): the account fields now recall each world's last-used login on
 world switch (`Credentials.username(forWorld:)`, saved on Play), so the CatsEye game account
 and the HorizonXI account no longer fight over one field.
+
+## 2026-08-19 (later still) — Gaia XI client fully installed; blocked at credentials
+
+Full integration done without their Electron launcher:
+- Their launcher zip (260 MB, needs site login — fetched via Daniel's browser session) unpacks a
+  complete Ashita 4.3.1.2 client skeleton incl. `bootloader/gxiloader.exe` (their LSB-2.0.0 fork)
+  and `config/boot/GaiaXI.ini` (`file = .\bootloader\gxiloader.exe`, `--server play.gaiaxi.com`).
+- The game data is a plain 8 GB zip on their CDN: 
+  `https://gaiaxi.evenmonkeys.workers.dev/install/SquareEnix.zip` (no auth!) → extracted into the
+  client folder. Their launcher APIs: `gaiaxi.com/api/v2/{server_address,patch_version,
+  launcher_version,approved_addons,approved_plugins}.json`. **Gotcha:** patch_version's zip URL
+  (`patch_2026_06_07_4.zip`) 404s on the CDN — patch presumed folded into the launcher zip.
+- Install lives at `/Volumes/x10/Video Games/Mac/FFXI/GaiaXI/GaiaXI`, symlinked as
+  `prefix10 drive_c/Games/GaiaXI`; world dataPath + bootProfile (GaiaXI.ini) wired; Gaia's
+  API-published addon allowlist enforced (170+24).
+- Unattended `--play --world "Gaia XI"` runs the full chain: their gxiloader resolves
+  play.gaiaxi.com:54231, TLS ok — **server rejects the login** ("Bad json reply from remote" =
+  their fork's error path replies an old-style single byte; a direct protocol probe with the same
+  stored credentials returns 0x02 LOGIN_ERROR for login AND create, all case variants).
+- So the machine side is done end-to-end; the block is the credential pair itself. Website login
+  works in-browser, but the game auth rejects it. Open question for Daniel: is the game password
+  separate from the site password (edit.xi bounced back to the account landing page, so it could
+  not be checked), or was a typo stored? Their Discord is the support channel.

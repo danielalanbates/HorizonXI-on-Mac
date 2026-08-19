@@ -140,7 +140,7 @@ struct Server: Codable, Identifiable, Hashable {
                installNote: "FFEra's own installer (5.5 GB from their Google Drive): full client, Ashita and Windower. It runs inside the wrapper; install into C:\\Games\\FFEra. Accounts: ffera.com › Register."),
         // play.gaiaxi.com verified 2026-08-19: resolves, LSB auth port 54231 open, answers the
         // standard xiloader TLS/JSON login (bad-credential probe returned LOGIN_ERROR).
-        Server(name: "Gaia XI", host: "play.gaiaxi.com", bootProfile: "gaiaxi.ini", verified: false,
+        Server(name: "Gaia XI", host: "play.gaiaxi.com", bootProfile: "GaiaXI.ini", verified: false,
                note: "Accounts are registered on gaiaxi.com.",
                era: "75 cap", population: 276,
                installURL: "https://gaiaxi.com/account/index.xi?return=downloadzip", installKind: .website,
