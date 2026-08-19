@@ -120,6 +120,62 @@ enum AddonPolicies {
         published: horizonPlugins + horizonAddons,
         source: "HorizonXI's approved list, horizonxi.info/addons (checked 2026-08-14)")
 
+    /// CatsEyeXI's approved list, transcribed from the server's own GitHub wiki
+    /// <https://github.com/CatsAndBoats/catseyexi/wiki/Approved-Addons-and-Plugins> on
+    /// 2026-08-19. Their rule is an allowlist ("if it is not mentioned then it is not
+    /// allowed... may result in account termination"), so everything else is hidden. Only the
+    /// Ashita section is transcribed — this launcher's CatsEye client is Ashita. The wiki also
+    /// notes Bellhop is strictly forbidden (it can crash their server); it is not on the list,
+    /// so the filter already hides it.
+    static let catseyeAddons = [
+        "autojoin", "blumon", "blusets", "chains", "checker", "clock", "debuff", "distance",
+        "drawdistance", "enternity", "fastcs", "filters", "find", "findall", "fps", "GlamourUI",
+        "hxui", "ibar", "macrofix", "mapdot", "mobdb", "npcit", "pbar", "petinfo", "points",
+        "pupsets", "recast", "rolltracker", "scoreboard", "sellnpc", "sexchange", "skillchains",
+        "sparks", "status", "targetlines", "ticker", "timers", "timestamp", "tparty", "xipivot",
+    ]
+
+    static let catseyePlugins = [
+        "ashitacast", "dashcam", "dats", "deeps", "duration", "hardwaremouse", "legacyac",
+        "lootwhore", "minimap", "multisend", "screenshot", "shorthand", "statustimers",
+        "watchexp",
+    ]
+
+    /// Not on the wiki, but loaded by `scripts/default.txt` as shipped by CatsEye's own
+    /// installer — the server distributing an addon in its client is as approved as it gets,
+    /// and filtering these out would force-disable the server's own defaults.
+    static let catseyeShipped = [
+        "hideconsole", "move", "customcolors", "nolock", "cexidats", "partyfinder",
+    ]
+
+    static let catseye = AddonPolicy.allowlist(
+        published: catseyeAddons + catseyePlugins + catseyeShipped,
+        source: "CatsEyeXI's approved list, github.com/CatsAndBoats/catseyexi wiki (checked 2026-08-19)")
+
+    /// FFEra's ruling list from the server's official wiki,
+    /// <https://ffera.fandom.com/wiki/What_Addons_%26_Plugins_Are_Allowed>, transcribed
+    /// 2026-08-19 — Ashita "Allowed" section only (this launcher runs Ashita). Their page adds
+    /// that anything not yet ruled on should be asked about before use, so the unfiltered rest
+    /// is hidden here too — the safe reading of "ask first" is "not yet allowed".
+    /// ("/fillmode command" on their page is a game command, not an addon; Bellhop is allowed
+    /// on FFEra even though CatsEye bans it — the lists really are per server.)
+    static let fferaAllowed = [
+        "Affinity", "Antiemote", "Ashitacast", "Autojoin", "Autorespond", "Battlemod",
+        "Bellhop", "Blumon", "Blusets", "CFHBlock", "Chamcham", "Changecall", "Chatmon",
+        "Checker", "Clock", "Crafty", "Craftmon", "Dashcam", "Dats", "Debuff", "Deeps",
+        "DrawDistance", "DressMe", "Duration", "Enternity", "Filterless", "Filters", "Find",
+        "Findall", "Filterscan", "GearLock", "Greed", "Guildwork", "HardwareMouse", "Ibar",
+        "IME", "IMGuistyle", "InstantAH", "ItemWatch", "ja0wait", "Links", "Logs", "Lootwhore",
+        "Lotomatic", "Macrofix", "Mapdot", "Minimap", "Minimapmon", "Multisend", "Packer",
+        "Pbar", "Petinfo", "Pointwatch", "Recast", "Repeat", "Repeater", "Servo", "Sexchange",
+        "Shorthand", "Singlerace", "Status", "Statustimers", "STFU", "Synplicity", "WatchEXP",
+        "Zoom",
+    ]
+
+    static let ffera = AddonPolicy.allowlist(
+        published: fferaAllowed,
+        source: "FFEra's ruling list, ffera.fandom.com wiki (checked 2026-08-19)")
+
     /// A world running on this Mac with one player in it. There is nobody to be fair to and
     /// nobody to enforce anything, so nothing is filtered.
     static let localWorld = AddonPolicy.unrestricted(
@@ -145,6 +201,12 @@ enum AddonPolicies {
         if let live = fetched[server.name] { return live }
         switch server.name {
         case "HorizonXI": return horizon
+        case "CatsEyeXI": return catseye
+        case "FFEra": return ffera
+        // Eden publishes its rules only in its Discord's rules channel; Supernova, ValhallaXI,
+        // OmicronXI, Gaia XI and Tabula Rasa XI publish none anywhere this project could find
+        // (checked 2026-08-19). They stay .unknown — the addon screen shows everything and says
+        // so in warning colour, which is the honest failure mode (see docs/ADDON-POLICY.md).
         default: return .unknown
         }
     }

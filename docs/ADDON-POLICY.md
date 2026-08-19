@@ -27,8 +27,11 @@ Currently sourced:
 | server | policy | source |
 | --- | --- | --- |
 | HorizonXI | allowlist, 5 plugins + 153 addons | <https://horizonxi.info/addons>, the list HorizonXI's own wiki points players at (checked 2026-08-14) |
+| CatsEyeXI | allowlist, 40 addons + 14 plugins + 6 shipped-by-installer | <https://github.com/CatsAndBoats/catseyexi/wiki/Approved-Addons-and-Plugins> (checked 2026-08-19); Ashita section only. The six extras (`hideconsole move customcolors nolock cexidats partyfinder`) are loaded by the `scripts/default.txt` their own installer ships — filtering them would force-disable the server's defaults |
+| FFEra | allowlist, 64 addons | <https://ffera.fandom.com/wiki/What_Addons_%26_Plugins_Are_Allowed>, their official wiki (checked 2026-08-19); Ashita "Allowed" section. Their "ask before using anything unlisted" is read as not-yet-allowed |
 | Local server | unrestricted | it is your own world |
-| everything else | unknown | not sourced |
+| Eden | unknown | rules live only in their Discord's rules channel — nothing fetchable to cite |
+| Supernova, ValhallaXI, OmicronXI, Gaia XI, Tabula Rasa XI | unknown | no published list found anywhere (checked 2026-08-19) |
 
 `horizonxi.com/players/Addons` returns 403 to anything that is not a browser, which is why the
 `.info` mirror is the cited source. Re-check both before a release; names are stored verbatim as
