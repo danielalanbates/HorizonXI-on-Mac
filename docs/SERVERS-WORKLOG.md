@@ -223,3 +223,17 @@ Full integration done without their Electron launcher:
   works in-browser, but the game auth rejects it. Open question for Daniel: is the game password
   separate from the site password (edit.xi bounced back to the account landing page, so it could
   not be checked), or was a typo stored? Their Discord is the support channel.
+
+## 2026-08-19 (evening) — Gaia XI BOOTS to its title screen (manual pathway)
+
+The credential wall was a typo; re-entered password logs in. The remaining instant-exit
+("Closing…" 1s after login, Ashita UninstallAshita(204)) turned out to be **renderer-specific**:
+run manually from the client folder with no overrides — `cd GaiaXI/GaiaXI && wine Ashita-cli.exe
+GaiaXI.ini`, which lands on wined3d/OpenGL — the client boots to Gaia's title screen + Terms
+dialog (~29fps, screenshot in session). Through the launcher's normal DXVK/d3d8to9 pathway the
+same client dies at boot. Client itself is current: per-file patcher (`gaia_patch.py`, next to
+the install) reproduces their launcher's manifest+sha256 patch flow — 73 stale files fixed, 0
+failures. Their patch_version.json zip URL is dead; `patch/manifest.json` is the real system.
+
+TODO: make Play produce this launch for Gaia (bisect env/DXVK; per-world renderer fallback),
+fix the --args-no-window bug, re-verify HorizonXI/CatsEye.
