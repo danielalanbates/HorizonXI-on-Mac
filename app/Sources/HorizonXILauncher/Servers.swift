@@ -217,6 +217,10 @@ final class ServerStore: ObservableObject {
                 // Not the user's to edit, and an old servers.json predates the flag entirely.
                 out[i].local = b.local
                 if b.local { out[i].host = b.host }
+                // A stored blank host means the user never set one — adopt a host this project
+                // has since sourced (Gaia XI shipped blank until 2026-08-19). A user-typed host
+                // is never overwritten.
+                if out[i].host.isEmpty, !b.host.isEmpty { out[i].host = b.host }
                 // How a world's client is fetched is this project's research, refreshed each
                 // release (URLs go stale); it is not something the user edits.
                 out[i].installURL = b.installURL; out[i].installKind = b.installKind; out[i].installNote = b.installNote
