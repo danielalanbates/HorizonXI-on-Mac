@@ -176,6 +176,48 @@ enum AddonPolicies {
         published: fferaAllowed,
         source: "FFEra's ruling list, ffera.fandom.com wiki (checked 2026-08-19)")
 
+    /// Gaia XI's approved lists, fetched from the server's own launcher API on 2026-08-19:
+    /// <https://gaiaxi.com/api/v2/approved_addons.json> and `approved_plugins.json` — the same
+    /// JSON their launcher's Extensions screen is built from, so this is the authoritative
+    /// allowlist. Their guides page: unlisted addons can be requested on their Discord.
+    static let gaiaAddons = [
+        "Focuser", "affinity", "allmaps", "antiemote", "aspect", "att", "autofps", "autojoin",
+        "autologin", "autorespond", "balloon", "barfiller", "battlemod", "bigmode", "blucheck",
+        "blumon", "blusets", "boussole", "butterfeet", "calc", "casper", "cbind", "cfhblock",
+        "chains", "chaintimer", "chamcham", "changecall", "chatfix", "chatmon", "checker",
+        "clammy", "cleancs", "clearpartybars", "clock", "clockvana", "config", "cosplay",
+        "craftmon", "crosshair", "ctimers", "currenttime", "customhud", "customtarget", "debuff",
+        "digdig", "distance", "dkpbids", "dontdropthesoap", "drawdistance", "emotes",
+        "enemybuffs", "enternity", "equipmon", "equipviewer", "eventtracker", "expmon", "fadeout",
+        "fastcs", "fastswap", "filterless", "filters", "filterscan", "find", "fishaid",
+        "fishinginfo", "fps", "freemem", "gearfinder", "glamourui", "hgather", "hideconsole",
+        "hideobs", "hideparty", "hideui", "hitpoints", "hticks", "hush", "hxiclam", "hxifish",
+        "hxui", "ibar", "ime", "imguistyle", "instantah", "instantchat", "inventorycounter",
+        "inventorytracker", "invmon", "itemwatch", "libs", "links", "logger", "logincmd", "logs",
+        "lootz", "lschat", "luashitacast", "lugear", "macrofix", "macromaster", "mapdot", "me",
+        "meteorologist", "metrics", "minimap-helper", "minimapmon", "mipmap", "mobdb",
+        "mountmaster", "mountmuzzle", "move", "ninjatool", "nocombat", "nolock", "nomount",
+        "noname", "packrat", "parse", "partybuffs", "pbar", "peekaboo", "petinfo", "petme",
+        "playerinfo", "points", "pricecheck", "pupsets", "rcheck", "recast", "renamer", "rest",
+        "rolltracker", "rsvp", "scoreboard", "sexchange", "simplelog", "singlerace", "skillchain",
+        "skillchains", "status", "statustimers", "stfu", "targetlines", "tcrossbars", "thotbar",
+        "ticker", "timers", "timestamp", "tokens", "tparty", "tracker", "trainmon", "translataru",
+        "treasurepool", "trimspells", "truesight", "ttimers", "watchdog", "whogot", "xicamera",
+        "xichats", "xiui", "xivbar", "xivhotbar", "xivparty", "zonelines", "zonename",
+        "zonetimer", "zoom",
+    ]
+
+    static let gaiaPlugins = [
+        "addons", "crossbar", "deeps", "discordrpc", "duration", "findall", "gbinder",
+        "gearlock", "hardwaremouse", "legacyac", "lootwhore", "minimap", "multisend",
+        "nameplate", "packetflow", "pivot", "screenshot", "sequencer", "shorthand", "stylist",
+        "thirdparty", "toon", "watchexp", "xipivot",
+    ]
+
+    static let gaia = AddonPolicy.allowlist(
+        published: gaiaAddons + gaiaPlugins,
+        source: "Gaia XI's approved lists, gaiaxi.com/api/v2 (checked 2026-08-19)")
+
     /// A world running on this Mac with one player in it. There is nobody to be fair to and
     /// nobody to enforce anything, so nothing is filtered.
     static let localWorld = AddonPolicy.unrestricted(
@@ -203,6 +245,7 @@ enum AddonPolicies {
         case "HorizonXI": return horizon
         case "CatsEyeXI": return catseye
         case "FFEra": return ffera
+        case "Gaia XI": return gaia
         // Eden publishes its rules only in its Discord's rules channel; Supernova, ValhallaXI,
         // OmicronXI, Gaia XI and Tabula Rasa XI publish none anywhere this project could find
         // (checked 2026-08-19). They stay .unknown — the addon screen shows everything and says
