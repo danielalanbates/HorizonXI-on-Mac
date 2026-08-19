@@ -187,3 +187,16 @@ Automated creation attempts, for the record:
 
 Once an account named like the `--user` in `catseyexi.ini` exists (or the launcher's account
 field is updated), Play should reach character select with no further work.
+
+## 2026-08-19 (later) — CatsEye login succeeded; "Valid Content ID not found" = no character yet
+
+Registration on catseyexi.com worked and the loader logged in ("Successfully logged in as
+danielalanbates!") but the client stops at **"Valid Content ID not found."** Per CatsEye's own
+download page this means no character exists yet: characters are created on the **website
+dashboard** (Login → Create Character → pick a game mode), which then issues **separate game
+account credentials** (one game account per game mode — Accelerated / Crystal Warrior /
+Wings-Era). Those generated credentials, not the website login, go in the launcher.
+
+Launcher change (32eb3c8): the account fields now recall each world's last-used login on
+world switch (`Credentials.username(forWorld:)`, saved on Play), so the CatsEye game account
+and the HorizonXI account no longer fight over one field.
