@@ -163,3 +163,27 @@ next release's tag must exceed the installed `CFBundleShortVersionString` or it 
 in a loop — `scripts/package.sh` reads the version from the bundle, so cut the release as **v2.7**
 (`HXI_SIGN_ID=<hash> ./scripts/package.sh` → notarized `dist/FFXI-on-Mac-2.7.dmg` →
 `gh release create v2.7 …`). `/Applications` reinstalled as 2.7 so it won't offer the older 2.6.
+
+## 2026-08-19 — CatsEyeXI "Play failed" root cause: no account (creation is server-disabled)
+
+The 2026-08-15 client-version wall is GONE — the CatsEye install (`prefix10`,
+`C:\Games\CatsEyeXI\catseyexi-client`, loader `Ashita/bootloader/pol.exe` = LSB xiloader 2.0.1)
+connects, TLS-handshakes, and reaches auth fine. The failure is simply
+`Failed to login. Invalid username or password.`: the stored credentials are HorizonXI accounts,
+and LSB accounts are **per server** — no CatsEye account exists yet.
+
+Automated creation attempts, for the record:
+- xiloader's TUI (FTXUI) renders on a pty but consumes **no** input under our wine — arrows,
+  tab, digits, and SGR mouse clicks all dead (`scratchpad cexi_create*.py`, archived in
+  `archive/catseye-account-2026-08-19/`). Menu-driving is not a pathway.
+- `--email` does not switch xiloader to create mode; it autologs-in.
+- The auth protocol is small: **JSON over TLS to server.catseyexi.com:54231**, e.g.
+  `{"command":32,"username":…,"password":…,"version":[2,0,1]}` (`login_cmd::LOGIN_CREATE=0x20`;
+  omit `version` and you get "xiloader too old… reported 0.0.0"). The server answered
+  `{"result":8}` = `LOGIN_ERROR_CREATE_DISABLED` — **account creation is disabled at the login
+  server**. Source: `src/login/auth_session.cpp` in CatsAndBoats/catseyexi.
+- Registration is web-only: **https://www.catseyexi.com/register** (Next.js SPA). Account
+  creation + password entry is a human step, not an automation one.
+
+Once an account named like the `--user` in `catseyexi.ini` exists (or the launcher's account
+field is updated), Play should reach character select with no further work.
