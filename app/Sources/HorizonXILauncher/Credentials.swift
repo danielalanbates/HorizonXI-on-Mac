@@ -11,6 +11,18 @@ enum Credentials {
         set { UserDefaults.standard.set(newValue, forKey: "account.user") }
     }
 
+    // Accounts are per server on LandSandBoat worlds, so remember which account name was last
+    // used on each world and recall it when the user switches back. Falls back to the global
+    // last-used name so existing installs keep their filled-in field.
+    static func username(forWorld world: String) -> String {
+        UserDefaults.standard.string(forKey: "account.user.\(world)") ?? username
+    }
+
+    static func setUsername(_ name: String, forWorld world: String) {
+        username = name
+        UserDefaults.standard.set(name, forKey: "account.user.\(world)")
+    }
+
     static var remember: Bool {
         get { UserDefaults.standard.bool(forKey: "account.remember") }
         set { UserDefaults.standard.set(newValue, forKey: "account.remember") }

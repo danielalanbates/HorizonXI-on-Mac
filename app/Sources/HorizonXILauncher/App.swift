@@ -109,6 +109,9 @@ struct ContentView: View {
             if store.selected?.local == true { local.refresh() }
             // Off the main actor out of habit from when this was a Keychain read that could
             // block on a system prompt (see Credentials.swift for why it no longer is).
+            if let name = store.selected?.name, store.selected?.local != true {
+                user = Credentials.username(forWorld: name)
+            }
             guard remember, !user.isEmpty else { return }
             let account = user
             let install = selected
@@ -128,6 +131,12 @@ struct ContentView: View {
         }
         .onChange(of: store.selectedID) { _ in
             if store.selected?.local == true { local.refresh() }
+            // Recall the account last used on this world — accounts are per server, so the
+            // HorizonXI login is wrong the moment CatsEye (or any other world) is picked.
+            if let name = store.selected?.name, store.selected?.local != true {
+                user = Credentials.username(forWorld: name)
+                pass = remember ? Credentials.password(for: user) : ""
+            }
             // The preflight checks are per world now (each has its own game folder): CatsEye's
             // "no client" verdict must not keep Play grey after switching back to HorizonXI.
             recheck()
@@ -1174,7 +1183,7 @@ struct ContentView: View {
         }
         notice = ""
         updateChecked = false
-        Credentials.username = user
+        Credentials.setUsername(user, forWorld: store.selected?.name ?? "")
         Credentials.remember = remember
         if remember { Credentials.savePassword(pass, for: user) }
         else { Credentials.deletePassword(for: user) }
