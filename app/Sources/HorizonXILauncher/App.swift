@@ -153,10 +153,17 @@ struct ContentView: View {
         // Doing it on the main thread means the window never appears at all — which looked
         // exactly like the app failing to launch. Scan off the main actor and fill the UI in.
         .task {
-            await refreshAsync()
-            // `open -a "FFXI on Mac" --args --play [--world <name>]`: press Play as soon as the
-            // install is known. For Shortcuts/Stream Deck users, and for this project's own
-            // unattended tests (see docs/SERVERS-WORKLOG.md).
+            // `--play` used to wait for the full volume scan below. After the game data moved
+            // to the x10 (2.4 TB, spinning), that scan can run for many minutes, and the
+            // launcher sat with no window and no log line — "it says it's running but it's
+            // not". The remembered install is enough to play with; the scan only refreshes the
+            // picker. So: fast path first, Play immediately, full scan afterwards.
+            if selected == nil, let remembered = Install.remembered() {
+                selected = remembered
+                installs = [remembered]
+            }
+            // Press Play as soon as the install is known. For Shortcuts/Stream Deck users, and
+            // for this project's own unattended tests (see docs/SERVERS-WORKLOG.md).
             let args = CommandLine.arguments
             if let w = args.firstIndex(of: "--world"), w + 1 < args.count,
                let srv = store.servers.first(where: { $0.name == args[w + 1] }) { store.select(srv) }
@@ -171,6 +178,7 @@ struct ContentView: View {
                     if !notice.isEmpty { runner.appendLine("!! \(notice)") }
                 }
             }
+            await refreshAsync()
             // Pick up each server's own published addon list, so the app's compiled-in snapshot
             // does not go stale between releases. Silent on failure -- offline must still launch.
             await feeds.refreshAsync(servers: store.servers)

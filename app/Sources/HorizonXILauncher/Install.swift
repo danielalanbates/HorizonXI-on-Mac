@@ -290,6 +290,11 @@ struct Install: Identifiable, Hashable {
     private static let skipNames: Set<String> = [
         "Backups.backupdb", "Photos", "Photos Library.photoslibrary", "Library", "node_modules",
         ".Trashes", "System Volume Information", "Movies", "Music", "Pictures",
+        // The x10 archive drive (2.4 TB, spinning): none of these hold a wrapper app, and
+        // walking them made discovery run for 10+ minutes after the game data moved there.
+        "LLMs", "Media", "Guidebooks", "Games & ROMs", "Emulators", "Operating Systems",
+        "SteamLibrary", "Software", "Thumb Drives Backup", "Daniel Backup", "Windows",
+        "SquareEnix", "ROM", "updates", "logs", "screenshots",
     ]
 
     private static func appsUnder(_ root: URL, depth: Int) -> [URL] {
