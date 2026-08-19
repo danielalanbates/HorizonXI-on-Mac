@@ -116,11 +116,12 @@ struct ContentView: View {
             let account = user
             let install = selected
             let profile = store.selected?.bootProfile ?? "horizonxi.ini"
+            let worldName = store.selected?.name ?? ""
             Task.detached(priority: .userInitiated) {
                 if let i = install {
                     Credentials.adoptPasswordFromProfile(user: account, install: i, profile: profile)
                 }
-                let found = Credentials.password(for: account)
+                let found = Credentials.password(for: account, world: worldName)
                 await MainActor.run { pass = found }
             }
         }
@@ -135,11 +136,18 @@ struct ContentView: View {
             // HorizonXI login is wrong the moment CatsEye (or any other world) is picked.
             if let name = store.selected?.name, store.selected?.local != true {
                 user = Credentials.username(forWorld: name)
-                pass = remember ? Credentials.password(for: user) : ""
+                pass = remember ? Credentials.password(for: user, world: name) : ""
             }
             // The preflight checks are per world now (each has its own game folder): CatsEye's
             // "no client" verdict must not keep Play grey after switching back to HorizonXI.
             recheck()
+        }
+        // Keep the players-online line current: on launch, whenever the world changes, and
+        // every two minutes while the window is open. The fetch is three tiny GETs and silent
+        // on failure, so this costs nothing when offline.
+        .task { await feeds.refreshPopulations() }
+        .onReceive(Timer.publish(every: 120, on: .main, in: .common).autoconnect()) { _ in
+            Task { await feeds.refreshPopulations() }
         }
         // Discovery walks /Volumes, and an external drive can make that take tens of seconds.
         // Doing it on the main thread means the window never appears at all — which looked
@@ -156,7 +164,7 @@ struct ContentView: View {
                 if selected == nil { runner.appendLine("!! --play: no install found yet") }
                 else if runner.running { runner.appendLine("!! --play: already running") }
                 else {
-                    if remember, !user.isEmpty, pass.isEmpty { pass = Credentials.password(for: user) }
+                    if remember, !user.isEmpty, pass.isEmpty { pass = Credentials.password(for: user, world: store.selected?.name ?? "") }
                     await recheckAsync()
                     runner.appendLine("==> --play: \(store.selected?.name ?? "?") as \(user.isEmpty ? "(no account)" : user)")
                     play()
@@ -190,6 +198,7 @@ struct ContentView: View {
                     .foregroundStyle(Vana.gold)
                 updateBanner
                 newsBanner
+                populationLine
             }
             .padding(.horizontal, 34).padding(.top, 34).padding(.bottom, 20)
 
@@ -224,7 +233,7 @@ struct ContentView: View {
                 } else {
                     Image(systemName: "questionmark.circle").font(.caption2)
                         .foregroundStyle(Vana.muted)
-                        .help("Untested here — set the login host before playing.")
+                        .help("This project has not logged into this server itself yet.")
                 }
             }
 
@@ -247,27 +256,13 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
 
-            if let s = store.selected, !s.verified {
-                VStack(alignment: .leading, spacing: 5) {
-                    TextField("login host", text: Binding(
-                        get: { s.host }, set: { var c = s; c.host = $0; store.update(c) }))
-                        .textFieldStyle(.roundedBorder).font(.caption2)
-                    HStack(spacing: 6) {
-                        TextField("boot profile .ini", text: Binding(
-                            get: { s.bootProfile }, set: { var c = s; c.bootProfile = $0; store.update(c) }))
-                            .textFieldStyle(.roundedBorder).font(.caption2)
-                        if !Server.builtins.contains(where: { $0.name == s.name }) {
-                            Button(role: .destructive) { store.remove(s) } label: {
-                                Image(systemName: "trash")
-                            }.buttonStyle(.borderless)
-                        }
-                    }
-                    Text(s.host.isEmpty
-                         ? "No login host set for \(s.name) — add it before playing."
-                         : "\(s.host) — untested by this project.")
-                        .font(.caption2).foregroundStyle(Vana.ember)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            // The host and boot-profile fields used to sit here for every unverified world,
+            // which read as something the player was expected to fill in. They now live under
+            // Setup & Diagnostics; only the one thing that actually blocks Play stays visible.
+            if let s = store.selected, !s.local, s.host.isEmpty {
+                Text("No login host set for \(s.name) — add it under Setup & Diagnostics.")
+                    .font(.caption2).foregroundStyle(Vana.ember)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         // A world other than HorizonXI with no folder of its own would be run out of HorizonXI's
         // files -- which is exactly what earns "The game's data has been updated" from CatsEye.
@@ -333,6 +328,20 @@ struct ContentView: View {
             }
         case .idle, .checking:
             EmptyView()
+        }
+    }
+
+    /// Live players-online for the selected world, under the news banner. Only shown when the
+    /// server publishes a counter (its own website's number); no counter, no line — never a 0.
+    @ViewBuilder
+    private var populationLine: some View {
+        if let name = store.selected?.name, let n = feeds.populations[name] {
+            HStack(spacing: 8) {
+                Circle().fill(Color.green.opacity(0.8)).frame(width: 6, height: 6)
+                Text("\(n.formatted()) players online now")
+                    .font(.callout).foregroundStyle(Vana.muted)
+            }
+            .padding(.top, 2)
         }
     }
 
@@ -868,6 +877,23 @@ struct ContentView: View {
 
             DisclosureGroup(isExpanded: $showDetails) {
                 VStack(alignment: .leading, spacing: 6) {
+                    if let s = store.selected, !s.local {
+                        Text("SERVER CONNECTION").font(.caption2).tracking(2).foregroundStyle(Vana.muted)
+                        TextField("login host", text: Binding(
+                            get: { s.host }, set: { var c = s; c.host = $0; store.update(c) }))
+                            .textFieldStyle(.roundedBorder).font(.caption2)
+                        HStack(spacing: 6) {
+                            TextField("boot profile .ini", text: Binding(
+                                get: { s.bootProfile }, set: { var c = s; c.bootProfile = $0; store.update(c) }))
+                                .textFieldStyle(.roundedBorder).font(.caption2)
+                            if !Server.builtins.contains(where: { $0.name == s.name }) {
+                                Button(role: .destructive) { store.remove(s) } label: {
+                                    Image(systemName: "trash")
+                                }.buttonStyle(.borderless)
+                            }
+                        }
+                        Divider()
+                    }
                     Toggle("Fast synchronisation (msync)", isOn: $perf.msync)
                     Toggle("Silence wine debug channels", isOn: $perf.silenceWineDebug)
                     Toggle("Keep awake (no App Nap)", isOn: $perf.disableAppNap)
@@ -1185,8 +1211,8 @@ struct ContentView: View {
         updateChecked = false
         Credentials.setUsername(user, forWorld: store.selected?.name ?? "")
         Credentials.remember = remember
-        if remember { Credentials.savePassword(pass, for: user) }
-        else { Credentials.deletePassword(for: user) }
+        if remember { Credentials.savePassword(pass, for: user, world: store.selected?.name ?? "") }
+        else { Credentials.savePassword("", for: user, world: store.selected?.name ?? "") }
 
         let server = store.selected ?? Server.builtins[0]
         guard !server.host.isEmpty else {

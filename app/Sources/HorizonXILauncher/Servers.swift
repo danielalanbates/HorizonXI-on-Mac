@@ -138,9 +138,10 @@ struct Server: Codable, Identifiable, Hashable {
                // default C:\Games\FFEra, stock xiloader. Registration is on their site.
                installURL: "https://drive.usercontent.google.com/download?id=1w2o3XH9jmeFF81kG07TUf8hP7cwo8tuD&export=download&confirm=t", installKind: .installerExe,
                installNote: "FFEra's own installer (5.5 GB from their Google Drive): full client, Ashita and Windower. It runs inside the wrapper; install into C:\\Games\\FFEra. Accounts: ffera.com › Register."),
-        Server(name: "Gaia XI", host: "", bootProfile: "gaiaxi.ini", verified: false,
-               note: "No login host published anywhere this project could find — get it from "
-                     + "Gaia XI's own launcher.",
+        // play.gaiaxi.com verified 2026-08-19: resolves, LSB auth port 54231 open, answers the
+        // standard xiloader TLS/JSON login (bad-credential probe returned LOGIN_ERROR).
+        Server(name: "Gaia XI", host: "play.gaiaxi.com", bootProfile: "gaiaxi.ini", verified: false,
+               note: "Accounts are registered on gaiaxi.com.",
                era: "75 cap", population: 276,
                installURL: "https://gaiaxi.com/account/index.xi?return=downloadzip", installKind: .website,
                installNote: "Gaia XI's launcher zip is behind their site login (register there first). Save it, then Run installer… — their launcher.exe downloads the whole game into C:\\Games\\Gaia XI."),
@@ -224,10 +225,12 @@ final class ServerStore: ObservableObject {
         return out
     }
 
-    /// HorizonXI first because Daniel asked for it and because it is the only verified entry;
-    /// everything else by community size, largest first. The numbers stay out of the UI.
+    /// HorizonXI first because Daniel asked for it; everything else by community size, largest
+    /// first — except the local server, which Daniel wants last: it is a tool, not a community,
+    /// and its pinned fake population was floating it to second place. Numbers stay out of the UI.
     var ordered: [Server] {
         servers.sorted {
+            if $0.local != $1.local { return $1.local }
             if $0.pinned != $1.pinned { return $0.pinned }
             if $0.population != $1.population { return $0.population > $1.population }
             return $0.name < $1.name

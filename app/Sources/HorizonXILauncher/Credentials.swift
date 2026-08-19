@@ -60,14 +60,25 @@ enum Credentials {
                                                ofItemAtPath: storeURL.path)
     }
 
-    static func savePassword(_ password: String, for user: String) {
+    /// Passwords are keyed per world AND user, because the same account name on two servers is
+    /// two different accounts with two different passwords — keying on the name alone let a
+    /// CatsEye login overwrite the HorizonXI password for "danielalanbates" (2026-08-19). The
+    /// bare-username key survives as a read fallback for stores written before this.
+    private static func key(_ user: String, _ world: String) -> String {
+        world.isEmpty ? user : "\(world)|\(user)"
+    }
+
+    static func savePassword(_ password: String, for user: String, world: String = "") {
         var m = load()
-        if password.isEmpty { m.removeValue(forKey: user) } else { m[user] = password }
+        if password.isEmpty { m.removeValue(forKey: key(user, world)) }
+        else { m[key(user, world)] = password }
         store(m)
     }
 
-    static func password(for user: String) -> String {
-        if let p = load()[user], !p.isEmpty { return p }
+    static func password(for user: String, world: String = "") -> String {
+        let m = load()
+        if let p = m[key(user, world)], !p.isEmpty { return p }
+        if let p = m[user], !p.isEmpty { return p }
         return ""
     }
 

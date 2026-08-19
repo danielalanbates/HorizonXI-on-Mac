@@ -45,6 +45,41 @@ final class ServerFeeds: ObservableObject {
     @Published private(set) var requiredClients: [String: String] = [:]
     /// Newest HorizonXI marketing version per api.horizonxi.com/api/v1/launcher/install-game.
     @Published private(set) var horizonLatest: String?
+    /// Server name -> players online right now, from the server's own public counter. Only the
+    /// servers that publish one appear here; absence means "don't show a number", never zero.
+    @Published private(set) var populations: [String: Int] = [:]
+
+    /// Where each server publishes its live online count, and how the payload reads. All three
+    /// are the same numbers the servers' own websites display (verified 2026-08-19); nothing is
+    /// scraped from HTML, so a redesign of their pages cannot silently break this.
+    private static let populationSources: [(server: String, url: String, jsonKey: String?)] = [
+        // Plain integer body, the counter horizonxi.com shows.
+        ("HorizonXI", "https://api.horizonxi.com/api/v1/misc/status", nil),
+        // {"online":true,"playerCount":647,...} — catseyexi.com's homepage counter.
+        ("CatsEyeXI", "https://www.catseyexi.com/api/online-count", "playerCount"),
+        // Plain integer body — edenxi.com's "active" counter.
+        ("Eden", "https://edenxi.com/api/v1/misc/active", nil),
+    ]
+
+    /// Fetch every published online counter. Cheap (three tiny GETs), silent on failure, and a
+    /// stale number is worse than none: a failed fetch removes the entry rather than keeping it.
+    func refreshPopulations() async {
+        for src in Self.populationSources {
+            var count: Int?
+            if let url = URL(string: src.url),
+               let (data, resp) = try? await URLSession.shared.data(from: url),
+               (resp as? HTTPURLResponse)?.statusCode == 200 {
+                if let key = src.jsonKey {
+                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    count = json?[key] as? Int
+                } else {
+                    count = Int(String(decoding: data, as: UTF8.self)
+                        .trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+            }
+            populations[src.server] = count
+        }
+    }
 
     private static var cacheURL: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
