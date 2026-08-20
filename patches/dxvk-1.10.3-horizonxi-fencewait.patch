@@ -376,7 +376,7 @@ index c3bc413..ba918ae 100644
  #include "../dxvk/dxvk_cs.h"
  
 diff --git a/src/d3d9/d3d9_common_texture.h b/src/d3d9/d3d9_common_texture.h
-index e52ead2..cf7a5e5 100644
+index e52ead2..a40f8d7 100644
 --- a/src/d3d9/d3d9_common_texture.h
 +++ b/src/d3d9/d3d9_common_texture.h
 @@ -1,5 +1,8 @@
@@ -388,6 +388,42 @@ index e52ead2..cf7a5e5 100644
  #include "d3d9_format.h"
  #include "d3d9_util.h"
  #include "d3d9_caps.h"
+@@ -443,6 +446,26 @@ namespace dxvk {
+      * \param [in] Subresource Subresource index
+      * \param [in] Seq Sequence number
+      */
++    /**
++     * \brief Early read-back fence (D3D9_RT_EARLY_FENCE)
++     *
++     * When the small visibility render target is unbound, the copy into its staging
++     * buffer is emitted and flushed immediately, and the submission carrying it is
++     * remembered here. The next Lock waits on that submission's fence directly and
++     * skips emitting a second copy. Consumed (cleared) by the lock.
++     */
++    void SetEarlyReadback(Rc<DxvkCommandList> List) {
++      m_earlyReadback = std::move(List);
++    }
++
++    Rc<DxvkCommandList> TakeEarlyReadback() {
++      return std::exchange(m_earlyReadback, nullptr);
++    }
++
++    bool HasEarlyReadback() const {
++      return m_earlyReadback != nullptr;
++    }
++
+     void TrackMappingBufferSequenceNumber(UINT Subresource, uint64_t Seq) {
+       if (Subresource < m_seqs.size())
+         m_seqs[Subresource] = Seq;
+@@ -477,6 +500,8 @@ namespace dxvk {
+     D3D9SubresourceArray<
+       uint64_t>                   m_seqs = { };
+ 
++    Rc<DxvkCommandList>           m_earlyReadback;
++
+     D3D9_VK_FORMAT_MAPPING        m_mapping;
+ 
+     bool                          m_shadow; //< Depth Compare-ness
 diff --git a/src/d3d9/d3d9_cursor.h b/src/d3d9/d3d9_cursor.h
 index 32645d2..f729b8f 100644
 --- a/src/d3d9/d3d9_cursor.h
@@ -402,7 +438,7 @@ index 32645d2..f729b8f 100644
  
  namespace dxvk {
 diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
-index 734a7a0..1f3107b 100644
+index 734a7a0..db7a47c 100644
 --- a/src/d3d9/d3d9_device.cpp
 +++ b/src/d3d9/d3d9_device.cpp
 @@ -1,5 +1,8 @@
@@ -779,7 +815,7 @@ index 734a7a0..1f3107b 100644
      return PresentEx(
        pSourceRect,
        pDestRect,
-@@ -1237,6 +1589,29 @@ namespace dxvk {
+@@ -1237,6 +1589,98 @@ namespace dxvk {
        return D3DERR_INVALIDCALL;
  
      if (RenderTargetIndex == 0) {
@@ -805,11 +841,80 @@ index 734a7a0..1f3107b 100644
 +          }
 +        }
 +      }
++      // D3D9_RT_EARLY_FENCE=<max edge in px>: when the visibility render target is
++      // unbound, emit its image->staging copy NOW and flush, so the copy rides in the
++      // same submission as the pass that produced it (pending depth 1 at the lock,
++      // ~0.7 ms) instead of a second lock-time submission behind it (depth 2, ~2 ms —
++      // fence-depth probe, 2026-08-20). The submission is remembered on the texture;
++      // the next Lock waits its fence and skips emitting a second copy. Bytes are
++      // identical to the slow path: the pattern is strictly render -> unbind -> lock
++      // (54k-event interleave probe), nothing touches the surface in between.
++      static const uint32_t rtEarlyFenceMaxEdge = [] {
++        const char* v = std::getenv("D3D9_RT_EARLY_FENCE");
++        return (v != nullptr && *v != '\0') ? uint32_t(std::atoi(v)) : 0u;
++      }();
++      if (rtEarlyFenceMaxEdge != 0) {
++        auto* prev = m_state.renderTargets[0].ptr();
++        if (prev != nullptr && prev != rt) {
++          auto* prevTex = prev->GetCommonTexture();
++          if (prevTex != nullptr) {
++            const auto* pd = prevTex->Desc();
++            Rc<DxvkImage>  img = prevTex->GetImage();
++            Rc<DxvkBuffer> buf = prevTex->GetBuffer(0);
++            if (pd->Pool == D3DPOOL_DEFAULT && (pd->Usage & D3DUSAGE_RENDERTARGET)
++             && pd->Width <= rtEarlyFenceMaxEdge && pd->Height <= rtEarlyFenceMaxEdge
++             && img != nullptr && buf != nullptr
++             && img->info().sampleCount == VK_SAMPLE_COUNT_1_BIT
++             && !IsDepthFormat(pd->Format)) {
++              auto subres = prevTex->GetSubresourceFromIndex(VK_IMAGE_ASPECT_COLOR_BIT, 0);
++              auto layers = vk::makeSubresourceLayers(subres);
++              VkExtent3D extent = img->mipLevelExtent(0);
++              EmitCs([
++                cImageBuffer = buf,
++                cImage       = img,
++                cSubres      = layers,
++                cExtent      = extent
++              ] (DxvkContext* ctx) {
++                ctx->copyImageToBuffer(cImageBuffer, 0, 4, 0,
++                  cImage, cSubres, VkOffset3D { 0, 0, 0 }, cExtent);
++              });
++              TrackTextureMappingBufferSequenceNumber(prevTex, 0);
++              Flush();
++              // The CS thread must have processed the flush before the submission can be
++              // captured; an earlier capture waits an older fence = stale bytes.
++              SynchronizeCsThread(DxvkCsThread::SynchronizeAll);
++              prevTex->SetEarlyReadback(m_dxvkDevice->lastSubmittedList());
++            }
++          }
++        }
++      }
++      // Companion to D3D9_RT_IDENT_PROBE: log when a small RT is bound ("B") or unbound
++      // ("U"), so lock lines ("L", written at LockImage) can be interleaved with render
++      // passes. Decides whether per-frame lock dedup is sound.
++      static FILE* rtIdentProbe2 = [] () -> FILE* {
++        const char* v = std::getenv("D3D9_RT_IDENT_PROBE");
++        return (v != nullptr && *v != '\0') ? std::fopen(v, "a") : nullptr;
++      }();
++      if (rtIdentProbe2 != nullptr) {
++        auto logEvt = [&] (char kind, D3D9Surface* surf) {
++          if (surf == nullptr) return;
++          auto* t = surf->GetCommonTexture();
++          if (t == nullptr) return;
++          const auto* td = t->Desc();
++          if (td->Pool != D3DPOOL_DEFAULT || !(td->Usage & D3DUSAGE_RENDERTARGET)
++           || td->Width > 32 || td->Height > 32) return;
++          auto us = std::chrono::duration_cast<std::chrono::microseconds>(
++            std::chrono::steady_clock::now().time_since_epoch()).count();
++          std::fprintf(rtIdentProbe2, "%lld,%c,%p\n", (long long)us, kind, (void*)t);
++        };
++        logEvt('U', m_state.renderTargets[0].ptr());
++        logEvt('B', rt);
++      }
 +
        auto rtSize = rt->GetSurfaceExtent();
  
        D3DVIEWPORT9 viewport;
-@@ -1270,6 +1645,7 @@ namespace dxvk {
+@@ -1270,6 +1714,7 @@ namespace dxvk {
        return D3D_OK;
  
      // Do a strong flush if the first render target is changed.
@@ -817,7 +922,7 @@ index 734a7a0..1f3107b 100644
      FlushImplicit(RenderTargetIndex == 0 ? TRUE : FALSE);
      m_flags.set(D3D9DeviceFlag::DirtyFramebuffer);
  
-@@ -1390,6 +1766,7 @@ namespace dxvk {
+@@ -1390,6 +1835,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::EndScene() {
@@ -825,7 +930,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(!m_flags.test(D3D9DeviceFlag::InScene)))
-@@ -1410,6 +1787,7 @@ namespace dxvk {
+@@ -1410,6 +1856,7 @@ namespace dxvk {
            D3DCOLOR Color,
            float    Z,
            DWORD    Stencil) {
@@ -833,7 +938,7 @@ index 734a7a0..1f3107b 100644
      if (unlikely(!Count && pRects))
        return D3D_OK;
  
-@@ -1569,6 +1947,7 @@ namespace dxvk {
+@@ -1569,6 +2016,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetTransform(D3DTRANSFORMSTATETYPE State, const D3DMATRIX* pMatrix) {
@@ -841,7 +946,7 @@ index 734a7a0..1f3107b 100644
      return SetStateTransform(GetTransformIndex(State), pMatrix);
    }
  
-@@ -1605,6 +1984,7 @@ namespace dxvk {
+@@ -1605,6 +2053,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetViewport(const D3DVIEWPORT9* pViewport) {
@@ -849,7 +954,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(ShouldRecord()))
-@@ -1787,6 +2167,7 @@ namespace dxvk {
+@@ -1787,6 +2236,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value) {
@@ -857,7 +962,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      // D3D9 only allows reading for values 0 and 7-255 so we don't need to do anything but return OK
-@@ -2226,6 +2607,7 @@ namespace dxvk {
+@@ -2226,6 +2676,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetTexture(DWORD Stage, IDirect3DBaseTexture9* pTexture) {
@@ -865,7 +970,7 @@ index 734a7a0..1f3107b 100644
      if (unlikely(InvalidSampler(Stage)))
        return D3D_OK;
  
-@@ -2261,6 +2643,7 @@ namespace dxvk {
+@@ -2261,6 +2712,7 @@ namespace dxvk {
            DWORD                    Stage,
            D3DTEXTURESTAGESTATETYPE Type,
            DWORD                    Value) {
@@ -873,7 +978,7 @@ index 734a7a0..1f3107b 100644
      return SetStateTextureStageState(Stage, RemapTextureStageStateType(Type), Value);
    }
  
-@@ -2291,6 +2674,7 @@ namespace dxvk {
+@@ -2291,6 +2743,7 @@ namespace dxvk {
            DWORD               Sampler,
            D3DSAMPLERSTATETYPE Type,
            DWORD               Value) {
@@ -881,7 +986,7 @@ index 734a7a0..1f3107b 100644
      if (unlikely(InvalidSampler(Sampler)))
        return D3D_OK;
  
-@@ -2397,6 +2781,42 @@ namespace dxvk {
+@@ -2397,6 +2850,42 @@ namespace dxvk {
            D3DPRIMITIVETYPE PrimitiveType,
            UINT             StartVertex,
            UINT             PrimitiveCount) {
@@ -924,7 +1029,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2433,6 +2853,42 @@ namespace dxvk {
+@@ -2433,6 +2922,42 @@ namespace dxvk {
            UINT             NumVertices,
            UINT             StartIndex,
            UINT             PrimitiveCount) {
@@ -967,7 +1072,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2469,6 +2925,39 @@ namespace dxvk {
+@@ -2469,6 +2994,39 @@ namespace dxvk {
            UINT             PrimitiveCount,
      const void*            pVertexStreamZeroData,
            UINT             VertexStreamZeroStride) {
@@ -1007,7 +1112,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2522,6 +3011,39 @@ namespace dxvk {
+@@ -2522,6 +3080,39 @@ namespace dxvk {
            D3DFORMAT        IndexDataFormat,
      const void*            pVertexStreamZeroData,
            UINT             VertexStreamZeroStride) {
@@ -1047,7 +1152,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(m_state.vertexDecl == nullptr))
-@@ -2718,6 +3240,7 @@ namespace dxvk {
+@@ -2718,6 +3309,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetVertexDeclaration(IDirect3DVertexDeclaration9* pDecl) {
@@ -1055,7 +1160,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      D3D9VertexDecl* decl = static_cast<D3D9VertexDecl*>(pDecl);
-@@ -2762,6 +3285,7 @@ namespace dxvk {
+@@ -2762,6 +3354,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetFVF(DWORD FVF) {
@@ -1063,7 +1168,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (FVF == 0)
-@@ -2823,6 +3347,7 @@ namespace dxvk {
+@@ -2823,6 +3416,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetVertexShader(IDirect3DVertexShader9* pShader) {
@@ -1071,7 +1176,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      D3D9VertexShader* shader = static_cast<D3D9VertexShader*>(pShader);
-@@ -2888,6 +3413,7 @@ namespace dxvk {
+@@ -2888,6 +3482,7 @@ namespace dxvk {
            UINT   StartRegister,
      const float* pConstantData,
            UINT   Vector4fCount) {
@@ -1079,7 +1184,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      return SetShaderConstants<
-@@ -2979,6 +3505,7 @@ namespace dxvk {
+@@ -2979,6 +3574,7 @@ namespace dxvk {
            IDirect3DVertexBuffer9* pStreamData,
            UINT                    OffsetInBytes,
            UINT                    Stride) {
@@ -1087,7 +1192,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(StreamNumber >= caps::MaxStreams))
-@@ -3098,6 +3625,7 @@ namespace dxvk {
+@@ -3098,6 +3694,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetIndices(IDirect3DIndexBuffer9* pIndexData) {
@@ -1095,7 +1200,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      D3D9IndexBuffer* buffer = static_cast<D3D9IndexBuffer*>(pIndexData);
-@@ -3155,6 +3683,7 @@ namespace dxvk {
+@@ -3155,6 +3752,7 @@ namespace dxvk {
  
  
    HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetPixelShader(IDirect3DPixelShader9* pShader) {
@@ -1103,7 +1208,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      D3D9PixelShader* shader = static_cast<D3D9PixelShader*>(pShader);
-@@ -3224,6 +3753,7 @@ namespace dxvk {
+@@ -3224,6 +3822,7 @@ namespace dxvk {
      UINT   StartRegister,
      const float* pConstantData,
      UINT   Vector4fCount) {
@@ -1111,7 +1216,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      return SetShaderConstants <
-@@ -3892,8 +4422,13 @@ namespace dxvk {
+@@ -3892,8 +4491,13 @@ namespace dxvk {
      DxvkDeviceFeatures enabled = {};
  
      // Geometry shaders are used for some meta ops
@@ -1127,7 +1232,7 @@ index 734a7a0..1f3107b 100644
      enabled.extRobustness2.robustBufferAccess2 = supported.extRobustness2.robustBufferAccess2;
  
      enabled.extMemoryPriority.memoryPriority = supported.extMemoryPriority.memoryPriority;
-@@ -3921,7 +4456,10 @@ namespace dxvk {
+@@ -3921,7 +4525,10 @@ namespace dxvk {
      enabled.core.features.sampleRateShading = VK_TRUE;
      enabled.core.features.samplerAnisotropy = supported.core.features.samplerAnisotropy;
      enabled.core.features.shaderClipDistance = VK_TRUE;
@@ -1139,7 +1244,7 @@ index 734a7a0..1f3107b 100644
  
      // Ensure we support real BC formats and unofficial vendor ones.
      enabled.core.features.textureCompressionBC = VK_TRUE;
-@@ -4060,7 +4598,10 @@ namespace dxvk {
+@@ -4060,7 +4667,10 @@ namespace dxvk {
    bool D3D9DeviceEx::WaitForResource(
    const Rc<DxvkResource>&                 Resource,
          uint64_t                          SequenceNumber,
@@ -1151,7 +1256,7 @@ index 734a7a0..1f3107b 100644
      // Wait for the any pending D3D9 command to be executed
      // on the CS thread so that we can determine whether the
      // resource is currently in use or not.
-@@ -4079,6 +4620,7 @@ namespace dxvk {
+@@ -4079,6 +4689,7 @@ namespace dxvk {
          // still try to spin on `Map` until the resource is
          // idle, so we should flush pending commands
          FlushImplicit(FALSE);
@@ -1159,7 +1264,7 @@ index 734a7a0..1f3107b 100644
          return false;
        }
        else {
-@@ -4087,10 +4629,13 @@ namespace dxvk {
+@@ -4087,10 +4698,13 @@ namespace dxvk {
          Flush();
          SynchronizeCsThread(SequenceNumber);
  
@@ -1174,7 +1279,7 @@ index 734a7a0..1f3107b 100644
      return true;
    }
  
-@@ -4121,6 +4666,74 @@ namespace dxvk {
+@@ -4121,6 +4735,74 @@ namespace dxvk {
    }
  
  
@@ -1249,7 +1354,7 @@ index 734a7a0..1f3107b 100644
    HRESULT D3D9DeviceEx::LockImage(
              D3D9CommonTexture*      pResource,
              UINT                    Face,
-@@ -4128,6 +4741,7 @@ namespace dxvk {
+@@ -4128,6 +4810,7 @@ namespace dxvk {
              D3DLOCKED_BOX*          pLockedBox,
        const D3DBOX*                 pBox,
              DWORD                   Flags) {
@@ -1257,7 +1362,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      UINT Subresource = pResource->CalcSubresource(Face, MipLevel);
-@@ -4208,6 +4822,9 @@ namespace dxvk {
+@@ -4208,6 +4891,9 @@ namespace dxvk {
      DxvkBufferSliceHandle physSlice;
  
      if (Flags & D3DLOCK_DISCARD) {
@@ -1267,7 +1372,17 @@ index 734a7a0..1f3107b 100644
        // We do not have to preserve the contents of the
        // buffer if the entire image gets discarded.
        physSlice = pResource->DiscardMapSlice(Subresource);
-@@ -4303,11 +4920,83 @@ namespace dxvk {
+@@ -4233,7 +4919,8 @@ namespace dxvk {
+         std::memset(physSlice.mapPtr, 0, physSlice.length);
+       }
+       else if (!skipWait) {
+-        if (unlikely(needsReadback) && pResource->GetImage() != nullptr) {
++        if (unlikely(needsReadback) && pResource->GetImage() != nullptr
++         && !pResource->HasEarlyReadback()) {
+           Rc<DxvkImage> resourceImage = pResource->GetImage();
+ 
+           Rc<DxvkImage> mappedImage = resourceImage->info().sampleCount != 1
+@@ -4303,11 +4990,123 @@ namespace dxvk {
              }
            });
            TrackTextureMappingBufferSequenceNumber(pResource, Subresource);
@@ -1323,27 +1438,67 @@ index 734a7a0..1f3107b 100644
 +          && desc.Width  <= rtFenceMaxEdge
 +          && desc.Height <= rtFenceMaxEdge;
 +
++        // D3D9_RT_IDENT_PROBE=<path>: one line per small-RT lock — microsecond timestamp and
++        // the texture's identity. Answers whether the ~4 locks per frame hit one surface
++        // repeatedly (dedup-able: serve one result per frame) or four distinct surfaces
++        // (dedup needs per-texture caching or is pointless).
++        static FILE* rtIdentProbe = [] () -> FILE* {
++          const char* v = std::getenv("D3D9_RT_IDENT_PROBE");
++          return (v != nullptr && *v != '\0') ? std::fopen(v, "a") : nullptr;
++        }();
++        if (rtIdentProbe != nullptr && (smallRtFence || smallRtReadback)) {
++          auto us = std::chrono::duration_cast<std::chrono::microseconds>(
++            std::chrono::steady_clock::now().time_since_epoch()).count();
++          std::fprintf(rtIdentProbe, "%lld,L,%p\n", (long long)us, (void*)pResource);
++          std::fflush(rtIdentProbe);
++        }
++
 +        bool fenceSatisfied = false;
 +        if (smallRtFence && !smallRtReadback) {
 +          auto stallStart = std::chrono::steady_clock::now();
-+          // Get the copy onto the GPU: emit pending CS work and submit it.
-+          Flush();
-+          // Full CS sync, not just to the copy's sequence: the flush's own submission is
-+          // processed by the CS thread *after* the copy, and lastSubmittedList() must not be
-+          // captured before that submission is enqueued — an earlier capture waits an older
-+          // fence and could hand the game a stale read-back (exactly the NOWAIT bug).
-+          SynchronizeCsThread(DxvkCsThread::SynchronizeAll);
++          // With an early read-back pending (D3D9_RT_EARLY_FENCE), the copy was flushed
++          // when the render target was unbound — no lock-time flush needed, and the wait
++          // lands on a submission that is already executing.
++          Rc<DxvkCommandList> earlyPeek = pResource->HasEarlyReadback()
++            ? pResource->TakeEarlyReadback() : nullptr;
++          if (earlyPeek == nullptr) {
++            // Get the copy onto the GPU: emit pending CS work and submit it.
++            Flush();
++            // Full CS sync, not just to the copy's sequence: the flush's own submission is
++            // processed by the CS thread *after* the copy, and lastSubmittedList() must not
++            // be captured before that submission is enqueued — an earlier capture waits an
++            // older fence and could hand the game a stale read-back (the NOWAIT bug).
++            SynchronizeCsThread(DxvkCsThread::SynchronizeAll);
++          }
 +          // The submission created by that flush contains our copy (it was recorded before
 +          // this lock). Wait on its fence directly, bounded: the list object can be recycled
 +          // by the retirement thread (fence reset), so cap each wait and re-check the
 +          // resource; fall back to the exact slow path if this never converges.
-+          Rc<DxvkCommandList> list = m_dxvkDevice->lastSubmittedList();
++          Rc<DxvkCommandList> list = earlyPeek != nullptr
++            ? std::move(earlyPeek)
++            : m_dxvkDevice->lastSubmittedList();
++          // D3D9_RT_FENCE_PROBE=<path>: per lock, the pending-submission depth at wait start
++          // and the microseconds the fence wait took. Decides the side-queue architecture:
++          // depth ~1 with a long wait = the pre-lock submission's own execution dominates
++          // (a second queue cannot help; the copy waits on its own pass); depth >> 1 = the
++          // wait is queued-behind work and a second VkQueue/MTLCommandQueue wins.
++          static FILE* fenceProbe = [] () -> FILE* {
++            const char* v = std::getenv("D3D9_RT_FENCE_PROBE");
++            return (v != nullptr && *v != '\0') ? std::fopen(v, "a") : nullptr;
++          }();
++          uint32_t fpDepth = fenceProbe ? m_dxvkDevice->pendingSubmissions() : 0u;
++          auto fpT0 = std::chrono::steady_clock::now();
 +          if (list != nullptr) {
 +            for (uint32_t i = 0; i < 100 && !fenceSatisfied; i++) {
 +              if (!mappedBuffer->isInUse(DxvkAccess::Write)) { fenceSatisfied = true; break; }
 +              if (list->synchronizeBounded(500'000ull) == VK_SUCCESS)
 +                fenceSatisfied = true;
 +            }
++          }
++          if (fenceProbe != nullptr) {
++            auto us = std::chrono::duration_cast<std::chrono::microseconds>(
++              std::chrono::steady_clock::now() - fpT0).count();
++            std::fprintf(fenceProbe, "%u,%lld\n", fpDepth, (long long)us);
 +          }
 +          g_stallProbe.add(kStMapWait, stallStart);
 +        }
@@ -1353,7 +1508,7 @@ index 734a7a0..1f3107b 100644
            return D3DERR_WASSTILLDRAWING;
        }
      }
-@@ -4588,6 +5277,7 @@ namespace dxvk {
+@@ -4588,6 +5387,7 @@ namespace dxvk {
            UINT                    SizeToLock,
            void**                  ppbData,
            DWORD                   Flags) {
@@ -1361,7 +1516,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      if (unlikely(ppbData == nullptr))
-@@ -4773,25 +5463,50 @@ namespace dxvk {
+@@ -4773,25 +5573,50 @@ namespace dxvk {
    }
  
  
@@ -1414,7 +1569,7 @@ index 734a7a0..1f3107b 100644
      D3D9DeviceLock lock = LockDevice();
  
      // Dispatch current chunk so that all commands
-@@ -4799,6 +5514,7 @@ namespace dxvk {
+@@ -4799,6 +5624,7 @@ namespace dxvk {
      FlushCsChunk();
  
      m_csThread.synchronize(SequenceNumber);
@@ -1422,7 +1577,7 @@ index 734a7a0..1f3107b 100644
    }
  
  
-@@ -5553,6 +6269,58 @@ namespace dxvk {
+@@ -5553,6 +6379,58 @@ namespace dxvk {
    }
  
  
@@ -1481,7 +1636,7 @@ index 734a7a0..1f3107b 100644
    void D3D9DeviceEx::BindFramebuffer() {
      m_flags.clr(D3D9DeviceFlag::DirtyFramebuffer);
  
-@@ -5581,8 +6349,25 @@ namespace dxvk {
+@@ -5581,8 +6459,25 @@ namespace dxvk {
          m_state.renderTargets[i]->GetRenderTargetLayout() };
      }
  
@@ -1508,7 +1663,7 @@ index 734a7a0..1f3107b 100644
          || m_state.renderStates[D3DRS_ZWRITEENABLE]
          || m_state.renderStates[D3DRS_STENCILENABLE])) {
        const DxvkImageCreateInfo& dsImageInfo = m_state.depthStencil->GetCommonTexture()->GetImage()->info();
-@@ -5595,6 +6380,12 @@ namespace dxvk {
+@@ -5595,6 +6490,12 @@ namespace dxvk {
        }
      }
  
@@ -1521,7 +1676,7 @@ index 734a7a0..1f3107b 100644
      // Create and bind the framebuffer object to the context
      EmitCs([
        cAttachments = std::move(attachments)
-@@ -6429,6 +7220,7 @@ namespace dxvk {
+@@ -6429,6 +7330,7 @@ namespace dxvk {
  
  
    void D3D9DeviceEx::End(D3D9Query* pQuery) {

@@ -230,3 +230,22 @@ end-to-end to the title screen. First render on this path is slow (cold DXVK pip
 cache) — do not judge it by early screenshots. Two real residuals: the cooperative
 CX-26.3 wine still page-faults during LSB boot (7B31EF5E — live world unaffected), and
 the harness's blind key-driving needs its wait-for-pixels guard (added to inworld.py).
+
+## 2026-08-20 (night): plan-1/3 session — flags, record run, early-fence refuted
+
+- `X87_FAST_ROUND=2` breaks the client at the POL handoff. Rejected; never retry.
+- **Project record, measured in-world: 43.5 fps median at 4K max** (fence path +
+  cooperative x87, light ~920-draw scene). Crowded scenes still land in the 20s.
+- Fence-depth probe (22,668 locks): median pending depth 2, median wait 2.0 ms/lock —
+  the residual is per-submission completion latency (~1 ms each on MoltenVK), not GPU
+  execution.
+- `D3D9_RT_EARLY_FENCE` (copy + flush at RT-unbind, wait that submission at lock):
+  REFUTED. fps wash (43.9 vs 43.5), waits worse (5.9 ms median — the unbind flush drags
+  the whole frame chunk along), CS/queue threads red-lined from per-test full syncs.
+  Root cause is structural: the interleave probe shows the lock follows the unbind
+  IMMEDIATELY — no gap for the copy to execute in. Code stays env-gated OFF.
+- Surviving architecture for the residual ~2 ms/lock: the SIDE QUEUE, refined estimate
+  ~1.3 ms x 3.5 locks ≈ 4.5 ms/frame (43 -> ~52 fps light scenes). Beyond that the wall
+  is the client main thread (~90% of a core at 44 fps).
+- Harness: hidden-wine-app window enumeration bug fixed (bench.py unhide_wine) — this
+  was the "no wine windows" flakiness all along.
