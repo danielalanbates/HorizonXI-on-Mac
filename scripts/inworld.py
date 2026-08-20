@@ -211,6 +211,23 @@ def main():
     b.focus_game(hide_others=True)
     snap("boot", 0)
 
+    # Cold DXVK pipeline caches (fresh wine, or the LSB path after the live cache was built
+    # under a different wine) keep the window black for minutes; pressing Enter on schedule
+    # then lands before any UI exists and the run never leaves the title screen
+    # (lsb-verify, 2026-08-20). Wait for real pixels before the first key.
+    for _ in range(48):   # up to 4 minutes
+        pth = b.shot(args.tag, 99)
+        if pth:
+            import struct as _st
+            with open(pth, "rb") as f:
+                d = f.read()
+            off = _st.unpack_from("<I", d, 10)[0] if len(d) > 14 else 0
+            body = d[off::197]
+            if body and sum(1 for x in body if x > 24) / len(body) > 0.02:
+                break
+        time.sleep(5)
+    b.focus_game(hide_others=True)
+
     # rules-of-conduct dialog, then the title screen, until the scene gets heavy
     for i in range(6):
         b.press(RETURN, after=1.0)

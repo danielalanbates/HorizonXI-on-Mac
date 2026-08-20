@@ -222,8 +222,11 @@ the bind/unbind boundaries and fence only the side queue at lock time. Read-only
 resources (geometry, textures) need cross-queue hazard care; the 16x16 + its depth are
 exclusively the side queue's.
 
-Also from today: the LOCAL LSB pathway is currently broken two ways (documented for the
-next session): under the cooperative CX-26.3 wine, LSB boots page-fault at 7B31EF5E
-regardless of dll version or sound settings; under Sikarugir wine, xiloader closes
-post-connect (likely no character on the freshly-started local DB). The dedup probe data
-came from the live server instead.
+LSB-local status, corrected after live debugging with Daniel: the pathway WORKS. The
+"post-connect close" was simply a missing local account (the DB only had the harness's
+lsbtest fixtures; Daniel's login was refused). Account `danielalanbates` now exists in
+the local DB (bcrypt row, id 3), and the launcher's Local-server world verified
+end-to-end to the title screen. First render on this path is slow (cold DXVK pipeline
+cache) — do not judge it by early screenshots. Two real residuals: the cooperative
+CX-26.3 wine still page-faults during LSB boot (7B31EF5E — live world unaffected), and
+the harness's blind key-driving needs its wait-for-pixels guard (added to inworld.py).
