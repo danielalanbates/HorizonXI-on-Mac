@@ -407,7 +407,13 @@ final class Runner: ObservableObject {
         LuaJITGuard.apply(install) { [weak self] in self?.appendLine($0) }
         appendLine("==> launching \(profile)")
         var env = perf.environment(for: install)
-        for (k, v) in X87Sidecar.requiredEnvironment { env[k] = v }
+        // ROSETTA_DISABLE_AOT only pays off when the sidecar then attaches and patches x87;
+        // without the sidecar it forces Rosetta's slow path and costs ~half the stock frame
+        // rate (measured 2026-08-19: ~5 fps vs ~11 stock). So set it only when the sidecar
+        // is actually present to attach.
+        if X87Sidecar.binary() != nil {
+            for (k, v) in X87Sidecar.requiredEnvironment { env[k] = v }
+        }
         // Spawned through a shell with a *file* redirect, not Foundation.Process pipes.
         // 2026-08-19: after the wrapper moved to the x10, every game launched the old way died
         // one second after "Connected to server!" — while a byte-identical spawn (same exe,
