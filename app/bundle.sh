@@ -83,7 +83,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>NSDesktopFolderUsageDescription</key><string>To find a wrapper you keep on the Desktop.</string>
   <key>NSDocumentsFolderUsageDescription</key><string>To find a wrapper you keep in Documents.</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>2.7</string>
+  <key>CFBundleShortVersionString</key><string>2.8</string>
   <key>CFBundleVersion</key><string>9</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
@@ -107,7 +107,12 @@ PLIST
 find "$APP" -exec xattr -c {} \; 2>/dev/null || true
 
 X87SC="$APP/Contents/Resources/x87sidecar_entitled"
+X87COOP="$APP/Contents/Resources/x87sidecar-coop"
 if [[ -n "${HXI_SIGN_ID:-}" ]]; then
+  # The cooperative sidecar has no entitlements, so it can carry the hardened runtime and the
+  # secure timestamp the notary demands of nested executables. --timestamp is required here:
+  # without it notarization returns Invalid on exactly this file (measured 2026-08-20).
+  [[ -f "$X87COOP" ]] && codesign --force --options runtime --timestamp -s "$HXI_SIGN_ID" "$X87COOP"
   [[ -f "$X87SC" ]] && codesign --force --options runtime -s "$HXI_SIGN_ID" \
     --entitlements "$REPO/vendor/x87sidecar-entitlements.plist" "$X87SC"
   codesign --force --options runtime -s "$HXI_SIGN_ID" "$APP"

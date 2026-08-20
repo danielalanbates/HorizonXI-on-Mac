@@ -152,3 +152,19 @@ A locked screen (`frontmost=loginwindow`) still stops a run dead and always will
 
 `DXVK_DRAW_PROBE` crashes the client at 4K with the sidecar attached. `DXVK_STALL_LOG` was written
 to be cheap enough not to (two clock reads per instrumented call, no allocation) and does not.
+
+## 2026-08-20: cooperative x87 baseline, and two more dead ends
+
+With the cooperative sidecar + CX-26.3 wine (see X87-WALL.md), the honest number stands:
+**23.7 fps median in-world at 4K max** (`inworld-coop-aot`). Two more config-level levers
+measured against that baseline, same session:
+
+| configuration | fps median |
+| --- | --- |
+| cooperative baseline (maxFrameLatency=1 already in dxvk.conf) | 23.68 |
+| + `d3d9.presentInterval = 0` (vsync off) | 23.16 — no gain, reverted |
+| + `MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0` | 20.90 — worse, rejected |
+
+Config space is exhausted. Anything past ~24 fps at these settings requires engine-level
+work on the visibility read-back (dedicated-queue submission for the 16×16 surface's draw
+set, or convincing the client not to serialise on it) — DXVK source territory.

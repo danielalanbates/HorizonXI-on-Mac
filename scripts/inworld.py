@@ -28,6 +28,15 @@ def type_command(text):
     b.press(RETURN, after=1.5)                 # send
 
 
+def unhide_terminal():
+    # The hide_others focus pass hides Terminal, which Daniel watches; always bring it back
+    # when a run finishes (2026-08-20).
+    import subprocess as _sp
+    _sp.run(["osascript", "-e",
+             'tell application "System Events" to set visible of process "Terminal" to true'],
+            capture_output=True)
+
+
 def shutdown(tag=None):
     """FFXI's own /shutdown command. Retried, because a missed keystroke leaves a character
     logged in on the server."""
@@ -260,4 +269,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        unhide_terminal()
