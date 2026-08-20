@@ -110,6 +110,14 @@ struct PerfSettings: Codable {
         // Metal command buffer objects rather than reallocating them per frame -- so neither
         // can produce visual glitches. Always on.
         env["MVK_CONFIG_FAST_MATH_ENABLED"] = "1"
+        // FFXI locks a 16x16 visibility render target ~4x/frame; stock DXVK makes that lock
+        // wait behind the retirement thread's one-at-a-time fence processing (~15
+        // submissions/frame x ~0.85 ms measured 2026-08-20 = most of a 26 ms stall). The
+        // vendored DXVK's fence fast path waits on the lock's own submission fence instead —
+        // exact (same bytes as the slow path; it is NOT the broken NOWAIT approximation),
+        // in-world wait fell 28.8 -> 9 ms/frame, best run 25.1 vs 23.7 fps. Bounded to
+        // surfaces <= 32 px. See patches/dxvk-1.10.3-horizonxi-fencewait.patch.
+        env["D3D9_RT_READBACK_FENCE"] = "32"
         env["MVK_CONFIG_USE_COMMAND_POOLING"] = "1"
         if metalHUD { env["MTL_HUD_ENABLED"] = "1" }
         // Only our patched d3d9.dll reads this; harmless (silently ignored) on the other

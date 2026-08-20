@@ -168,3 +168,34 @@ measured against that baseline, same session:
 Config space is exhausted. Anything past ~24 fps at these settings requires engine-level
 work on the visibility read-back (dedicated-queue submission for the 16×16 surface's draw
 set, or convincing the client not to serialise on it) — DXVK source territory.
+
+## 2026-08-20 (later): the fence fast path — first real dent in the read-back wall
+
+Root cause finally isolated with a retirement-thread probe (`DXVK_QUEUE_LOG`): the 26 ms
+stall was never GPU execution. ~15 submissions/frame retire through DXVK's finish thread
+ONE AT A TIME, each `vkWaitForFences` costing ~0.85 ms on MoltenVK (~275 ms of serialized
+fence-waiting per second at 10% GPU busy). The visibility lock waits behind that serial
+queue.
+
+`D3D9_RT_READBACK_FENCE=<max edge px>` (patches/dxvk-1.10.3-horizonxi-fencewait.patch,
+now in the vendored dll, enabled by the launcher at 32): the lock flushes, does a FULL CS
+sync (required — capturing the last submission before the flush's own submission is
+enqueued would wait an older fence and reproduce the NOWAIT stale-read bug), then waits
+directly on that submission's fence, bounded, with fallback to the exact slow path.
+**Exact by construction**: the fence signaling means the staging buffer holds this
+frame's bytes.
+
+Measured: in-world map_wait 28.8 -> ~9 ms/frame; best run 25.07 vs 23.68 baseline; blink
+probe over a live populated dock scene showed no NOWAIT-style entity dropout (spikes an
+order of magnitude below the broken signature, consistent with other players moving).
+Honesty note: single runs each — the planned 3x3 A/B was cancelled (no unattended
+launch loops, standing rule); scene-density spread between runs is larger than the
+effect, so treat +1.4 fps as indicative, not proven.
+
+`D3D9_RT_UNBIND_FLUSH` (flush when the small RT is unbound) is also in the patch but
+showed no additional gain (24.23 with both, n=1) — left off by default.
+
+Remaining wall: with waits at ~9 ms, the frame is now bounded by the client's own main
+thread (~78% of a core, x87 + draw submission). Next fronts: sidecar JIT quality, or
+cutting the residual 9 ms (per-texture early fence capture at RT-unbind so the lock
+waits a long-signaled fence).
