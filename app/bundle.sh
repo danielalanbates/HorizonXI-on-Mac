@@ -46,7 +46,14 @@ done
 # x87sidecar: the fix for FFXI's x87 floating-point math running ~100x slow under Rosetta (see
 # docs/X87-WALL.md). Signed individually below with its own entitlements -- the app's deep-sign
 # strips them otherwise, and without get-task-allow/cs.debugger it cannot attach to the game.
-if [[ -f "$REPO/vendor/x87sidecar_entitled" ]]; then
+if [[ -f "$REPO/vendor/x87sidecar-coop" ]]; then
+  # Cooperative-mode sidecar (no entitlements, notarizable); preferred on macOS >= 26.5.2.
+  cp "$REPO/vendor/x87sidecar-coop" "$APP/Contents/Resources/x87sidecar-coop"
+  chmod +x "$APP/Contents/Resources/x87sidecar-coop"
+fi
+# attach-by-pid sidecar: BROKEN on macOS 26.5.2+ (cross-process i-cache flush), so it is no
+# longer bundled by default. Restore this block only for older macOS.
+if false && [[ -f "$REPO/vendor/x87sidecar_entitled" ]]; then
   cp "$REPO/vendor/x87sidecar_entitled" "$APP/Contents/Resources/x87sidecar_entitled"
   chmod +x "$APP/Contents/Resources/x87sidecar_entitled"
 fi

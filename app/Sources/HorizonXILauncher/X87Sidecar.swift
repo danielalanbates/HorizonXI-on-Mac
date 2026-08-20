@@ -24,6 +24,21 @@ enum X87Sidecar {
     /// nothing left to hook. Belongs on the *game's* environment, set before it launches.
     static let requiredEnvironment = ["ROSETTA_DISABLE_AOT": "1"]
 
+    /// Cooperative-mode pieces: the unentitled sidecar (bundled, or vendor/ under `swift run`)
+    /// plus the handshake-patched CX wine from athei/wine-build. Both must exist; the wine is
+    /// a per-machine install because it is 700 MB unpacked. See docs/X87-WALL.md.
+    static func cooperative() -> (sidecar: URL, wine: URL)? {
+        let wine = URL(fileURLWithPath: "/Volumes/Games/FFXI/wine-coop/wine/bin/wine")
+        guard FileManager.default.isExecutableFile(atPath: wine.path) else { return nil }
+        if let u = Bundle.main.url(forResource: "x87sidecar-coop", withExtension: nil) {
+            return (u, wine)
+        }
+        let dev = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("vendor/x87sidecar-coop")
+        return FileManager.default.isExecutableFile(atPath: dev.path) ? (dev, wine) : nil
+    }
+
     /// Poll for horizon-loader.exe -- the process Ashita actually runs the client in, not the
     /// injector (Ashita-cli.exe) that launches it and exits within a second or two. Attaching to
     /// the injector is a silent no-op: it installs, logs success, and patches a process that

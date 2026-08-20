@@ -407,11 +407,20 @@ final class Runner: ObservableObject {
         LuaJITGuard.apply(install) { [weak self] in self?.appendLine($0) }
         appendLine("==> launching \(profile)")
         var env = perf.environment(for: install)
-        // ROSETTA_DISABLE_AOT only pays off when the sidecar then attaches and patches x87;
-        // without the sidecar it forces Rosetta's slow path and costs ~half the stock frame
-        // rate (measured 2026-08-19: ~5 fps vs ~11 stock). So set it only when the sidecar
-        // is actually present to attach.
-        if X87Sidecar.binary() != nil {
+        // x87 acceleration, two generations:
+        //  * Cooperative (preferred): x87sidecar --cooperative launching the patched CX wine
+        //    (athei/wine-build at COOP_WINE). Every wine process — including horizon-loader,
+        //    a *grandchild* via Ashita — does its own handshake and flushes its own i-cache,
+        //    which is the only reliable way since macOS 26.5.2's Rosetta. No entitlements.
+        //  * attach-by-pid (legacy, x87sidecar_entitled in Resources): broken on 26.5.2 —
+        //    cross-process i-cache flush is unreliable, the client page-faults minutes after
+        //    attach. Kept only as a fallback for older macOS; the binary is currently NOT
+        //    bundled for that reason.
+        // ROSETTA_DISABLE_AOT only pays off when a sidecar actually patches x87; without one
+        // it forces Rosetta's slow path and costs ~half the stock frame rate (measured
+        // 2026-08-19: ~5 fps vs ~11 stock). Set it only when acceleration will engage.
+        let coop = X87Sidecar.cooperative()
+        if coop != nil || X87Sidecar.binary() != nil {
             for (k, v) in X87Sidecar.requiredEnvironment { env[k] = v }
         }
         // Spawned through a shell with a *file* redirect, not Foundation.Process pipes.
@@ -422,8 +431,19 @@ final class Runner: ObservableObject {
         // wineserver stopped, strays killed — the only surviving difference was how Foundation
         // wires the child. So launch the way that demonstrably works and tail the file for the
         // log pane.
-        spawnViaShell(install.wine,
-              args: [install.gameDirWine + "\\Ashita-cli.exe", profile],
+        let exe: URL
+        let args: [String]
+        if let coop {
+            exe = coop.sidecar
+            args = ["--cooperative", coop.wine.path,
+                    install.gameDirWine + "\\Ashita-cli.exe", profile]
+            appendLine("==> x87 cooperative: \(coop.wine.path)")
+        } else {
+            exe = install.wine
+            args = [install.gameDirWine + "\\Ashita-cli.exe", profile]
+        }
+        spawnViaShell(exe,
+              args: args,
               env: env,
               cwd: install.gameDir) { [weak self] code in
             // This is Ashita-cli.exe, the *injector*. It exits within seconds of a successful
@@ -441,9 +461,12 @@ final class Runner: ObservableObject {
         // path for the life of the process. A late attach "works" but leaves most of the game
         // at stock speed. (The 2026-08-19 attach crashes were a stale sidecar binary built for
         // pre-26.5.2 Rosetta, not the timing — rebuild the sidecar after every macOS update.)
-        Task { [weak self] in
-            let p = await X87Sidecar.attachWhenReady { [weak self] in self?.appendLine($0) }
-            self?.x87Proc = p
+        // Cooperative mode needs no attach at all: the patched wine handshakes on its own.
+        if coop == nil {
+            Task { [weak self] in
+                let p = await X87Sidecar.attachWhenReady { [weak self] in self?.appendLine($0) }
+                self?.x87Proc = p
+            }
         }
     }
 
