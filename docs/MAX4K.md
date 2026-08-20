@@ -199,3 +199,31 @@ Remaining wall: with waits at ~9 ms, the frame is now bounded by the client's ow
 thread (~78% of a core, x87 + draw submission). Next fronts: sidecar JIT quality, or
 cutting the residual 9 ms (per-texture early fence capture at RT-unbind so the lock
 waits a long-signaled fence).
+
+## 2026-08-20 (evening): per-frame dedup of the visibility test — REFUTED before implementation
+
+`D3D9_RT_IDENT_PROBE` (in the fencewait patch) logged every small-RT bind/unbind/lock with
+texture identity. 53,941 events on a live in-world run:
+
+- **One single 16x16 texture** serves every visibility test (15k+ locks, one pointer).
+- The event stream is a strict `lock, bind, unbind` cycle (`LBULBULBU...`, 17,976 clean
+  `BU` pairs between locks, one anomaly). **Every lock is preceded by its own fresh render
+  pass into the surface.** Each read is a distinct test of a distinct light/frame state.
+
+Serving a cached per-frame result would therefore hand test N the result of test N-1 —
+the NOWAIT corruption class again. Do not re-attempt dedup/caching of this surface.
+
+What the probe DOES establish for the next attempt: the test pass is self-contained
+(own tiny RT, re-rendered occluder geometry) and strictly interleaved with main-scene
+work. The sound path to killing the residual ~9 ms is submitting the `bind..unbind`
+command range on a SECOND VkQueue (own MTLCommandQueue in MoltenVK) so its fence does not
+queue behind the frame's main submissions — real DXVK surgery: split command recording at
+the bind/unbind boundaries and fence only the side queue at lock time. Read-only shared
+resources (geometry, textures) need cross-queue hazard care; the 16x16 + its depth are
+exclusively the side queue's.
+
+Also from today: the LOCAL LSB pathway is currently broken two ways (documented for the
+next session): under the cooperative CX-26.3 wine, LSB boots page-fault at 7B31EF5E
+regardless of dll version or sound settings; under Sikarugir wine, xiloader closes
+post-connect (likely no character on the freshly-started local DB). The dedup probe data
+came from the live server instead.
