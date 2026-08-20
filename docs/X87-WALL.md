@@ -181,3 +181,26 @@ The only levers that touch it:
 
 Before trying anything else on this project, run `scripts/tools/x87real.c` against the engine in
 question. If it does not beat 1 Mverts/s, the frame rate will not change, whatever else is done.
+
+## 2026-08-19: macOS 26.5.2 broke attach-by-pid; cooperative mode is the path
+
+The 26.5.2 update changed Rosetta. The vendored attach-by-pid sidecar mispatched
+`translate_insn` and page-faulted the client (~2 min after attach, thread 00d8,
+address 7B90EF5E, every run). Rebuilding upstream did not save the attach mode:
+attaching to a *running* process cannot reliably flush the target's i-cache on new
+Rosetta — upstream documents this and solved it with cooperative mode, where the
+target flushes its own cache during a Mach handshake.
+
+Working setup (launcher auto-uses it when present):
+* `/Volumes/Games/FFXI/wine-coop/` — athei/wine-build `wine-cx-26.3.0-1` (patched CX
+  wine: re-execs through the sidecar with `--cooperative`, does the tracee handshake).
+  Boots the game on the existing prefix10 unchanged, Vulkan/DXVK working.
+* `vendor/x87sidecar-coop` (bundled as `Resources/x87sidecar-coop`) — unentitled
+  cooperative sidecar built from upstream 238a214. Notarizable.
+* attach-by-pid (`x87sidecar_entitled`) is no longer bundled; bundle.sh keeps the
+  block behind `if false` for older macOS.
+
+Rule: **rebuild the sidecar (and re-check the coop wine) after every macOS update.**
+In-world fps validation of the cooperative path was pending at write time (screen
+locked); the harness invocation is
+`BENCH_WINE=~/Games/hxi-workspace/wine-coop-wrap.sh python3 inworld.py --tag <t> --env FFXI_FPS_DIVISOR=1 --sample 45`.
