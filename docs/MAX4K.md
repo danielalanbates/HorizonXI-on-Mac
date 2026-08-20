@@ -249,3 +249,19 @@ the harness's blind key-driving needs its wait-for-pixels guard (added to inworl
   is the client main thread (~90% of a core at 44 fps).
 - Harness: hidden-wine-app window enumeration bug fixed (bench.py unhide_wine) — this
   was the "no wine windows" flakiness all along.
+
+## 2026-08-21: side-queue session — the queue does not exist, and two more dead ends
+
+- **MoltenVK exposes exactly one VkQueue (family 0, count 1) — verified against both the
+  wrapper's library and upstream v1.4.2 with a direct probe.** The side-queue design as
+  "second VkQueue" is impossible without a patched MoltenVK, and this machine has no
+  Xcode to build one (a CI build via GitHub Actions is the pathway if ever needed).
+- `D3D9_PERIODIC_FLUSH=<draws>` (submit every N draws so GPU work overlaps the CPU
+  frame): built, measured at 200 — 40.5 fps vs 43.5/43.9 comparable-scene runs, waits
+  1.68 vs 2.0 ms, depth still 2. No win; extra submissions eat the saving. Env-gated
+  OFF. (With early-fence also refuted, submission-boundary tuning is exhausted.)
+- Suspicious observation for the NEXT investigation: at 44 fps the main thread shows
+  ~90-95% CPU-busy while supposedly *blocked* ~7 ms/frame in fence waits — MoltenVK's
+  vkWaitForFences may spin rather than sleep. If so, the residual wait is stealing CPU
+  from the x87-bound main thread, and a sleeping wait (or MoltenVK fence fix) frees
+  real frame time. Verify with a profiler sample of the wait site before believing it.
