@@ -53,3 +53,13 @@ Terminal context, which holds whatever permission the Finder context is missing.
    a login-shell context (osascript → Terminal, or enable Remote Login and ssh
    localhost) as a permanent, invisible pathway.
 3. Un-break the collateral above.
+
+## 2026-08-19 (late): real Apple ID signing — what works and what cannot
+- Distribution: `HXI_SIGN_ID=<devid-sha1> ./scripts/package.sh` builds, signs,
+  notarizes, staples — verified end-to-end today (FFXI-on-Mac-2.7.dmg, "Notarized
+  Developer ID", Gatekeeper accepted). THIS is the release process.
+- The LOCAL /Applications copy CANNOT be Developer-ID signed: any team-signed variant
+  (hardened or not, fresh TCC, no quarantine, even after Dev-ID-signing all 31 wine
+  Mach-Os) is denied dlopen of the wrapper's ntdll.so with "file system sandbox blocked
+  open()". Ad-hoc builds load wine fine. Until the wrapper itself ships notarized,
+  install ad-hoc locally and use the notarized DMG only for distribution.
