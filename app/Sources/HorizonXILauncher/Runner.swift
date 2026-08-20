@@ -59,8 +59,13 @@ final class Runner: ObservableObject {
     @Published var loginFailure: String = ""
     private var currentInstall: Install?
 
+    /// Set when the boot loader prints "Connected to server!" — the x87 sidecar must not
+    /// attach before this (see the attach Task in `launch`).
+    var loginMarkerSeen = false
+
     func appendChunk(_ s: String) {
         tee(s)
+        if !loginMarkerSeen, s.contains("Connected to server!") { loginMarkerSeen = true }
         // Every xiloader fork prints one of these and drops to an interactive menu no window shows.
         let failMarkers = ["Failed to login", "Bad json reply from remote", "Error from remote",
                            "version mismatch", "xi_connect", "Account already logged in"]
@@ -435,11 +440,23 @@ final class Runner: ObservableObject {
             self?.watchGameProcess()
         }
         // The game runs in a child process (horizon-loader.exe) that does not exist yet at this
-        // point -- Ashita-cli.exe has to inject into it first. Wait for it off the main actor,
-        // then attach; see X87Sidecar.attachWhenReady.
+        // point -- Ashita-cli.exe has to inject into it first. And attaching while xiloader is
+        // still logging in corrupts it: 2026-08-19, every attach that landed before the POL
+        // handoff took the client down within a second of "Connected to server!" (trap 222 /
+        // page fault / winedbg "Program Error"). The x87 patch only matters in-world, so wait
+        // for the login marker in the loader's own output, give the handoff ten more seconds,
+        // and only then attach; see X87Sidecar.attachWhenReady.
+        loginMarkerSeen = false
         Task { [weak self] in
+            for _ in 0..<180 {   // up to 3 minutes for the marker; give up quietly otherwise
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self else { return }
+                if await MainActor.run(body: { self.loginMarkerSeen }) { break }
+            }
+            guard let self, await MainActor.run(body: { self.loginMarkerSeen }) else { return }
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
             let p = await X87Sidecar.attachWhenReady { [weak self] in self?.appendLine($0) }
-            self?.x87Proc = p
+            self.x87Proc = p
         }
     }
 
