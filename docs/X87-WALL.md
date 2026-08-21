@@ -239,3 +239,44 @@ Not yet fixed. Candidate pathways, cheapest first:
 Whatever the fix, the launcher should **verify rather than assume**: after the client pid appears,
 confirm the sidecar is still alive and attached to *that* pid, and say so in the log strip.
 A silent 2.5x regression is exactly what happened here.
+
+## 2026-08-21 (measured): x87 acceleration is now a 19x LOSS. Turned off by default.
+
+Both modes measured back to back on macOS 26.5.2, same 382-draw screen, same settings, 60
+one-second samples each from `DXVK_FPS_LOG`:
+
+| configuration | median fps |
+| --- | --- |
+| **no sidecar, Rosetta AOT enabled** | **58.02** |
+| cooperative sidecar + `ROSETTA_DISABLE_AOT` | 2.98 |
+| attach-by-pid + `ROSETTA_DISABLE_AOT` | client dies ~5 s after launch (UninstallAshita 228, before DXVK's first line) |
+
+The mechanism is not subtle. `ROSETTA_DISABLE_AOT` is what makes Rosetta call the hook the sidecar
+patches, and it forces the slow translation path on everything. That is a good trade when the JIT
+engages — it was worth 2.5x in-world when attach-by-pid worked — and a catastrophic one when it
+does not. It does not: the cooperative handshake fails outright, which is visible in the game log
+the moment you look for it:
+
+    [rosettax87] cooperative handshake receive failed: 0x10004003 ((ipc/rcv) timed out)
+
+So the client was paying the AOT penalty and getting nothing back. Every "5 fps" report today is
+that, not the renderer.
+
+**Shipped: x87 off by default.** No sidecar, no `ROSETTA_DISABLE_AOT`. `FFXI_ON_MAC_X87=1`
+re-enables the cooperative pathway for anyone working on it.
+
+Two things worth trying before this is called dead, in order:
+
+1. **Find out why the handshake times out.** The patched CX wine at `/Volumes/Games/FFXI/wine-coop`
+   is from athei/wine-build `wine-cx-26.3.0-1`, built against an earlier Rosetta. If its handshake
+   protocol no longer matches the sidecar built from upstream 238a214, rebuilding *both* against
+   current macOS is the fix, and the 2.5x comes back.
+2. **Do not wrap the sidecar's child.** An attempt to keep the sidecar alive past the injector's
+   exit by giving it `/bin/sh -c "wine …; wait"` makes things worse, not better: the sidecar waits
+   for a handshake from its *direct* child, and a native shell never sends one. The sidecar must
+   launch the patched wine directly.
+
+Also fixed while here: `Runner.gameIsRunning()` and that keep-alive loop both used
+`pgrep -f horizon-loader.exe`, which happily matches any shell whose command line merely *contains*
+that string — including the wrapper itself. Anything that greps for the client by name needs the
+`[h]orizon-loader` bracket trick or an exact match.

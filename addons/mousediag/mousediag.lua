@@ -141,6 +141,13 @@ local function inject_mouse_messages()
     local p = ffi.new('POINT'); ffi.C.GetCursorPos(p);
     local c = ffi.new('POINT'); c.x = p.x; c.y = p.y;
     ffi.C.ScreenToClient(hwnd, c);
+    -- Only speak for the client area. Windows would send WM_NCMOUSEMOVE for the frame, and
+    -- posting a plain WM_MOUSEMOVE with an out-of-range coordinate is what makes Ashita's ImGui
+    -- fall back to its -FLT_MAX "no mouse here" sentinel (docs/MOUSE.md, known rough edge).
+    local cr = ffi.new('RECT'); ffi.C.GetClientRect(hwnd, cr);
+    if c.x < 0 or c.y < 0 or c.x > (cr.right - cr.left) or c.y > (cr.bottom - cr.top) then
+        return;
+    end
     local lparam = bit.bor(bit.lshift(bit.band(c.y, 0xFFFF), 16), bit.band(c.x, 0xFFFF));
 
     local l = bit.band(ffi.C.GetAsyncKeyState(VK_LBUTTON), 0x8000) ~= 0;

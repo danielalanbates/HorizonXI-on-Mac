@@ -186,18 +186,20 @@ struct Server: Codable, Identifiable, Hashable {
     /// tested-by-this-project are different claims, and only the second earns the badge. Two
     /// servers (Gaia XI, Tabula Rasa XI) publish no login host anywhere this project could find;
     /// those stay blank on purpose rather than guessing.
-    /// The worlds the launcher offers: every one that is still running.
+    /// The worlds the launcher offers: **LandSandBoat only**, and still running.
     ///
-    /// An earlier cut here dropped every non-LandSandBoat world on the reasoning that only LSB
-    /// still receives upstream development. The emulator claim is true, but it does not follow
-    /// that those *servers* are dead, and checking said so plainly (2026-08-21): Eden had 835
-    /// players online and 2,642 people in its Discord at the time of the check, FFEra 313
-    /// online, ValhallaXI 271. A world with a thousand players in it is not deprecated, whatever
-    /// its codebase — so `codebase` is now shown to the player as information rather than used
-    /// as a filter. Only a world that has actually stopped is withheld.
-    static var builtins: [Server] { all.filter { !$0.retired } }
+    /// Daniel's qualification, restated 2026-08-21: LSB is mandatory, because it is the only
+    /// FFXI emulator still in development and therefore the only lineage that keeps receiving
+    /// content and fixes over time. Population does not override it — Eden is the second-largest
+    /// community on this list (835 online when checked) and is still cut, because its login
+    /// server is DarkStar-lineage. Which world is which was measured, not assumed: see
+    /// `Codebase`, `scripts/login-probe.py`, and docs/CODEBASE.md.
+    ///
+    /// `retired` is a separate axis: the server itself has stopped (Tabula Rasa XI).
+    static var builtins: [Server] {
+        all.filter { !$0.retired && $0.codebase == .landSandBoat }
+    }
 
-    /// Worlds withheld because the server itself is gone. See docs/CODEBASE.md.
     static var retiredWorlds: [Server] { all.filter(\.retired) }
 
     static let all: [Server] = [

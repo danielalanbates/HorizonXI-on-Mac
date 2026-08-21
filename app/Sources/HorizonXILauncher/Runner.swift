@@ -511,19 +511,31 @@ final class Runner: ObservableObject {
         // it forces Rosetta's slow path and costs ~half the stock frame rate (measured
         // 2026-08-19: ~5 fps vs ~11 stock). Set it only when acceleration will engage.
         // A world may have to run without x87 acceleration (see Server.x87).
-        // Preference order reversed 2026-08-21. Cooperative mode reads better on paper -- no
-        // entitlement, every wine process handshakes for itself -- but in practice the sidecar
-        // exits when the *injector* it launched exits, seconds after boot, and the client that
-        // Ashita spawns afterwards runs unpatched at stock Rosetta x87: ~5 fps, measured twice
-        // in-world. attach-by-pid attaches to horizon-loader.exe itself, which is the process
-        // that renders, and is the mode that measured 11.3 -> 28.5 fps. So: attach first,
-        // cooperative only when the entitled binary is missing.
-        let attach = useX87 ? X87Sidecar.binary() : nil
-        let coop = (useX87 && attach == nil) ? X87Sidecar.cooperative() : nil
+        // x87 acceleration is OFF by default as of 2026-08-21, because measuring it on this
+        // macOS (26.5.2) says every version of it is now a large net loss:
+        //
+        //   no sidecar, Rosetta AOT enabled ............ median 58.0 fps
+        //   cooperative sidecar + ROSETTA_DISABLE_AOT ... median  3.0 fps
+        //   attach-by-pid + ROSETTA_DISABLE_AOT ......... client dies ~5s after launch
+        //
+        // (Same 382-draw screen, same settings, 60 samples each, DXVK_FPS_LOG.) The mechanism is
+        // not subtle: ROSETTA_DISABLE_AOT is what makes the sidecar's hook reachable, and it
+        // forces Rosetta's slow path on everything. That is a fine trade when the JIT engages --
+        // it was worth 2.5x in-world when attach-by-pid worked -- and a catastrophic one when it
+        // does not. It does not: the cooperative handshake now fails outright
+        // ("[rosettax87] cooperative handshake receive failed ... (ipc/rcv) timed out"), so the
+        // client pays the AOT penalty and gets nothing back.
+        //
+        // Set FFXI_ON_MAC_X87=1 to opt back in while working on it. See docs/X87-WALL.md.
+        let x87Wanted = useX87 && ProcessInfo.processInfo.environment["FFXI_ON_MAC_X87"] == "1"
+        let coop = x87Wanted ? X87Sidecar.cooperative() : nil
         if !useX87 {
             appendLine("i  x87 acceleration is off for this world — its client exits at boot with it on.")
+        } else if !x87Wanted {
+            appendLine("i  x87 sidecar disabled: it costs ~19x on this macOS (docs/X87-WALL.md). "
+                       + "FFXI_ON_MAC_X87=1 re-enables it.")
         }
-        if useX87, coop != nil || X87Sidecar.binary() != nil {
+        if x87Wanted, coop != nil {
             for (k, v) in X87Sidecar.requiredEnvironment { env[k] = v }
         }
         // Spawned through a shell with a *file* redirect, not Foundation.Process pipes.
@@ -541,9 +553,20 @@ final class Runner: ObservableObject {
         let injector = install.gameDirWine + "\\" + install.ashitaCLI.lastPathComponent
         let bootFile = install.bootProfileName(profile)
         if let coop {
+            // The sidecar lives exactly as long as the process it launched. Launching the
+            // injector directly means it lives ~2 seconds: Ashita-cli.exe injects and exits,
+            // the sidecar follows it out, and the client Ashita just spawned is left running
+            // with nothing to handshake with -- the 5 fps. Give the sidecar a child that
+            // outlives the injector instead: run the injector, then idle until the client
+            // process is gone. Every wine process the patched CX wine starts in between
+            // re-execs through this same sidecar and does its own handshake.
+            let cmd = shellQuote(coop.wine.path) + " " + shellQuote(injector) + " "
+                + shellQuote(bootFile)
+                + "; while /usr/bin/pgrep -qf " + shellQuote(Self.currentGameExe)
+                + "; do /bin/sleep 5; done"
             exe = coop.sidecar
-            args = ["--cooperative", coop.wine.path, injector, bootFile]
-            appendLine("==> x87 cooperative: \(coop.wine.path)")
+            args = ["--cooperative", "/bin/sh", "-c", cmd]
+            appendLine("==> x87 cooperative: \(coop.wine.path) (sidecar held open for the client)")
         } else {
             exe = install.wine
             args = [injector, bootFile]
@@ -568,7 +591,7 @@ final class Runner: ObservableObject {
         // at stock speed. (The 2026-08-19 attach crashes were a stale sidecar binary built for
         // pre-26.5.2 Rosetta, not the timing — rebuild the sidecar after every macOS update.)
         // Cooperative mode needs no attach at all: the patched wine handshakes on its own.
-        if useX87, coop == nil {
+        if x87Wanted, coop == nil, X87Sidecar.binary() != nil {
             Task { [weak self] in
                 let p = await X87Sidecar.attachWhenReady { [weak self] in self?.appendLine($0) }
                 self?.x87Proc = p
@@ -650,6 +673,13 @@ final class Runner: ObservableObject {
     /// stdout/stderr go to a temp file that a DispatchSource tails into the log pane, so the
     /// child never holds a Foundation pipe. The tail keeps reading until the file stops growing
     /// *and* the game is gone, because horizon-loader outlives the injector this spawns.
+    /// Single-quote one word for /bin/sh. The cooperative launch builds a small shell command
+    /// (run the injector, then idle while the client lives), and every path in it can contain
+    /// spaces -- the wine wrapper lives under "/Volumes/Video Games/…" on this Mac.
+    private func shellQuote(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     private func spawnViaShell(_ exe: URL, args: [String], env: [String: String], cwd: URL,
                                done: @escaping (Int32) -> Void) {
         let out = FileManager.default.temporaryDirectory
