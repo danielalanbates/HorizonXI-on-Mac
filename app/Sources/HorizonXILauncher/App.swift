@@ -1175,6 +1175,18 @@ struct ContentView: View {
         case .installerExe:
             guard let u = URL(string: s.installURL) else { return }
             runner.installPageFallback = Self.homePages[s.name].flatMap(URL.init(string:))
+            // An NSIS script may ignore /D= and install wherever it likes (Eden's does). Take
+            // the folder the installer actually used rather than assuming the one we asked for —
+            // a dataPath that does not hold the world's client is what made "Play Eden" launch
+            // the HorizonXI client in the first place.
+            runner.onClientInstalled = { found in
+                guard var c = store.servers.first(where: { $0.name == s.name }) else { return }
+                if c.dataPath != found.path {
+                    c.dataPath = found.path; store.update(c)
+                    runner.appendLine("==> \(s.name)'s game data folder set to \(found.path)")
+                }
+                recheck()
+            }
             runner.runInstaller(from: u, in: i, dataPath: s.dataPath, name: s.name)
         case .clientZip:
             guard let u = URL(string: s.installURL) else { return }

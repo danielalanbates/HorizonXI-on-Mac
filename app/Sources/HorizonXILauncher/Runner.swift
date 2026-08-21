@@ -318,16 +318,67 @@ final class Runner: ObservableObject {
         }.first
     }
 
+    /// Does this PE identify itself as a Nullsoft (NSIS) installer? Those take `/S` (silent) and
+    /// `/D=<dir>` (target), which is the difference between a world that installs unattended and
+    /// one that needs somebody sitting in front of a wine window clicking Next. Verified
+    /// 2026-08-21 on Eden's `Installer.exe` (NSIS 3.06.1) and FFEra's `FFEraInstaller-Jan2023.exe`
+    /// (NSIS 3.08). Note `/D=` is advisory: Eden's script overrides it and installs to its own
+    /// `C:\Eden` regardless, which is why `findInstalledClient` runs afterwards.
+    static func isNSIS(_ exe: URL) -> Bool {
+        guard let d = try? Data(contentsOf: exe, options: .mappedIfSafe) else { return false }
+        let needle = Array("Nullsoft.NSIS.exehead".utf8)
+        // The marker sits in the manifest near the front of the file; a few MB is plenty and
+        // beats mapping a 157 MB installer's worth of pages through a search.
+        let window = d.prefix(4 << 20)
+        return window.range(of: Data(needle)) != nil
+    }
+
+    /// Where a just-run installer actually put the client: the newest folder under the prefix's
+    /// `drive_c` (or under the world's own folder) holding an Ashita launcher. Needed because an
+    /// NSIS script may ignore `/D=` entirely.
+    static func findInstalledClient(in install: Install, world: String) -> URL? {
+        let roots = [install.driveC, install.driveC.appendingPathComponent("Games")]
+        let fm = FileManager.default
+        for root in roots {
+            guard let kids = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { continue }
+            for kid in kids {
+                for probe in ["Ashita-cli.exe", "Ashita/Ashita-cli.exe", "Ashita.exe", "Ashita/Ashita.exe"]
+                where fm.fileExists(atPath: kid.appendingPathComponent(probe).path) {
+                    return kid
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Called with the folder an installer left the client in, when one is found.
+    var onClientInstalled: ((URL) -> Void)? = nil
+
     /// Start `exe` under wine in `install` and stream its output. `busy` clears when it exits.
     private func launchInstaller(exe: URL, in install: Install, name nm: String) {
-        appendLine("==> running \(exe.lastPathComponent) in \(install.prefixName) — install into C:\\Games\\\(nm)")
+        var args = [Install.winePath(exe, driveC: install.driveC)]
+        let silent = Self.isNSIS(exe)
+        if silent {
+            // /D must be last and unquoted -- that is NSIS's rule, not a preference.
+            args += ["/S", "/D=C:\\Games\\" + nm]
+            appendLine("==> running \(exe.lastPathComponent) in \(install.prefixName) — Nullsoft installer, running it unattended (/S). Nothing to click; this takes a while for a client-sized payload.")
+        } else {
+            appendLine("==> running \(exe.lastPathComponent) in \(install.prefixName) — install into C:\\Games\\\(nm)")
+        }
         var env = ProcessInfo.processInfo.environment
         env["WINEPREFIX"] = install.prefix.path; env["WINEDEBUG"] = "-all"
         env.removeValue(forKey: "DYLD_FALLBACK_LIBRARY_PATH"); env.removeValue(forKey: "DYLD_LIBRARY_PATH")
-        spawn(install.wine, args: [Install.winePath(exe, driveC: install.driveC)],
+        spawn(install.wine, args: args,
               env: env, cwd: exe.deletingLastPathComponent()) { [weak self] code in
-            self?.busy = false
-            self?.appendLine("==> installer exited \(code)")
+            guard let self else { return }
+            self.busy = false
+            self.appendLine("==> installer exited \(code)")
+            guard let found = Self.findInstalledClient(in: install, world: nm) else {
+                if silent { self.appendLine("!! \(nm)'s installer finished but no client folder was found under \(install.driveC.path). Check the log above.") }
+                return
+            }
+            self.appendLine("==> \(nm)'s client is at \(found.path)")
+            self.onClientInstalled?(found)
         }
     }
 
