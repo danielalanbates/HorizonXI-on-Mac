@@ -462,7 +462,7 @@ final class Runner: ObservableObject {
     }
 
     func launch(_ install: Install, perf: PerfSettings, profile: String = "horizonxi.ini",
-                useX87: Bool = true) {
+                useX87: Bool = true, world: String = "") {
         guard !running else { return }
         running = true
         loginFailure = ""
@@ -497,6 +497,8 @@ final class Runner: ObservableObject {
         // hits on this Mac (see LuaJITGuard). Idempotent, so this is cheap after the first run.
         LuaJITGuard.apply(install) { [weak self] in self?.appendLine($0) }
         appendLine("==> launching \(install.bootProfileName(profile)) (Ashita \(install.ashitaGeneration.rawValue))")
+        // Make the Dock tile say which world is running, under this project's own icon.
+        DockIcon.apply(to: install, world: world.isEmpty ? "Vana'diel" : world) { [weak self] in self?.appendLine($0) }
         var env = perf.environment(for: install)
         // x87 acceleration, two generations:
         //  * Cooperative (preferred): x87sidecar --cooperative launching the patched CX wine

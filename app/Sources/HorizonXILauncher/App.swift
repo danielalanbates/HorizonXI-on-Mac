@@ -1481,7 +1481,8 @@ struct ContentView: View {
                               + "(your setting, \(perf.renderer.title), is left alone). "
                               + "Clear it in the server's settings to override.")
         }
-        runner.launch(i, perf: effective, profile: server.bootProfile, useX87: server.x87)
+        runner.launch(i, perf: effective, profile: server.bootProfile, useX87: server.x87,
+                      world: server.name)
     }
 
     private func refresh() { Task { await refreshAsync() } }

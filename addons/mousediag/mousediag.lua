@@ -29,6 +29,8 @@ unsigned int GetDpiForSystem(void);
 short GetAsyncKeyState(int vk);
 int ShowCursor(int b);
 void* LoadCursorA(void* hi, const char* name);
+void* LoadImageA(void* hi, const char* name, unsigned int type, int cx, int cy, unsigned int fuseg);
+long SendMessageA(HWND h, unsigned int msg, unsigned int wp, long lp);
 void* SetCursor(void* c);
 long PostMessageA(HWND h, unsigned int msg, unsigned int wp, long lp);
 int   ClientToScreen(HWND h, POINT* p);
@@ -118,6 +120,35 @@ local VK_LBUTTON, VK_RBUTTON = 0x01, 0x02;
 ---  * lParam must be *client* coordinates of the FFXiClass window found here. An earlier version
 ---    of this used whatever window happened to be active, which is what made io.MousePos read as
 ---    ImGui's -FLT_MAX "no mouse" sentinel (docs/MOUSE.md, "known rough edge").
+
+-- Dock tile icon.
+--
+-- Wine's macdrv takes the macOS Dock tile from the *window's* Win32 icon -- which is why a wine
+-- Notepad shows a Notepad tile. FFXI sets none worth looking at, so the game sits in the Dock
+-- under a generic tile. Setting WM_SETICON here puts this project's crystal there instead, with
+-- nothing patched and no third-party binary touched.
+--
+-- Done once, after the client window exists. `state.icon_done` latches either way: a failure is
+-- a cosmetic miss, not something to retry every frame.
+local WM_SETICON, ICON_SMALL, ICON_BIG = 0x0080, 0, 1;
+local IMAGE_ICON, LR_LOADFROMFILE, LR_DEFAULTSIZE = 1, 0x0010, 0x0040;
+
+local function apply_dock_icon(hwnd)
+    if state.icon_done or hwnd == nil then return; end
+    state.icon_done = true;
+    local path = AshitaCore:GetInstallPath() .. '\\addons\\mousediag\\ffxi-dock.ico';
+    local f = io.open(path, 'rb');
+    if f == nil then log('dock icon: no ffxi-dock.ico at ' .. path); return; end
+    f:close();
+    local flags = bit.bor(LR_LOADFROMFILE, LR_DEFAULTSIZE);
+    local big = ffi.C.LoadImageA(nil, path, IMAGE_ICON, 256, 256, LR_LOADFROMFILE);
+    local small = ffi.C.LoadImageA(nil, path, IMAGE_ICON, 32, 32, LR_LOADFROMFILE);
+    if big == nil and small == nil then log('dock icon: LoadImageA returned nothing'); return; end
+    if big ~= nil then ffi.C.SendMessageA(hwnd, WM_SETICON, ICON_BIG, tonumber(ffi.cast('intptr_t', big))); end
+    if small ~= nil then ffi.C.SendMessageA(hwnd, WM_SETICON, ICON_SMALL, tonumber(ffi.cast('intptr_t', small))); end
+    log('dock icon: set from ' .. path);
+end
+
 local function inject_mouse_messages()
     local hwnd = state.client_hwnd;
     if hwnd == nil then
@@ -125,6 +156,7 @@ local function inject_mouse_messages()
         state.client_hwnd = hwnd;
     end
     if hwnd == nil then return; end
+    apply_dock_icon(hwnd);
     if ffi.C.GetForegroundWindow() ~= hwnd then
         -- Release anything held, so a button never latches down while the player is elsewhere.
         if state.ldown then
