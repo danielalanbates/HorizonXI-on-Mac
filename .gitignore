@@ -4,8 +4,11 @@ app/.build/
 app/build/
 dist/
 
-# never commit a boot profile — it holds the account name and password
+# never commit a boot profile — it holds the account name and password.
+# Ashita v4 spells them .ini, v3 (Eden, ValhallaXI, FFEra) spells them .xml.
 config/boot/*.ini
+config/boot/*.xml
+*.boot.xml
 *.premetal
 sweep-out/
 
