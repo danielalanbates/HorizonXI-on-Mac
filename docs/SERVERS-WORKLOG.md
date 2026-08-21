@@ -287,3 +287,79 @@ Daniel's report was right and the cause was not subtle. Found at start of sessio
 * FFEra (5.5 GB) and ValhallaXI installers downloaded. Valhalla's is a **.NET/Mono WinForms**
   installer, not NSIS — no silent flag found yet, so it needs either GUI driving or a look at
   what it actually downloads.
+
+### 2026-08-21 (later) — Eden installed and connecting; three worlds turn out to be Ashita v3
+
+**Eden's client is on this Mac and talks to Eden.** Their zip is not a client: it is
+`Installer.exe` (NSIS 3.06.1, 157 MB) + `data.pak` (5.6 GB). Run `Installer.exe /S` under wine in
+`prefix-installers` → 14 GB client (`Ashita/`, `SquareEnix/`, `Windower/`). It **ignores `/D=`**
+and installs to its own `C:\Eden`; the tree was moved to
+`/Volumes/x10/Video Games/Mac/FFXI/Eden` afterwards and `data.pak` + the zip deleted.
+
+Eden's own loader against Eden's own login server, first time from this Mac:
+
+```
+[08/21/26 08:05:41] Connected to server!
+[08/21/26 08:05:42] Invalid username or password.
+```
+
+So the machine side is done — **the only thing left for Eden is a real account**. Their loader
+(`Ashita/ffxi-bootmod/xiloader.exe`, an EdenServer fork of the DarkStar loader) offers
+`1.) Login  2.) Create Account  3.) Quit` on a console prompt, and it is a plain `std::cin` app
+rather than CatsEye's FTXUI one, so piped input would probably drive it. **Not done deliberately:**
+registering an account in Daniel's name on a third-party service is his call, not an unattended
+one, and a duplicate registration would be worse than none. Same wall as CatsEyeXI and Gaia XI.
+
+**ValhallaXI** reaches `Connected to server!` too, from a fresh client, same remaining wall.
+Their published "web installer" is a .NET WinForms *downloader*; its strings name what it fetches,
+so the launcher now goes straight to `https://mirror.valhalla.group/ValhallaXI.zip`
+(7,879,409,522 bytes, no auth, ranges supported) via the new `clientZip` install kind.
+
+**FFEra** installs the same way as Eden (`FFEraInstaller-Jan2023.exe`, NSIS 3.08); it *does*
+honour `/D=`. Its payload is `RetailClient-30221103_1.pak`.
+
+#### The finding that mattered: Eden, ValhallaXI and FFEra all ship **Ashita v3**
+
+Not v4, which is what this launcher was built against and what HorizonXI, CatsEyeXI and Gaia XI
+ship. The differences are small but total:
+
+| | Ashita v4 | Ashita v3 |
+|---|---|---|
+| injector | `Ashita-cli.exe` | `injector.exe` |
+| boot profile | `config/boot/<name>.ini` | `config/boot/<name>.xml` |
+| loader folder | `bootloader/` | `ffxi-bootmod/` |
+| credentials | `[ashita.boot] command =` | `<setting name="boot_command">` |
+
+Both have a command-line injector, so both launch unattended. `Install.AshitaGeneration` picks
+the generation off the client; `Credentials` reads and writes either format; `Runner` runs
+`<injector> <profile>.<ext>`. One piece of work, three worlds unlocked.
+
+#### `--check`: headless preflight
+
+`FFXI-on-Mac --check [--world <name>]` prints, for every world, where its client / Ashita
+generation / boot profile / game data actually resolve, and any blocking check. It opens no
+window and starts no wine, so it can be run while somebody is playing.
+
+Running it immediately found the **wrong-client bug a second time**: Supernova, OmicronXI and
+Tabula Rasa XI all reported `ok` while resolving to the client inside the wrapper — HorizonXI's.
+An empty `dataPath` means "the wrapper's client" only for HorizonXI and the local server; for
+anybody else it means *no client*, and launching would have run HorizonXI's data against their
+login server. Now blocked with that sentence.
+
+### Where every world actually stands (verified 2026-08-21, not assumed)
+
+| World | Client on this Mac | Reaches login server | Blocked on |
+|---|---|---|---|
+| HorizonXI | yes (v4) | yes, plays | — |
+| Local server | yes (v4) | yes | — |
+| CatsEyeXI | yes (v4) | yes, logs in | a character on their web dashboard |
+| Eden | **yes (v3, new)** | **yes** | an Eden account |
+| ValhallaXI | **yes (v3, new)** | **yes** | a Valhalla account |
+| FFEra | **yes (v3, new)** | not tried yet | account + first launch |
+| Gaia XI | yes (v4) | yes, logs in | Play must use the OpenGL pathway (now pinned) |
+| Supernova | no | — | retail pipeline never run end to end |
+| OmicronXI | no | — | same |
+| Tabula Rasa XI | no | — | server appears defunct |
+
+**Not claimed:** none of Eden / ValhallaXI / FFEra has been driven to a 3D world, because none has
+a usable account. "Connects and is refused at auth" is exactly as far as this got, and no further.
