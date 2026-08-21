@@ -13,6 +13,14 @@ import Foundation
 ///
 /// Exit status is 1 if any checked world has a blocking problem, so it is usable from a script.
 enum Headless {
+    /// True when this process was started to do one job and print about it, rather than to show
+    /// a window: `--check` (which exits here) or `--play` (which needs a window, but whose log
+    /// belongs on stderr as well -- see Runner.tee).
+    static var isHeadlessRun: Bool {
+        let a = CommandLine.arguments
+        return a.contains("--check") || a.contains("--play")
+    }
+
     @MainActor static func runIfAsked() {
         let args = CommandLine.arguments
         guard args.contains("--check") else { return }

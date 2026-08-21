@@ -48,6 +48,11 @@ final class Runner: ObservableObject {
     private lazy var logHandle: FileHandle? = try? FileHandle(forWritingTo: Self.logFile)
 
     private func tee(_ s: String) {
+        // A headless run (--play/--check) has no log strip to read, and its silence is exactly
+        // what made --play look like it did nothing for weeks. Mirror to stderr there.
+        if Headless.isHeadlessRun, let d = s.data(using: .utf8) {
+            FileHandle.standardError.write(d)
+        }
         guard let h = logHandle, let d = s.data(using: .utf8) else { return }
         h.seekToEndOfFile(); h.write(d)
     }
@@ -569,9 +574,17 @@ final class Runner: ObservableObject {
             exe = coop.sidecar
             args = ["--cooperative", "/bin/sh", "-c", cmd]
             appendLine("==> x87 cooperative: \(coop.wine.path) (sidecar held open for the client)")
+        } else if let wine = X87Sidecar.patchedWine() {
+            // Not about x87: the wrapper's own wine exits one second after login. See
+            // X87Sidecar.patchedWine.
+            exe = wine
+            args = [injector, bootFile]
+            appendLine("==> wine: \(wine.path)")
         } else {
             exe = install.wine
             args = [injector, bootFile]
+            appendLine("!! falling back to the wrapper's own wine — expect the client to exit "
+                       + "about a second after login (docs/WINE-BUILD.md)")
         }
         spawnViaShell(exe,
               args: args,

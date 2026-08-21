@@ -1379,6 +1379,7 @@ struct ContentView: View {
         guard let i = active else { return }
         if runner.busy {
             notice = "An install or update is running in the wrapper. Play would stop it — wait for it to finish (or cancel it from Setup & Diagnostics)."
+            runner.appendLine("!! " + notice)
             return
         }
         notice = ""
@@ -1391,6 +1392,7 @@ struct ContentView: View {
         let server = store.selected ?? Server.builtins[0]
         guard !server.host.isEmpty else {
             notice = "\(server.name) has no login host set."
+            runner.appendLine("!! " + notice)
             return
         }
 
@@ -1422,12 +1424,14 @@ struct ContentView: View {
         if server.host.trimmingCharacters(in: .whitespaces).isEmpty {
             notice = "\(server.name) has no login host set. Get it from that server's own "
                    + "launcher or setup guide and put it in the server's Host field."
+            runner.appendLine("!! " + notice)
             return
         }
         // A world the install has no boot profile for — the local one, on every machine — needs
         // that file to exist before anything can be written into it.
         if !Credentials.ensureProfile(server.bootProfile, in: i) {
             notice = "Could not create config/boot/\(server.bootProfile)."
+            runner.appendLine("!! " + notice)
             return
         }
         // The client was installed by HorizonXI and carries their logo in its own data. On any
@@ -1445,6 +1449,7 @@ struct ContentView: View {
                    + (server.name == "CatsEyeXI"
                       ? "Open Setup & Diagnostics › CatsEyeXI installer… to update it with their own launcher."
                       : "Update the client first.")
+            runner.appendLine("!! " + notice)
             runner.appendLine("!! version check: \(server.name) requires \(requiredVer), installed \(have)")
             return
         }
@@ -1464,6 +1469,7 @@ struct ContentView: View {
             if !Credentials.apply(user: user, password: pass, to: i,
                                   profile: server.bootProfile, server: server.host) {
                 notice = "Could not write config/boot/\(server.bootProfile) — launching with its existing account."
+                runner.appendLine("!! " + notice)
             }
         }
         // A world may need a different renderer than the global preference (Gaia XI: DXVK kills
