@@ -44,6 +44,28 @@ struct Server: Codable, Identifiable, Hashable {
     /// One line about the download: what it is and roughly how big.
     var installNote: String = ""
 
+    /// Which server emulator this world runs. Decides whether it appears in the launcher at
+    /// all: LandSandBoat is the only FFXI emulator still in development, so a world on anything
+    /// else is frozen at whatever its fork inherited. Established 2026-08-21 by probing each
+    /// login server directly -- see `Codebase` and docs/CODEBASE.md.
+    var codebase: Codebase = .unknown
+
+    /// The emulator a world runs on, as told by its login server.
+    ///
+    /// The discriminator is port 54231. Modern LandSandBoat speaks JSON over TLS there
+    /// (`src/login/auth_session.cpp`) and answers a stale version tuple with a verbatim
+    /// "Your xiloader is too old." payload. DarkStar-lineage login servers predate TLS entirely
+    /// and never complete a handshake. `scripts/login-probe.py` re-runs the test.
+    enum Codebase: String, Codable {
+        /// TLS completed and the server answered LandSandBoat's own JSON (or its binary result
+        /// code, for a world running an older LSB login).
+        case landSandBoat
+        /// Port open, TLS refused or timed out: the pre-LSB binary login protocol.
+        case darkStarLineage
+        /// Not probed, or no login host published.
+        case unknown
+    }
+
     /// Where a new player signs up for this world, and how signing up actually works there.
     /// Checked 2026-08-21, each against the server's own site or the invite API — several of
     /// these worlds have no web signup at all (the account is typed into the loader console on
@@ -87,11 +109,13 @@ struct Server: Codable, Identifiable, Hashable {
     // had before, so every field added since then is missing from it — and a decode failure here
     // throws the file away and silently resets the login hosts they typed in.
     init(name: String, host: String, bootProfile: String, verified: Bool, note: String,
-         era: String = "", population: Int = 0, pinned: Bool = false, local: Bool = false,
+         era: String = "", population: Int = 0, pinned: Bool = false,
+         codebase: Codebase = .unknown, local: Bool = false,
          requiredClientURL: String = "", requiredClient: String = "",
          installURL: String = "", installKind: InstallKind = .website, installNote: String = "",
          accountURL: String = "", accountHow: String = "", discordURL: String = "",
          renderer: Renderer? = nil, x87: Bool = true, msync: Bool = true) {
+        self.codebase = codebase
         self.name = name; self.host = host; self.bootProfile = bootProfile
         self.verified = verified; self.note = note; self.era = era
         self.population = population; self.pinned = pinned; self.local = local
@@ -119,6 +143,8 @@ struct Server: Codable, Identifiable, Hashable {
         installKind = try c.decodeIfPresent(InstallKind.self, forKey: .installKind) ?? .website
         accountURL  = try c.decodeIfPresent(String.self, forKey: .accountURL) ?? ""
         accountHow  = try c.decodeIfPresent(String.self, forKey: .accountHow) ?? ""
+        codebase    = try c.decodeIfPresent(Codebase.self, forKey: .codebase)
+            ?? Server.all.first { $0.name == name }?.codebase ?? .unknown
         discordURL  = try c.decodeIfPresent(String.self, forKey: .discordURL) ?? ""
         installNote = try c.decodeIfPresent(String.self, forKey: .installNote) ?? ""
         renderer    = try c.decodeIfPresent(Renderer.self, forKey: .renderer)
@@ -154,11 +180,21 @@ struct Server: Codable, Identifiable, Hashable {
     /// tested-by-this-project are different claims, and only the second earns the badge. Two
     /// servers (Gaia XI, Tabula Rasa XI) publish no login host anywhere this project could find;
     /// those stay blank on purpose rather than guessing.
-    static let builtins: [Server] = [
+    /// The worlds the launcher offers. LandSandBoat only, as of 2026-08-21: it is the one FFXI
+    /// emulator still being developed, so a world on anything else stops receiving content and
+    /// fixes from upstream. The rest are kept in `retired` rather than deleted -- their install
+    /// pathways, boot profiles and client versions were all real work, and a world that turns
+    /// out to be on LSB after all comes back by changing one `codebase:`.
+    static var builtins: [Server] { all.filter { $0.codebase == .landSandBoat } }
+
+    /// Cut for running a non-LSB emulator, or defunct. See docs/CODEBASE.md.
+    static var retired: [Server] { all.filter { $0.codebase != .landSandBoat } }
+
+    static let all: [Server] = [
         Server(name: "HorizonXI", host: "play.horizonxi.com", bootProfile: "horizonxi.ini",
                verified: true,
                note: "The server this project was built and tested against.",
-               era: "Chains of Promathia · 75 cap", population: 9495, pinned: true,
+               era: "Chains of Promathia · 75 cap", population: 9495, pinned: true, codebase: .landSandBoat,
                installURL: "https://horizonxi.com/play", installKind: .horizonTorrent,
                installNote: "HorizonXI's own client, fetched the way their launcher does it: a 9.4 GB torrent, then their updates. Needs aria2 (brew install aria2).",
                accountURL: "https://horizonxi.com/register",
@@ -167,14 +203,14 @@ struct Server: Codable, Identifiable, Hashable {
         Server(name: "Local server", host: "127.0.0.1", bootProfile: "lsb.ini",
                verified: true,
                note: "LandSandBoat, built and run on this Mac. Nobody else can reach it.",
-               era: "LandSandBoat · your own world", population: 9494, pinned: true,
+               era: "LandSandBoat · your own world", population: 9494, pinned: true, codebase: .landSandBoat,
                local: true,
                accountHow: "Your own world: the loader window offers to create the account the "
                      + "first time you connect. No signup site, and nobody to ask."),
         Server(name: "CatsEyeXI", host: "server.catseyexi.com", bootProfile: "catseyexi.ini",
                verified: false,
                note: "Login host from CatsEyeXI's own connect page. Untested by this project.",
-               era: "Custom content · 75 cap", population: 2722,
+               era: "Custom content · 75 cap", population: 2722, codebase: .landSandBoat,
                // CatsEyeXI's server settings are public; CLIENT_VER there is what its login
                // server enforces (VER_LOCK = 2, "this version or newer"). 30251204_1 as of
                // 2026-08-15. HorizonXI's client was at 30251101_2 that day, which is exactly
@@ -189,7 +225,7 @@ struct Server: Codable, Identifiable, Hashable {
                discordURL: "https://discord.gg/catseyexi"),
         Server(name: "Eden", host: "play.edenxi.com", bootProfile: "eden.ini", verified: false,
                note: "Login host from Eden's own new-player wiki. Untested by this project.",
-               era: "Classic · 75 cap", population: 1925,
+               era: "Classic · 75 cap", population: 1925, codebase: .darkStarLineage,
                // Eden534.zip on Google Drive (5.8 GB, checked 2026-08-16): a full pre-retail-era
                // client + Ashita + Windower, default C:\Eden, loader Ashita\ffxi-bootmod\xiloader.exe.
                // The bit.ly on their site resolves to this file id; if Eden ships a new build the id
@@ -208,7 +244,7 @@ struct Server: Codable, Identifiable, Hashable {
         Server(name: "FFEra", host: "ffera.com", bootProfile: "ffera.ini", verified: false,
                note: "Longest-running 75-cap community server. Login host from FFEra's own "
                      + "wiki. Untested by this project.",
-               era: "Wings of the Goddess · 75 cap", population: 218,
+               era: "Wings of the Goddess · 75 cap", population: 218, codebase: .darkStarLineage,
                // FFEraInstaller-Jan2023.zip on Google Drive (5.5 GB): installer + RetailClient pak,
                // default C:\Games\FFEra, stock xiloader. Registration is on their site.
                installURL: "https://drive.usercontent.google.com/download?id=1w2o3XH9jmeFF81kG07TUf8hP7cwo8tuD&export=download&confirm=t", installKind: .installerExe,
@@ -220,7 +256,7 @@ struct Server: Codable, Identifiable, Hashable {
         // standard xiloader TLS/JSON login (bad-credential probe returned LOGIN_ERROR).
         Server(name: "Gaia XI", host: "play.gaiaxi.com", bootProfile: "GaiaXI.ini", verified: false,
                note: "Accounts are registered on gaiaxi.com.",
-               era: "75 cap", population: 276,
+               era: "75 cap", population: 276, codebase: .landSandBoat,
                installURL: "https://gaiaxi.com/account/index.xi?return=downloadzip", installKind: .website,
                installNote: "Gaia XI's launcher zip is behind their site login (register there first). Save it, then Run installer… — their launcher.exe downloads the whole game into C:\\Games\\Gaia XI.",
                accountURL: "https://gaiaxi.com/account/index.xi",
@@ -234,7 +270,7 @@ struct Server: Codable, Identifiable, Hashable {
         Server(name: "ValhallaXI", host: "logon.valhalla.group", bootProfile: "valhallaxi.ini",
                verified: false,
                note: "Login host from Valhalla's own connect page (2026-08). Untested by this project.",
-               era: "90 cap", population: 216,
+               era: "90 cap", population: 216, codebase: .darkStarLineage,
                // Their web installer zip (3.6 MB, 2026r14 as of 2026-08-16); the installer then
                // downloads the client. If this exact file goes away the launcher opens their page.
                // Their web installer is a .NET WinForms downloader; its strings name the file it
@@ -254,7 +290,7 @@ struct Server: Codable, Identifiable, Hashable {
                verified: false,
                note: "Login host from Supernova's own Ashita setup guide. Untested by this "
                      + "project.",
-               era: "75 cap", population: 155,
+               era: "75 cap", population: 155, codebase: .landSandBoat,
                installURL: "https://supernovaffxi.wordpress.com/get-started-on-supernova/client-installation/", installKind: .retail,
                installNote: "Bring-your-own retail FFXI: Square Enix's free client (7.7 GB, five parts) installs inside the wrapper, then PlayOnline updates it, then Supernova's patch and DATs go on top. Slow (hours) but every step is automated.",
                accountHow: "No signup page — the account is created in the loader window that "
@@ -265,7 +301,7 @@ struct Server: Codable, Identifiable, Hashable {
                verified: false,
                note: "Heavily customized. Login host from Omicron's own wiki. Untested by this "
                      + "project.",
-               era: "99 cap", population: 105,
+               era: "99 cap", population: 105, codebase: .landSandBoat,
                installURL: "https://omicronxi.fandom.com/wiki/Connecting_to_OmicronXI", installKind: .retail,
                installNote: "Bring-your-own retail FFXI: Square Enix's free client (7.7 GB, five parts) installs inside the wrapper, then PlayOnline updates it, then Ashita + xiloader are added. Slow (hours) but every step is automated.",
                // omicronffxi.com sits behind a Cloudflare challenge this project cannot read,
@@ -276,7 +312,7 @@ struct Server: Codable, Identifiable, Hashable {
         Server(name: "Tabula Rasa XI", host: "", bootProfile: "tabularasa.ini", verified: false,
                note: "No login host published anywhere this project could find — get it from "
                      + "their own launcher.",
-               era: "75 cap", population: 70,
+               era: "75 cap", population: 70, codebase: .unknown,
                installKind: .none,
                installNote: "Server appears defunct: site parked and their GitHub last touched 2024-05 (checked 2026-08-16). Kept on the list so an existing install can still be pointed at a host from their Discord.",
                accountHow: "No signup anywhere: tabularasaxi.com is a parked domain (checked "
@@ -312,7 +348,11 @@ final class ServerStore: ObservableObject {
 
     /// Keep the user's edited hosts, but pick up servers added to `builtins` in later releases.
     private static func merge(saved: [Server]) -> [Server] {
-        var out = saved
+        // A servers.json written before the LSB-only cut still lists the retired worlds. Drop
+        // those by name -- but only ones this project shipped and has since retired, never a
+        // server the user added themselves.
+        let retiredNames = Set(Server.retired.map(\.name))
+        var out = saved.filter { !retiredNames.contains($0.name) }
         for b in Server.builtins where !saved.contains(where: { $0.name == b.name }) {
             out.append(b)
         }

@@ -204,3 +204,38 @@ Rule: **rebuild the sidecar (and re-check the coop wine) after every macOS updat
 In-world fps validation of the cooperative path was pending at write time (screen
 locked); the harness invocation is
 `BENCH_WINE=~/Games/hxi-workspace/wine-coop-wrap.sh python3 inworld.py --tag <t> --env FFXI_FPS_DIVISOR=1 --sample 45`.
+
+## 2026-08-21: cooperative mode does NOT survive into the client — this is the 5 fps
+
+First in-world use of the cooperative path (its fps validation was still pending above), and it
+fails. Observed twice, from a normal Play press:
+
+* `x87sidecar-coop --cooperative …/wine-coop/wine/bin/wine …` starts and is visible in `ps`.
+* Within about a minute it is **gone**, while `horizon-loader.exe` keeps running, reparented to
+  launchd (PPID 1).
+* The client then burns ~90-110% CPU on one core and draws roughly 5 fps, even at low resolution
+  — stock Rosetta x87 speed, exactly the wall this sidecar exists to remove.
+
+That is consistent with the failure mode already written down at the top of this file: the
+handshake covers the process that performs it. The patched wine re-execs through the sidecar,
+but the client Ashita ends up running in is not the process that handshook, so it is never
+patched; and when the sidecar's own child exits, the sidecar exits with it, leaving the game
+running unaccelerated. Nothing in the launcher notices — the log line says the cooperative
+pathway was used, and it was; it just did not stick.
+
+Not yet fixed. Candidate pathways, cheapest first:
+
+1. **Keep the sidecar alive and re-handshake per child.** Check whether upstream's cooperative
+   mode has a "follow children" / `--wait` option; if it exits because its direct child exited,
+   the launcher can hold it open and let wine's descendants handshake as they spawn.
+2. **Cooperative launch of the client itself, not the injector.** Ashita's boot chain is
+   `Ashita-cli.exe` -> `horizon-loader.exe`; if the loader can be started directly under the
+   sidecar with Ashita injecting afterwards, the process that handshakes is the one that renders.
+3. **Revive attach-by-pid on current Rosetta.** It was 2.5x when it worked (11.3 -> 28.5 fps) and
+   broke on 26.5.2 because attaching to a running process cannot flush the target's i-cache.
+   Worth re-testing against the current macOS with a freshly built sidecar before assuming it is
+   still broken.
+
+Whatever the fix, the launcher should **verify rather than assume**: after the client pid appears,
+confirm the sidecar is still alive and attached to *that* pid, and say so in the log strip.
+A silent 2.5x regression is exactly what happened here.
