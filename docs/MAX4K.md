@@ -265,3 +265,15 @@ the harness's blind key-driving needs its wait-for-pixels guard (added to inworl
   vkWaitForFences may spin rather than sleep. If so, the residual wait is stealing CPU
   from the x87-bound main thread, and a sleeping wait (or MoltenVK fence fix) frees
   real frame time. Verify with a profiler sample of the wait site before believing it.
+
+## 2026-08-21 (later): fence-spin hypothesis REFUTED by profiler sample
+
+/usr/bin/sample of the live client (8 s in-world): the fence wait resolves to
+`vkWaitForFences -> _pthread_cond_wait` — a sleeping wait, 366/1079 samples (~34% of the
+main thread's wall time). No spin; MoltenVK is efficient here. The waits are genuine
+GPU/completion latency, and with NOWAIT (breaks entities), side-queue (no second queue
+exists), early-fence and periodic-flush (both measured, no gain) all closed, the
+read-back wall is now optimized to its floor on this stack. Remaining upside lives
+elsewhere: Metal completion-handler latency inside MoltenVK (needs a CI-built patched
+MoltenVK) or making the client's x87 math faster (sidecar upstream). Sample saved
+paths + probe tooling: /tmp/game-sample.txt (transient), mvkprobe.c in session notes.
