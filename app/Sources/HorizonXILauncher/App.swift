@@ -1300,7 +1300,17 @@ struct ContentView: View {
                 notice = "Could not write config/boot/\(server.bootProfile) — launching with its existing account."
             }
         }
-        runner.launch(i, perf: perf, profile: server.bootProfile)
+        // A world may need a different renderer than the global preference (Gaia XI: DXVK kills
+        // its client, OpenGL boots it). Applied here rather than by mutating the user's setting,
+        // so switching worlds never silently rewrites what they chose.
+        var effective = perf
+        if let r = server.renderer, r != perf.renderer {
+            effective.renderer = r
+            runner.appendLine("i  \(server.name) is pinned to the \(r.title) renderer "
+                              + "(your setting, \(perf.renderer.title), is left alone). "
+                              + "Clear it in the server's settings to override.")
+        }
+        runner.launch(i, perf: effective, profile: server.bootProfile)
     }
 
     private func refresh() { Task { await refreshAsync() } }

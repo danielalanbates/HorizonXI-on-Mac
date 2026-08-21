@@ -24,10 +24,15 @@ struct Install: Identifiable, Hashable {
     static let installerPrefixName = "prefix-installers"
     var installerPrefix: Install { Install(wrapper: wrapper, prefixName: Self.installerPrefixName) }
 
+    /// The world this install was resolved for, when it came from a `Server`. Diagnostics only
+    /// (`clientAmbiguity`); the launch itself keys off `gameDirOverride`.
+    var worldName: String? = nil
+
     /// The same wrapper and prefix, pointed at a world's own game folder.
     func forServer(_ s: Server) -> Install {
         var c = self
-        c.gameDirOverride = s.dataPath.isEmpty ? nil : Self.resolveAshitaDir(URL(fileURLWithPath: s.dataPath))
+        c.worldName = s.name
+        c.gameDirOverride = s.dataPath.isEmpty ? nil : Self.resolveAshitaDir(URL(fileURLWithPath: s.dataPath), world: s.name)
         c.dataRoot = s.dataPath.isEmpty ? nil : URL(fileURLWithPath: s.dataPath)
         return c
     }
@@ -53,15 +58,58 @@ struct Install: Identifiable, Hashable {
 
     /// First folder at or under `root` (depth ≤ 3) that holds Ashita-cli.exe. Falls back to
     /// `root` itself, so a wrong choice still shows up as "missing Ashita-cli.exe" at that path.
-    static func resolveAshitaDir(_ root: URL) -> URL {
+    ///
+    /// **`world` matters when `root` holds more than one client.** Measured 2026-08-21: Eden's
+    /// `dataPath` had been set to the *parent* folder that holds every world's install
+    /// (`.../Mac/FFXI`), so this search returned `HorizonXI-fresh` and "Play Eden" silently
+    /// launched the HorizonXI client, HorizonXI's loader and HorizonXI's DATs against
+    /// play.edenxi.com, with nothing in the UI saying so. When a world name is given, a candidate
+    /// whose path names that world wins; `clientAmbiguity` reports the cases with no safe guess.
+    static func resolveAshitaDir(_ root: URL, world: String? = nil) -> URL {
         let fm = FileManager.default
         if fm.fileExists(atPath: root.appendingPathComponent("Ashita-cli.exe").path) { return root }
-        if let c = ashitaCache[root.path], fm.fileExists(atPath: c.appendingPathComponent("Ashita-cli.exe").path) { return c }
-        if let hit = find(under: root, depth: 3, where: { fm.fileExists(atPath: $0.appendingPathComponent("Ashita-cli.exe").path) }) {
-            ashitaCache[root.path] = hit
-            return hit
+        let key = root.path + "#" + (world ?? "")
+        if let c = ashitaCache[key], fm.fileExists(atPath: c.appendingPathComponent("Ashita-cli.exe").path) { return c }
+        let hits = ashitaCandidates(under: root)
+        guard !hits.isEmpty else { return root }
+        let pick = world.flatMap { w in hits.first { matches(world: w, path: $0, under: root) } } ?? hits[0]
+        ashitaCache[key] = pick
+        return pick
+    }
+
+    /// Every folder at or under `root` (depth <= 3) holding Ashita-cli.exe, shallowest first.
+    static func ashitaCandidates(under root: URL) -> [URL] {
+        let fm = FileManager.default
+        return findAll(under: root, depth: 3) {
+            fm.fileExists(atPath: $0.appendingPathComponent("Ashita-cli.exe").path)
         }
-        return root
+    }
+
+    /// Does `path` (below `root`) name `world`? Compared on letters and digits only, so
+    /// "Gaia XI" matches `GaiaXI` and "CatsEyeXI" matches `catseyexi-client`, while a folder
+    /// named for a different world never matches.
+    static func matches(world: String, path: URL, under root: URL) -> Bool {
+        func squash(_ s: String) -> String { s.lowercased().filter { $0.isLetter || $0.isNumber } }
+        let w = squash(world)
+        guard !w.isEmpty else { return false }
+        let rel = path.path.hasPrefix(root.path) ? String(path.path.dropFirst(root.path.count)) : path.path
+        return squash(rel).contains(w)
+    }
+
+    /// nil when this install's client is unambiguously the world's own. Otherwise a sentence
+    /// naming what was found, for the UI to refuse the launch with. A data root holding several
+    /// clients, none named for the world, is exactly the wrong-client case: there is no safe
+    /// guess, so it must not be guessed.
+    var clientAmbiguity: String? {
+        guard let root = dataRoot, let world = worldName else { return nil }
+        let hits = Self.ashitaCandidates(under: root)
+        guard hits.count > 1 else { return nil }
+        if hits.contains(where: { Self.matches(world: world, path: $0, under: root) }) { return nil }
+        let names = hits.prefix(4).map { $0.lastPathComponent }.joined(separator: ", ")
+        return "\(root.path) holds \(hits.count) different FFXI clients (\(names)) and none is "
+             + "named for \(world). Point \(world) at its own client folder, not at the folder "
+             + "that contains them all -- otherwise it launches another world's client and data "
+             + "against \(world)'s login server."
     }
 
     /// The folder that holds `FINAL FANTASY XI` (and `PlayOnlineViewer`) for this world — what the
@@ -117,6 +165,30 @@ struct Install: Identifiable, Hashable {
             if level.isEmpty { break }
         }
         return nil
+    }
+
+    /// Every match, shallowest first. Same bounds and ROM-skipping as `find`.
+    private static func findAll(under root: URL, depth: Int, where pred: (URL) -> Bool) -> [URL] {
+        let fm = FileManager.default
+        var level: [URL] = [root]
+        var out: [URL] = []
+        for _ in 0...depth {
+            var next: [URL] = []
+            for dir in level {
+                if pred(dir) { out.append(dir); continue }
+                guard let kids = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else { continue }
+                for k in kids {
+                    if heavyDirs.contains(k.lastPathComponent) {
+                        if pred(k) { out.append(k) }
+                        continue
+                    }
+                    if (try? k.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true { next.append(k) }
+                }
+            }
+            level = next
+            if level.isEmpty { break }
+        }
+        return out
     }
 
     /// Windows-side path of `gameDir` for the wine command line: `C:\HorizonXI` for the classic

@@ -237,3 +237,53 @@ failures. Their patch_version.json zip URL is dead; `patch/manifest.json` is the
 
 TODO: make Play produce this launch for Gaia (bisect env/DXVK; per-world renderer fallback),
 fix the --args-no-window bug, re-verify HorizonXI/CatsEye.
+
+## 2026-08-21 — "Eden didn't work" root cause: there was never an Eden client
+
+Daniel's report was right and the cause was not subtle. Found at start of session:
+
+* `servers.json` had Eden's `dataPath` = `/Volumes/x10/Video Games/Mac/FFXI` — the **parent
+  folder that holds every world's install**, not Eden's own. `Install.resolveAshitaDir` does a
+  breadth-first search for `Ashita-cli.exe` under that folder and returned `HorizonXI-fresh`.
+* So "Play Eden" launched **the HorizonXI client, HorizonXI's `horizon-loader.exe`, HorizonXI's
+  registry and HorizonXI's DATs** against `play.edenxi.com`. `eden.ini` was sitting inside
+  `HorizonXI-fresh/config/boot/` with `file = .\bootloader\horizon-loader.exe`. A live loader
+  was still up from that attempt, stalled just after `Resolved server address to
+  '144.217.79.186:54231'`. Nothing in the UI said any of this.
+* `installer-downloads/Eden-installer.zip` was **3.30 GB of 5.77 GB** — a truncated download,
+  never extracted, never installed. There was no Eden client on this Mac at all.
+
+### Fixes to the launcher (so this class of failure cannot recur silently)
+
+* `Install.resolveAshitaDir(_:world:)` now takes the world name. When a data root holds several
+  clients, a candidate whose path names the world wins over one that does not (compared on
+  letters and digits only, so "Gaia XI" matches `GaiaXI` and "CatsEyeXI" matches
+  `catseyexi-client`). New `Install.ashitaCandidates(under:)` and `findAll` back it.
+* `Install.clientAmbiguity` returns a sentence when the data root holds >1 client and none is
+  named for the world — the case with no safe guess.
+* New **blocking** preflight check `worldclient` ("Client belongs to this world"). Blocking, not
+  a warning: every downstream step succeeds when the wrong client is picked, which is exactly
+  why this went unnoticed.
+
+### Eden client, actually installed
+
+* Re-downloaded to the full **5,772,431,825 bytes** (`curl -C -`; the Google Drive direct URL in
+  `Servers.builtins` still works and supports ranges).
+* The zip is **not** a client — it is `Installer.exe` (157 MB) + `data.pak` (5.6 GB).
+  `Installer.exe` is **NSIS 3.06.1**, so it takes `/S` and installs unattended. No GUI driving
+  needed. It **ignores `/D=`** and installs to its own default `C:\Eden`.
+* Run: `WINEPREFIX=<wrapper>/SharedSupport/prefix-installers wine 'C:\Games\Eden\Installer.exe' /S`
+  → lays down `Ashita/`, `SquareEnix/`, `Windower/`.
+* **Eden ships Ashita v3, not v4**: its boot configs are `Ashita/config/boot/Eden*.xml`, and the
+  loader lives in `Ashita/ffxi-bootmod/`. The launcher's whole launch path assumes Ashita v4
+  (`Ashita-cli.exe` + `config/boot/*.ini`). This is a real, separate piece of work — see below.
+
+### Also this session
+
+* **Per-world renderer** (`Server.renderer`). Gaia XI's client boots on wined3d/OpenGL and dies
+  ~1 s after login on DXVK (measured 2026-08-19); the choice therefore cannot be global. Gaia XI's
+  built-in entry is pinned to `.openGL`; Play applies it without mutating the user's own setting
+  and logs that it did.
+* FFEra (5.5 GB) and ValhallaXI installers downloaded. Valhalla's is a **.NET/Mono WinForms**
+  installer, not NSIS — no silent flag found yet, so it needs either GUI driving or a look at
+  what it actually downloads.

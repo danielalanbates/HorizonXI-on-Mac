@@ -62,6 +62,18 @@ enum Preflight {
             "present — launch must go through Ashita, not xiloader",
             "missing \(install.ashitaCLI.path)")
 
+        // The wrong-client trap. A world pointed at a folder that holds several clients gets
+        // whichever one the search reached first, and every downstream step then succeeds --
+        // Ashita injects, the loader connects, the registry points somewhere valid -- against
+        // another world's game data. It cost this project a full "Eden doesn't work" cycle in
+        // August 2026. Blocking, not a warning: there is no safe guess to fall back to.
+        if let why = install.clientAmbiguity {
+            add("worldclient", "Client belongs to this world", false, "", why)
+        } else if let w = install.worldName, install.dataRoot != nil {
+            add("worldclient", "Client belongs to this world", true, install.gameDir.path,
+                "not \(w)'s own client")
+        }
+
         // FINDINGS #1/#2: the wrapper's rpath points at SharedSupport/wine/lib, the dylibs ship in
         // Contents/Frameworks. Symlinking is what removes the DYLD_* dependency that SIP strips.
         let libDir = install.sharedSupport.appendingPathComponent("wine/lib")

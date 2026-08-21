@@ -43,6 +43,12 @@ struct Server: Codable, Identifiable, Hashable {
     var installKind: InstallKind = .website
     /// One line about the download: what it is and roughly how big.
     var installNote: String = ""
+    /// Renderer this world's client needs, when the global choice does not work for it.
+    /// nil = use the user's setting. Measured 2026-08-19: Gaia XI's client reaches its title
+    /// screen on wined3d/OpenGL but exits about a second after login (Ashita
+    /// UninstallAshita(204)) on the DXVK pathway that every other world runs fine, so the
+    /// choice has to be per world rather than global.
+    var renderer: Renderer? = nil
 
     enum InstallKind: String, Codable { case website, installerExe, catseyeLauncher, horizonTorrent, retail, none }
 
@@ -53,12 +59,14 @@ struct Server: Codable, Identifiable, Hashable {
     init(name: String, host: String, bootProfile: String, verified: Bool, note: String,
          era: String = "", population: Int = 0, pinned: Bool = false, local: Bool = false,
          requiredClientURL: String = "", requiredClient: String = "",
-         installURL: String = "", installKind: InstallKind = .website, installNote: String = "") {
+         installURL: String = "", installKind: InstallKind = .website, installNote: String = "",
+         renderer: Renderer? = nil) {
         self.name = name; self.host = host; self.bootProfile = bootProfile
         self.verified = verified; self.note = note; self.era = era
         self.population = population; self.pinned = pinned; self.local = local
         self.requiredClientURL = requiredClientURL; self.requiredClient = requiredClient
         self.installURL = installURL; self.installKind = installKind; self.installNote = installNote
+        self.renderer = renderer
     }
 
     init(from decoder: Decoder) throws {
@@ -78,6 +86,13 @@ struct Server: Codable, Identifiable, Hashable {
         installURL  = try c.decodeIfPresent(String.self, forKey: .installURL) ?? ""
         installKind = try c.decodeIfPresent(InstallKind.self, forKey: .installKind) ?? .website
         installNote = try c.decodeIfPresent(String.self, forKey: .installNote) ?? ""
+        renderer    = try c.decodeIfPresent(Renderer.self, forKey: .renderer)
+        // A world the user has not renamed inherits a renderer the project has since measured
+        // for it -- otherwise a servers.json written before this field existed keeps launching
+        // Gaia XI on the pathway that is known to kill it.
+        if renderer == nil, let b = Server.builtins.first(where: { $0.name == name }) {
+            renderer = b.renderer
+        }
         if installURL.isEmpty, let b = Server.builtins.first(where: { $0.name == name }) {
             installURL = b.installURL; installKind = b.installKind; installNote = b.installNote
         }
@@ -144,7 +159,11 @@ struct Server: Codable, Identifiable, Hashable {
                note: "Accounts are registered on gaiaxi.com.",
                era: "75 cap", population: 276,
                installURL: "https://gaiaxi.com/account/index.xi?return=downloadzip", installKind: .website,
-               installNote: "Gaia XI's launcher zip is behind their site login (register there first). Save it, then Run installer… — their launcher.exe downloads the whole game into C:\\Games\\Gaia XI."),
+               installNote: "Gaia XI's launcher zip is behind their site login (register there first). Save it, then Run installer… — their launcher.exe downloads the whole game into C:\\Games\\Gaia XI.",
+               // Their client dies about a second after login on the DXVK pathway and boots on
+               // wined3d/OpenGL. Slower, but a slow world beats a world that exits. See
+               // docs/SERVERS-WORKLOG.md, 2026-08-19.
+               renderer: .openGL),
         Server(name: "ValhallaXI", host: "logon.valhalla.group", bootProfile: "valhallaxi.ini",
                verified: false,
                note: "Login host from Valhalla's own connect page (2026-08). Untested by this project.",
