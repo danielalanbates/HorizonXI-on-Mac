@@ -442,3 +442,30 @@ from (GUI app vs terminal); that is where to look next.
 
 `spawnViaShell` now writes `last-spawn.txt` (exe, args, cwd, full environment) on every launch —
 it was referenced in a comment but nothing wrote it, and diffing it is what made this possible.
+
+### 2026-08-21 (later) — FFEra launches too; v3 profiles are now synthesised when none ships
+
+FFEra's client installs fine (NSIS `/S`, and unlike Eden's it honours `/D=`) but ships Ashita v3
+with **no `config` folder at all** — v3 normally writes its boot XML from its own GUI
+configurator, which is not a pathway under wine. `Credentials.ensureProfile` therefore had nothing
+to seed from and returned false, so Play could not even start.
+
+`Credentials.v3Profile(loader:folder:)` now writes a minimal v3 boot XML from scratch when the
+world ships none: `boot_file` names whatever loader is actually in the client's loader folder
+(`defaultLoaderName`, which reads `Install.bootLoaderDir`, so `ffxi-bootmod` and `bootloader` both
+work), and `boot_command` is filled with the account by `apply` before each launch, exactly as for
+a v4 `.ini`.
+
+Result, through the app:
+
+```
+==> launching ffera.xml (Ashita v3)
+[SUCCESS] Injected!
+[08/21/26 09:53:13] Connected to server!
+[08/21/26 09:53:13] Failed to login. Invalid username / password.
+!! login refused: … — stopping the loader
+```
+
+**Every world that has a client now launches that client and reaches its own login server.**
+Four of them (Eden, ValhallaXI, FFEra, CatsEyeXI) stop at the account, which is the one thing this
+project cannot supply for Daniel. Gaia XI logs in and still loses its window (see above).

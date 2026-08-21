@@ -139,9 +139,19 @@ enum Credentials {
                 }
                 return width(a) < width(b)
             }
-            guard let seed = widest,
-                  let text = try? String(contentsOf: dir.appendingPathComponent(seed), encoding: .utf8),
-                  (try? text.write(to: target, atomically: true, encoding: .utf8)) != nil
+            // FFEra's client ships Ashita v3 with **no config folder at all** — v3 normally
+            // writes its boot XML from its own GUI configurator, which is not a pathway here.
+            // So when there is nothing to seed from, write a minimal one.
+            let text: String
+            if let seed = widest,
+               let t = try? String(contentsOf: dir.appendingPathComponent(seed), encoding: .utf8) {
+                text = t
+            } else {
+                text = v3Profile(loader: defaultLoaderName(in: install),
+                                 folder: install.bootLoaderDir.lastPathComponent)
+            }
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            guard (try? text.write(to: target, atomically: true, encoding: .utf8)) != nil
             else { return false }
             try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
             return true
@@ -169,6 +179,48 @@ enum Credentials {
         }
         return false
     }
+
+
+    /// The loader to boot when a client ships no profile naming one: whatever executable is
+    /// actually sitting in this client's loader folder, preferring the names we know.
+    static func defaultLoaderName(in install: Install) -> String {
+        let present = ((try? FileManager.default.contentsOfDirectory(atPath: install.bootLoaderDir.path)) ?? [])
+            .filter { $0.lowercased().hasSuffix(".exe") }
+        return knownLoaders.first { k in present.contains { $0.caseInsensitiveCompare(k) == .orderedSame } }
+            ?? present.sorted().first ?? "xiloader.exe"
+    }
+
+    /// A minimal Ashita v3 boot profile. Only the settings v3 actually reads at boot; the rest
+    /// of its schema is display defaults it fills in itself. `boot_command` is rewritten with the
+    /// account by `apply` before every launch, exactly as for a v4 `.ini`.
+    static func v3Profile(loader: String, folder: String, width: Int = 1600, height: Int = 900) -> String {
+        """
+        <?xml version="1.0" encoding="utf-8" standalone="yes"?>
+        <settings>
+          <setting name="config_name">FFXI on Mac</setting>
+          <setting name="pol_version">2</setting>
+          <setting name="window_x">\(width)</setting>
+          <setting name="window_y">\(height)</setting>
+          <setting name="windowed">True</setting>
+          <setting name="boot_file">.\\\(folder)\\\(loader)</setting>
+          <setting name="boot_command"></setting>
+          <setting name="startup_script">Default.txt</setting>
+          <setting name="test_server">False</setting>
+          <setting name="auto_close">False</setting>
+          <setting name="show_border">True</setting>
+          <setting name="unhook_mouse">True</setting>
+          <setting name="startpos_x">-1</setting>
+          <setting name="startpos_y">-1</setting>
+          <setting name="background_x">\(width)</setting>
+          <setting name="background_y">\(height)</setting>
+          <setting name="menu_x">\(width)</setting>
+          <setting name="menu_y">\(height)</setting>
+          <setting name="language">2</setting>
+          <setting name="log_level">4</setting>
+        </settings>
+        """
+    }
+
 
     /// Boot loaders this launcher knows how to find, in preference order, when a profile names one
     /// that is not in the install.
