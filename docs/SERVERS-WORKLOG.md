@@ -469,3 +469,27 @@ Result, through the app:
 **Every world that has a client now launches that client and reaches its own login server.**
 Four of them (Eden, ValhallaXI, FFEra, CatsEyeXI) stop at the account, which is the one thing this
 project cannot supply for Daniel. Gaia XI logs in and still loses its window (see above).
+
+## 2026-08-21 — account links for every world
+
+Added a permanent "Getting an account" card to the hero column (`accountCard` in App.swift) and
+three fields to `Server`: `accountURL`, `accountHow`, `discordURL`. Every world's route was
+sourced from that server's own site the same day; the table and the reasoning are in
+docs/ACCOUNTS.md.
+
+Verified by screenshot on the installed 3.0 app: card renders for the selected world, and the
+"Every other world" list shows all nine others with the right verb per world.
+
+Two things worth knowing before touching this UI again:
+
+- **Synthetic clicks into this window drift.** The news banner rotates every 7 seconds between
+  one- and two-line items, which moves everything below it by ~15pt. Fixed screen coordinates
+  computed from an earlier screenshot land on the wrong control — during this work a stale
+  coordinate hit the world picker and then Play, which launched HorizonXI unintentionally. Use
+  `FFXI_ON_MAC_SHOW_SIGNUPS=1` (or find the control in a screenshot taken immediately before the
+  click) rather than reusing coordinates.
+- **`--play` is still broken** (unchanged from 2.8; see the earlier entry).
+
+Also noticed, not fixed: the loader is invoked with `--pass` on its command line, so the account
+password is visible in `ps` output to any process on this Mac. Fixing it means feeding the
+credential to xiloader some other way (stdin or its config), which is a separate piece of work.

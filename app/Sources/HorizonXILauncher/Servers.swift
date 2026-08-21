@@ -43,6 +43,17 @@ struct Server: Codable, Identifiable, Hashable {
     var installKind: InstallKind = .website
     /// One line about the download: what it is and roughly how big.
     var installNote: String = ""
+
+    /// Where a new player signs up for this world, and how signing up actually works there.
+    /// Checked 2026-08-21, each against the server's own site or the invite API — several of
+    /// these worlds have no web signup at all (the account is typed into the loader console on
+    /// first launch, or gated behind a Discord bot), and saying so is more useful than pointing
+    /// at a page that cannot create an account.
+    var accountURL: String = ""
+    /// Short sentence describing the signup route. Shown next to the button, always.
+    var accountHow: String = ""
+    /// The world's own Discord invite, verified live against discord.com's invite API.
+    var discordURL: String = ""
     /// Renderer this world's client needs, when the global choice does not work for it.
     /// nil = use the user's setting. Measured 2026-08-19: Gaia XI's client reaches its title
     /// screen on wined3d/OpenGL but exits about a second after login (Ashita
@@ -79,12 +90,14 @@ struct Server: Codable, Identifiable, Hashable {
          era: String = "", population: Int = 0, pinned: Bool = false, local: Bool = false,
          requiredClientURL: String = "", requiredClient: String = "",
          installURL: String = "", installKind: InstallKind = .website, installNote: String = "",
+         accountURL: String = "", accountHow: String = "", discordURL: String = "",
          renderer: Renderer? = nil, x87: Bool = true, msync: Bool = true) {
         self.name = name; self.host = host; self.bootProfile = bootProfile
         self.verified = verified; self.note = note; self.era = era
         self.population = population; self.pinned = pinned; self.local = local
         self.requiredClientURL = requiredClientURL; self.requiredClient = requiredClient
         self.installURL = installURL; self.installKind = installKind; self.installNote = installNote
+        self.accountURL = accountURL; self.accountHow = accountHow; self.discordURL = discordURL
         self.renderer = renderer; self.x87 = x87; self.msync = msync
     }
 
@@ -104,6 +117,9 @@ struct Server: Codable, Identifiable, Hashable {
         dataPath    = try c.decodeIfPresent(String.self, forKey: .dataPath) ?? ""
         installURL  = try c.decodeIfPresent(String.self, forKey: .installURL) ?? ""
         installKind = try c.decodeIfPresent(InstallKind.self, forKey: .installKind) ?? .website
+        accountURL  = try c.decodeIfPresent(String.self, forKey: .accountURL) ?? ""
+        accountHow  = try c.decodeIfPresent(String.self, forKey: .accountHow) ?? ""
+        discordURL  = try c.decodeIfPresent(String.self, forKey: .discordURL) ?? ""
         installNote = try c.decodeIfPresent(String.self, forKey: .installNote) ?? ""
         renderer    = try c.decodeIfPresent(Renderer.self, forKey: .renderer)
         x87         = try c.decodeIfPresent(Bool.self, forKey: .x87) ?? Server.builtins.first { $0.name == name }?.x87 ?? true
@@ -116,6 +132,11 @@ struct Server: Codable, Identifiable, Hashable {
         }
         if installURL.isEmpty, let b = Server.builtins.first(where: { $0.name == name }) {
             installURL = b.installURL; installKind = b.installKind; installNote = b.installNote
+        }
+        // Signup details were added after most servers.json files on disk were written, so a
+        // world the user has not renamed picks them up rather than showing an empty card.
+        if accountHow.isEmpty, let b = Server.builtins.first(where: { $0.name == name }) {
+            accountURL = b.accountURL; accountHow = b.accountHow; discordURL = b.discordURL
         }
         // Older servers.json files predate the version check; give the built-in entry's values
         // back to a server the user has not renamed, so the check works without a reset.
@@ -139,12 +160,17 @@ struct Server: Codable, Identifiable, Hashable {
                note: "The server this project was built and tested against.",
                era: "Chains of Promathia · 75 cap", population: 9495, pinned: true,
                installURL: "https://horizonxi.com/play", installKind: .horizonTorrent,
-               installNote: "HorizonXI's own client, fetched the way their launcher does it: a 9.4 GB torrent, then their updates. Needs aria2 (brew install aria2)."),
+               installNote: "HorizonXI's own client, fetched the way their launcher does it: a 9.4 GB torrent, then their updates. Needs aria2 (brew install aria2).",
+               accountURL: "https://horizonxi.com/register",
+               accountHow: "Sign up on horizonxi.com, then log in here with that account.",
+               discordURL: "https://discord.gg/horizonxi"),
         Server(name: "Local server", host: "127.0.0.1", bootProfile: "lsb.ini",
                verified: true,
                note: "LandSandBoat, built and run on this Mac. Nobody else can reach it.",
                era: "LandSandBoat · your own world", population: 9494, pinned: true,
-               local: true),
+               local: true,
+               accountHow: "Your own world: the loader window offers to create the account the "
+                     + "first time you connect. No signup site, and nobody to ask."),
         Server(name: "CatsEyeXI", host: "server.catseyexi.com", bootProfile: "catseyexi.ini",
                verified: false,
                note: "Login host from CatsEyeXI's own connect page. Untested by this project.",
@@ -156,7 +182,11 @@ struct Server: Codable, Identifiable, Hashable {
                requiredClientURL: "https://raw.githubusercontent.com/CatsAndBoats/catseyexi/base/settings/default/login.lua",
                requiredClient: "30251204_1",
                installURL: "https://catseyexi.com/download", installKind: .catseyeLauncher,
-               installNote: "CatsEyeXI's own launcher runs inside the wrapper and installs their client (full FFXI + their DATs, ~27 GB)."),
+               installNote: "CatsEyeXI's own launcher runs inside the wrapper and installs their client (full FFXI + their DATs, ~27 GB).",
+               accountURL: "https://www.catseyexi.com/register",
+               accountHow: "Register on catseyexi.com, then create the game account from that "
+                     + "site's account page — the website login is not the game login.",
+               discordURL: "https://discord.gg/catseyexi"),
         Server(name: "Eden", host: "play.edenxi.com", bootProfile: "eden.ini", verified: false,
                note: "Login host from Eden's own new-player wiki. Untested by this project.",
                era: "Classic · 75 cap", population: 1925,
@@ -165,7 +195,16 @@ struct Server: Codable, Identifiable, Hashable {
                // The bit.ly on their site resolves to this file id; if Eden ships a new build the id
                // changes and this falls back to opening their page.
                installURL: "https://drive.usercontent.google.com/download?id=196Da1f9Wx1Oy8LfDyqlvmJLaRr24n5A7&export=download&confirm=t", installKind: .installerExe,
-               installNote: "Eden's own installer (Eden534.zip, 5.8 GB from their Google Drive): full client, Ashita and Windower. It runs inside the wrapper; install into C:\\Games\\Eden."),
+               installNote: "Eden's own installer (Eden534.zip, 5.8 GB from their Google Drive): full client, Ashita and Windower. It runs inside the wrapper; install into C:\\Games\\Eden.",
+               // Eden has no signup page at all: edenxi.com is a news SPA. Their wiki's new-player
+               // guide says a registration code comes from their Discord bot (`!getcode`, 7
+               // digits, valid 10 minutes) and the account itself is typed into the loader
+               // console. Pointing at edenxi.com would be pointing at a page that cannot sign
+               // anyone up, so this points at the invite (checked live: guild "Eden").
+               accountHow: "No signup page — the account is created in the loader window that "
+                     + "opens when you press Play. Eden gates that with a registration code "
+                     + "their Discord bot hands out (!getcode: 7 digits, good for 10 minutes).",
+               discordURL: "https://discord.gg/S3EAWr2Jec"),
         Server(name: "FFEra", host: "ffera.com", bootProfile: "ffera.ini", verified: false,
                note: "Longest-running 75-cap community server. Login host from FFEra's own "
                      + "wiki. Untested by this project.",
@@ -173,7 +212,10 @@ struct Server: Codable, Identifiable, Hashable {
                // FFEraInstaller-Jan2023.zip on Google Drive (5.5 GB): installer + RetailClient pak,
                // default C:\Games\FFEra, stock xiloader. Registration is on their site.
                installURL: "https://drive.usercontent.google.com/download?id=1w2o3XH9jmeFF81kG07TUf8hP7cwo8tuD&export=download&confirm=t", installKind: .installerExe,
-               installNote: "FFEra's own installer (5.5 GB from their Google Drive): full client, Ashita and Windower. It runs inside the wrapper; install into C:\\Games\\FFEra. Accounts: ffera.com › Register."),
+               installNote: "FFEra's own installer (5.5 GB from their Google Drive): full client, Ashita and Windower. It runs inside the wrapper; install into C:\\Games\\FFEra. Accounts: ffera.com › Register.",
+               accountURL: "https://www.ffera.com/?p=register",
+               accountHow: "Register on ffera.com (their Register tab), then log in here.",
+               discordURL: "https://discord.gg/v2T95kq"),
         // play.gaiaxi.com verified 2026-08-19: resolves, LSB auth port 54231 open, answers the
         // standard xiloader TLS/JSON login (bad-credential probe returned LOGIN_ERROR).
         Server(name: "Gaia XI", host: "play.gaiaxi.com", bootProfile: "GaiaXI.ini", verified: false,
@@ -181,6 +223,10 @@ struct Server: Codable, Identifiable, Hashable {
                era: "75 cap", population: 276,
                installURL: "https://gaiaxi.com/account/index.xi?return=downloadzip", installKind: .website,
                installNote: "Gaia XI's launcher zip is behind their site login (register there first). Save it, then Run installer… — their launcher.exe downloads the whole game into C:\\Games\\Gaia XI.",
+               accountURL: "https://gaiaxi.com/account/index.xi",
+               accountHow: "Register on gaiaxi.com — the same account gates their download and "
+                     + "the game login.",
+               discordURL: "https://discord.gg/gaiaxi",
                // Their client dies about a second after login on the DXVK pathway and boots on
                // wined3d/OpenGL. Slower, but a slow world beats a world that exits. See
                // docs/SERVERS-WORKLOG.md, 2026-08-19.
@@ -196,27 +242,45 @@ struct Server: Codable, Identifiable, Hashable {
                // Google Drive mirrors of the same zip: 1LPNOf8rvYRmGlnlaKD9lYvnSG4ygOe9r and
                // 1Y014QyqSTnNQJA7HgjXHDZrsGXudqU_Q.
                installURL: "https://mirror.valhalla.group/ValhallaXI.zip", installKind: .clientZip,
-               installNote: "Valhalla's client, straight from their own mirror (a 7.9 GB zip; their web installer only downloads this). Accounts: ucp.valhalla.group."),
+               installNote: "Valhalla's client, straight from their own mirror (a 7.9 GB zip; their web installer only downloads this). Accounts: ucp.valhalla.group.",
+               // ucp.valhalla.group is a control panel for an account that already exists (its
+               // only form is /login); their connect page documents no web signup, so the
+               // account is made in the loader console like other LandSandBoat worlds.
+               accountURL: "https://ucp.valhalla.group/",
+               accountHow: "No signup page — the account is created in the loader window that "
+                     + "opens when you press Play. ucp.valhalla.group then manages it.",
+               discordURL: "https://discord.gg/enB8nh3FKp"),
         Server(name: "Supernova", host: "login.supernovaffxi.com", bootProfile: "supernova.ini",
                verified: false,
                note: "Login host from Supernova's own Ashita setup guide. Untested by this "
                      + "project.",
                era: "75 cap", population: 155,
                installURL: "https://supernovaffxi.wordpress.com/get-started-on-supernova/client-installation/", installKind: .retail,
-               installNote: "Bring-your-own retail FFXI: Square Enix's free client (7.7 GB, five parts) installs inside the wrapper, then PlayOnline updates it, then Supernova's patch and DATs go on top. Slow (hours) but every step is automated."),
+               installNote: "Bring-your-own retail FFXI: Square Enix's free client (7.7 GB, five parts) installs inside the wrapper, then PlayOnline updates it, then Supernova's patch and DATs go on top. Slow (hours) but every step is automated.",
+               accountHow: "No signup page — the account is created in the loader window that "
+                     + "opens when you press Play, then linked to Discord from their Get "
+                     + "Started guide.",
+               discordURL: "https://discord.gg/QBBdfQh"),
         Server(name: "OmicronXI", host: "OmicronFFXI.com", bootProfile: "omicronxi.ini",
                verified: false,
                note: "Heavily customized. Login host from Omicron's own wiki. Untested by this "
                      + "project.",
                era: "99 cap", population: 105,
                installURL: "https://omicronxi.fandom.com/wiki/Connecting_to_OmicronXI", installKind: .retail,
-               installNote: "Bring-your-own retail FFXI: Square Enix's free client (7.7 GB, five parts) installs inside the wrapper, then PlayOnline updates it, then Ashita + xiloader are added. Slow (hours) but every step is automated."),
+               installNote: "Bring-your-own retail FFXI: Square Enix's free client (7.7 GB, five parts) installs inside the wrapper, then PlayOnline updates it, then Ashita + xiloader are added. Slow (hours) but every step is automated.",
+               // omicronffxi.com sits behind a Cloudflare challenge this project cannot read,
+               // so the wiki's own connect page is the honest destination.
+               accountURL: "https://omicronxi.fandom.com/wiki/Connecting_to_OmicronXI",
+               accountHow: "Omicron publishes no signup form — their wiki's connect page and "
+                     + "their Discord are where new accounts are arranged."),
         Server(name: "Tabula Rasa XI", host: "", bootProfile: "tabularasa.ini", verified: false,
                note: "No login host published anywhere this project could find — get it from "
                      + "their own launcher.",
                era: "75 cap", population: 70,
                installKind: .none,
-               installNote: "Server appears defunct: site parked and their GitHub last touched 2024-05 (checked 2026-08-16). Kept on the list so an existing install can still be pointed at a host from their Discord."),
+               installNote: "Server appears defunct: site parked and their GitHub last touched 2024-05 (checked 2026-08-16). Kept on the list so an existing install can still be pointed at a host from their Discord.",
+               accountHow: "No signup anywhere: tabularasaxi.com is a parked domain (checked "
+                     + "2026-08-21). Only an account you already have will work."),
     ]
 }
 

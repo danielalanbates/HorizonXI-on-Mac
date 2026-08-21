@@ -88,6 +88,10 @@ struct ContentView: View {
     @State private var updateChecked = false
     @State private var scanning = false
     @State private var showSetup = false
+    // Starts open when FFXI_ON_MAC_SHOW_SIGNUPS=1, so this project can screenshot the expanded
+    // list without driving a synthetic click into the window (see docs/SERVERS-WORKLOG.md).
+    @State private var showAllSignups =
+        ProcessInfo.processInfo.environment["FFXI_ON_MAC_SHOW_SIGNUPS"] == "1"
 
     private var blocked: Bool { checks.contains { $0.state == .bad } }
 
@@ -212,10 +216,20 @@ struct ContentView: View {
             }
             .padding(.horizontal, 34).padding(.top, 34).padding(.bottom, 20)
 
-            localServerCard
-            rendererBanner
-            notesCard
-            Spacer()
+            // Scrolled rather than clipped: the cards below already overflow a 632pt window once
+            // the signup list is open, and an overflowing VStack pushes the game's title off the
+            // top of the window instead of cutting the bottom off.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    accountCard
+                    localServerCard
+                    rendererBanner
+                    notesCard
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollIndicators(.hidden)
+            Spacer(minLength: 0)
 
             if showDetails {
                 ScrollView { statusList.padding(.horizontal, 34) }
@@ -777,6 +791,140 @@ struct ContentView: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.25)))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Vana.stroke))
         .padding(.horizontal, 34).padding(.top, 16)
+    }
+
+
+    // MARK: - Signup
+
+    /// Where to get an account, always on screen rather than buried in a sheet.
+    ///
+    /// This is the one thing a new player cannot do from inside the launcher: every world runs
+    /// its own account database, and four of the ten have no web signup at all — the account is
+    /// typed into the loader console on first launch, or gated behind a Discord bot. So the card
+    /// states the actual route for the selected world and offers the link that leads to it, and
+    /// keeps a link for every other world one disclosure away. See `Server.accountHow`.
+    @ViewBuilder
+    private var accountCard: some View {
+        if let s = store.selected {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Getting an account", systemImage: "person.badge.key")
+                    .font(.system(size: 12, weight: .semibold, design: .serif))
+                    .foregroundStyle(Vana.gold)
+
+                Text(s.accountHow.isEmpty
+                     ? "\(s.name) publishes no signup route this project could find."
+                     : s.accountHow)
+                    .font(.caption).foregroundStyle(Vana.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    // Only the worlds whose account really is typed into the loader console get
+                    // this line -- Tabula Rasa XI has no route at all and must not be told it
+                    // has one.
+                    if s.accountURL.isEmpty, s.accountHow.contains("loader window") {
+                        Label("Created in the loader window when you press Play",
+                              systemImage: "terminal")
+                            .font(.caption).foregroundStyle(Vana.crystalDim)
+                    }
+                    if let u = URL(string: s.accountURL), !s.accountURL.isEmpty {
+                        Button {
+                            NSWorkspace.shared.open(u)
+                        } label: {
+                            Label(Self.signupVerb(for: s), systemImage: "arrow.up.forward.square")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderedProminent).tint(Vana.goldDim)
+                        .help(u.absoluteString)
+                    }
+                    if let d = URL(string: s.discordURL), !s.discordURL.isEmpty,
+                       s.discordURL != s.accountURL {
+                        Button { NSWorkspace.shared.open(d) } label: {
+                            Label("Discord", systemImage: "bubble.left.and.bubble.right")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered).tint(Vana.crystalDim)
+                        .help(d.absoluteString)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                // A plain DisclosureGroup only toggles from its chevron on macOS -- clicking
+                // the words did nothing, which is exactly the kind of dead target this card
+                // exists to avoid. A button makes the whole row the target.
+                Button { withAnimation(.easeInOut(duration: 0.18)) { showAllSignups.toggle() } } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .rotationEffect(.degrees(showAllSignups ? 90 : 0))
+                        Text(showAllSignups ? "Every other world" : "Every other world")
+                            .font(.caption2)
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Vana.crystalDim)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                // Bounded and scrolled: the hero column has no scroll view of its own, so an
+                // unbounded ten-row list pushed the game's title off the top of the window.
+                if showAllSignups {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(store.ordered.filter { $0.name != s.name }) { other in
+                                signupRow(other)
+                            }
+                        }
+                        .padding(.trailing, 4)
+                    }
+                    // A ScrollView asks for zero height in a plain VStack, which rendered the
+                    // list as an empty gap. Give it the rows' own height, capped.
+                    .frame(height: CGFloat(store.ordered.count - 1) * 21 + 6)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: 500, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.25)))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Vana.stroke))
+            .padding(.horizontal, 34).padding(.top, 16)
+        }
+    }
+
+    /// A world with no signup link at all still gets a row, saying so — a missing row reads as
+    /// "the launcher forgot this one".
+    @ViewBuilder
+    private func signupRow(_ other: Server) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(other.name).font(.caption).foregroundStyle(Vana.text)
+                .frame(width: 104, alignment: .leading)
+            if let u = URL(string: other.accountURL), !other.accountURL.isEmpty {
+                Link(Self.signupVerb(for: other), destination: u)
+                    .font(.caption2).foregroundStyle(Vana.gold)
+                    .help(other.accountHow.isEmpty ? u.absoluteString : other.accountHow)
+            } else {
+                Text(other.accountHow.contains("loader window")
+                     ? "in the loader window" : "no signup published")
+                    .font(.caption2).foregroundStyle(Vana.muted)
+                    .help(other.accountHow)
+            }
+            Spacer(minLength: 0)
+            if let d = URL(string: other.discordURL), !other.discordURL.isEmpty,
+               other.discordURL != other.accountURL {
+                Link("Discord", destination: d).font(.caption2).foregroundStyle(Vana.crystalDim)
+            }
+        }
+    }
+
+    /// Say what the link actually does. Some of these lead to a wiki page or a control panel
+    /// rather than a registration form, and calling that "Create account" would be a lie. A
+    /// world with no signup page gets no button at all: its account is created in the loader
+    /// window at Play time, so there is nowhere to send the player.
+    private static func signupVerb(for s: Server) -> String {
+        guard !s.accountURL.isEmpty else { return "" }
+        if s.accountURL.contains("register") { return "Create account" }
+        if s.accountURL.contains("fandom.com") || s.accountURL.contains("wordpress.com") {
+            return "How to get one"
+        }
+        return "Account page"
     }
 
     private func row(_ k: String, _ v: String) -> some View {
