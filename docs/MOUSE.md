@@ -30,13 +30,32 @@ was a pure regression and has been reverted. Do not revisit it.
   `scripts/default.txt` the client dies during startup, before addons load. Keep it
   commented out.
 
+## 2026-08-21: injection is OFF again, and why
+
+Restoring the synthetic message stream (step 2 below) made the game unplayable in a way the
+original removal note never described: **Cmd-Tab back into the game and the camera spins**, and
+clicking does not stop it. FFXI reads mouse-look as a delta from a captured position; a synthetic
+WM_MOUSEMOVE posted on the frame focus returns hands it a delta the size of the screen, which it
+keeps applying. Releasing the buttons on focus loss does not help — the spin is a *move*, not a
+held button.
+
+So injection is behind `FFXI_MOUSE_INJECT=1` and off by default. The cursor fix (step 1) is
+unrelated, stays on, and is what stopped the blinking.
+
+**Clicking addon windows is therefore still unsolved**, and the two obvious paths are both known
+bad: this injection spins the camera, and `HardwareMouse.dll` kills the client at startup. What
+has *not* been tried is fixing the message stream at its source — Ashita 4.3's own mouse hook
+(`mouse.unhook` in the boot profile was tested and did nothing, but the hook itself was never
+read) or a DirectInput-side interposer. That is where the next attempt should go, rather than at
+another round of posting WM_ messages into a game that is doing its own mouse-look maths.
+
 ## The fix (verified working)
 In `mousediag.lua`, per frame:
 
 1. `SetCursor(LoadCursorA(nil, IDC_ARROW))` then drive `ShowCursor(1)` until the
    internal show-count is >= 0. Log line `ShowCursor count -> 1` means visible.
    **This is what made the cursor appear.**
-2. Synthesise the missing message stream from `GetCursorPos` + `GetAsyncKeyState` and
+2. (**Off by default — see the 2026-08-21 note above.**) Synthesise the missing message stream from `GetCursorPos` + `GetAsyncKeyState` and
    `PostMessageA` it to the `FFXiClass` window (WM_MOUSEMOVE 0x200,
    WM_LBUTTONDOWN/UP 0x201/0x202, WM_RBUTTONDOWN/UP 0x204/0x205). After this,
    `mousediag` reports `msgs=136` and climbing where it was pinned at 0.

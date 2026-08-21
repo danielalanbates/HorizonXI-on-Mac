@@ -149,14 +149,26 @@ local function apply_dock_icon(hwnd)
     log('dock icon: set from ' .. path);
 end
 
+--- OFF by default since 2026-08-21, the day it shipped: with it on, coming back to the game from
+--- Cmd-Tab leaves the camera spinning. FFXI reads mouse-look as a delta from a captured position,
+--- and a synthetic WM_MOUSEMOVE posted on the frame focus returns hands it a delta the size of the
+--- screen -- which it then keeps applying. Releasing the buttons on focus loss (below) does not
+--- help, because the spin is a *move*, not a held button. Clicking does not stop it because the
+--- client is not tracking the real pointer at all by then.
+---
+--- The cursor fix (ShowCursor) is unrelated and stays on. Set FFXI_MOUSE_INJECT=1 in the game's
+--- environment to work on the click path again; do not turn it on by default until Cmd-Tab has
+--- been tested against a real in-world session.
+local INJECT = os.getenv('FFXI_MOUSE_INJECT') == '1';
+
 local function inject_mouse_messages()
+    if not INJECT then return; end
     local hwnd = state.client_hwnd;
     if hwnd == nil then
         hwnd = ffi.C.FindWindowA('FFXiClass', nil);
         state.client_hwnd = hwnd;
     end
     if hwnd == nil then return; end
-    apply_dock_icon(hwnd);
     if ffi.C.GetForegroundWindow() ~= hwnd then
         -- Release anything held, so a button never latches down while the player is elsewhere.
         if state.ldown then
@@ -227,6 +239,7 @@ ashita.events.register('d3d_present', 'present_cb', function ()
     while n < CURSOR_COUNT_TARGET and guard < 32 do n = ffi.C.ShowCursor(1); guard = guard + 1; end
     if state.curlog == nil then state.curlog = true; log('ShowCursor count -> ' .. tostring(n)); end
     local io = imgui.GetIO();
+    apply_dock_icon(ffi.C.FindWindowA('FFXiClass', nil));
     inject_mouse_messages();
     state.hovered = io.WantCaptureMouse;
     local now = os.clock();

@@ -34,6 +34,19 @@ Not from the wrapper. Three things were measured on 2026-08-21:
 * `addons/mousediag/ffxi-dock.ico` + the `WM_SETICON` call in `mousediag.lua` — sets the client
   window's icon. Verified to run ("dock icon: set from …"), not yet verified to move the tile.
 
+## Also ruled out 2026-08-21 (second round)
+
+4. **A real .app bundle around wine does not rename it either.** With `Contents/lib` and
+   `Contents/share` symlinked to the wine tree, wine runs fine from inside a bundle named
+   `HorizonXI.app` with our icon and `CFBundleName` — and Cmd-Tab still says **wine**, because
+   winemac.so registers the Cocoa application itself. Setting `WINELOADER` to the in-bundle path
+   changes nothing.
+5. **`exeIcon.icns` next to the .exe is not read.** The name appears in winemac.so's strings
+   alongside `create_app_icon_images` / `setApplicationIconImage:`, so this build does have a
+   file-based icon path, but dropping `exeIcon.icns` in `C:\windows\system32` beside notepad.exe
+   left the tile as wine's derived exe icon. The location it actually reads has not been found;
+   the string is worth chasing with a disassembler rather than by guessing paths.
+
 ## What to try next, in order
 
 1. **Set the icon before the first window exists.** `WM_SETICON` after the fact appears to be too
