@@ -118,8 +118,34 @@ enum Credentials {
     static func ensureProfile(_ profile: String, in install: Install) -> Bool {
         let fm = FileManager.default
         let dir = install.gameDir.appendingPathComponent("config/boot")
-        let target = dir.appendingPathComponent(profile)
+        let name = install.bootProfileName(profile)
+        let target = dir.appendingPathComponent(name)
         if fm.fileExists(atPath: target.path) { return true }
+
+        // Ashita v3 client (Eden): seed from whichever <name>.xml its own installer shipped —
+        // those already name the right loader and the right server, so only the credentials in
+        // `boot_command` need rewriting afterwards. Prefer the largest window size on offer.
+        if name.hasSuffix(".xml") {
+            // Eden ships one XML per window size (Eden800600 / Eden1024768 / Eden1600900).
+            // Pick the largest by the `window_x` each one declares — sorting the *names* picks
+            // "Eden800600" because '8' sorts after '1', i.e. the smallest window.
+            let xmls = ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? [])
+                .filter { $0.lowercased().hasSuffix(".xml") }.sorted()
+            let widest = xmls.max { a, b in
+                func width(_ n: String) -> Int {
+                    guard let t = try? String(contentsOf: dir.appendingPathComponent(n), encoding: .utf8)
+                    else { return 0 }
+                    return Int(xmlSetting("window_x", in: t) ?? "0") ?? 0
+                }
+                return width(a) < width(b)
+            }
+            guard let seed = widest,
+                  let text = try? String(contentsOf: dir.appendingPathComponent(seed), encoding: .utf8),
+                  (try? text.write(to: target, atomically: true, encoding: .utf8)) != nil
+            else { return false }
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+            return true
+        }
 
         // Seed order: a profile the world's own installer shipped (any non-example .ini in the
         // folder), then HorizonXI's, then Ashita's examples. Whatever it came from, `file =` is
@@ -146,14 +172,17 @@ enum Credentials {
 
     /// Boot loaders this launcher knows how to find, in preference order, when a profile names one
     /// that is not in the install.
-    static let knownLoaders = ["horizon-loader.exe", "xiloader.exe", "pol.exe", "catseye-loader.exe", "eden-loader.exe"]
+    static let knownLoaders = ["horizon-loader.exe", "xiloader.exe", "pol.exe", "catseye-loader.exe", "gxiloader.exe"]
 
     /// Make `[ashita.boot] file =` name a loader that exists in `bootloader/`.
     static func fixBootLoader(_ profile: String, in install: Install) {
         let fm = FileManager.default
-        let url = install.gameDir.appendingPathComponent("config/boot/\(profile)")
+        let name = install.bootProfileName(profile)
+        // v3 profiles are seeded from the world's own XML, which already names its own loader.
+        guard name.hasSuffix(".ini") else { return }
+        let url = install.gameDir.appendingPathComponent("config/boot/\(name)")
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return }
-        let bl = install.gameDir.appendingPathComponent("bootloader")
+        let bl = install.bootLoaderDir
         let present = ((try? fm.contentsOfDirectory(atPath: bl.path)) ?? []).filter { $0.lowercased().hasSuffix(".exe") }
         guard !present.isEmpty else { return }
         let named = bootLoaderName(in: install, profile: profile) ?? ""
@@ -173,10 +202,50 @@ enum Credentials {
         try? TextFile.join(lines, terminator: eol).write(to: url, atomically: true, encoding: .utf8)
     }
 
+
+    // MARK: - Ashita v3 boot profiles (XML)
+    //
+    // Eden's client is Ashita v3, whose boot config is
+    //   <settings><setting name="boot_file">.\\ffxi-bootmod\\xiloader.exe</setting>
+    //             <setting name="boot_command">--server play.edenxi.com</setting>...</settings>
+    // rather than v4's `[ashita.boot] file = / command =` ini. Same two facts, different file
+    // format, so everything below is the XML spelling of what the ini functions do. Rewritten
+    // textually rather than through XMLDocument: these files are written by Ashita's own
+    // configuration editor and round-tripping them through a parser reorders and re-indents the
+    // whole thing for no reason.
+
+    /// Value of `<setting name="key">…</setting>`, or nil.
+    static func xmlSetting(_ key: String, in text: String) -> String? {
+        guard let r = text.range(of: "<setting name=\"\(key)\">"),
+              let end = text.range(of: "</setting>", range: r.upperBound..<text.endIndex)
+        else { return nil }
+        return String(text[r.upperBound..<end.lowerBound])
+    }
+
+    /// Replace `<setting name="key">…</setting>` in place. Returns nil when the key is absent —
+    /// a v3 profile that does not declare the setting is not one we should be inventing keys in.
+    static func xmlSetting(_ key: String, to value: String, in text: String) -> String? {
+        guard let r = text.range(of: "<setting name=\"\(key)\">"),
+              let end = text.range(of: "</setting>", range: r.upperBound..<text.endIndex)
+        else { return nil }
+        let escaped = value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+        return text.replacingCharacters(in: r.upperBound..<end.lowerBound, with: escaped)
+    }
+
     /// Basename of the executable the profile boots (`[ashita.boot] file`), e.g. horizon-loader.exe.
     static func bootLoaderName(in install: Install, profile: String) -> String? {
-        let url = install.gameDir.appendingPathComponent("config/boot/\(profile)")
+        let name = install.bootProfileName(profile)
+        let url = install.gameDir.appendingPathComponent("config/boot/\(name)")
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        if name.hasSuffix(".xml") {
+            guard let v = xmlSetting("boot_file", in: text), !v.isEmpty else { return nil }
+            let base = v.replacingOccurrences(of: "/", with: "\\")
+                .split(separator: "\\").last.map(String.init) ?? v
+            return base.isEmpty ? nil : base
+        }
         for raw in TextFile.lines(of: text) {
             let t = raw.trimmingCharacters(in: .whitespaces)
             guard !t.hasPrefix(";"), t.hasPrefix("file"), let eq = t.firstIndex(of: "=") else { continue }
@@ -194,8 +263,19 @@ enum Credentials {
     static func apply(user: String, password: String, to install: Install,
                       profile: String = "horizonxi.ini",
                       server: String = "play.horizonxi.com") -> Bool {
-        let url = install.gameDir.appendingPathComponent("config/boot/\(profile)")
+        let name = install.bootProfileName(profile)
+        let url = install.gameDir.appendingPathComponent("config/boot/\(name)")
         guard var text = try? String(contentsOf: url, encoding: .utf8) else { return false }
+
+        if name.hasSuffix(".xml") {
+            guard let out = xmlSetting("boot_command",
+                                       to: "--server \(server) --user \(user) --pass \(password)",
+                                       in: text),
+                  (try? out.write(to: url, atomically: true, encoding: .utf8)) != nil
+            else { return false }
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            return true
+        }
 
         let line = "command     = --server \(server) --user \(user) --pass \(password)"
         var replaced = false
@@ -221,7 +301,10 @@ enum Credentials {
     static func applyIniOverrides(_ overrides: [String: String], to install: Install,
                                   profile: String) {
         guard !overrides.isEmpty else { return }
-        let url = install.gameDir.appendingPathComponent("config/boot/\(profile)")
+        let name = install.bootProfileName(profile)
+        // v3's XML has no `[ffxi.direct3d8]` section, so there is nothing to override there.
+        guard name.hasSuffix(".ini") else { return }
+        let url = install.gameDir.appendingPathComponent("config/boot/\(name)")
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return }
 
         let eol = TextFile.terminator(of: text)

@@ -67,9 +67,9 @@ struct Install: Identifiable, Hashable {
     /// whose path names that world wins; `clientAmbiguity` reports the cases with no safe guess.
     static func resolveAshitaDir(_ root: URL, world: String? = nil) -> URL {
         let fm = FileManager.default
-        if fm.fileExists(atPath: root.appendingPathComponent("Ashita-cli.exe").path) { return root }
+        if Self.isAshitaDir(root) { return root }
         let key = root.path + "#" + (world ?? "")
-        if let c = ashitaCache[key], fm.fileExists(atPath: c.appendingPathComponent("Ashita-cli.exe").path) { return c }
+        if let c = ashitaCache[key], Self.isAshitaDir(c) { return c }
         let hits = ashitaCandidates(under: root)
         guard !hits.isEmpty else { return root }
         let pick = world.flatMap { w in hits.first { matches(world: w, path: $0, under: root) } } ?? hits[0]
@@ -79,10 +79,7 @@ struct Install: Identifiable, Hashable {
 
     /// Every folder at or under `root` (depth <= 3) holding Ashita-cli.exe, shallowest first.
     static func ashitaCandidates(under root: URL) -> [URL] {
-        let fm = FileManager.default
-        return findAll(under: root, depth: 3) {
-            fm.fileExists(atPath: $0.appendingPathComponent("Ashita-cli.exe").path)
-        }
+        findAll(under: root, depth: 3) { isAshitaDir($0) }
     }
 
     /// Does `path` (below `root`) name `world`? Compared on letters and digits only, so
@@ -212,7 +209,46 @@ struct Install: Identifiable, Hashable {
         if p.hasPrefix(c + "/") { return "C:" + String(p.dropFirst(c.count)).replacingOccurrences(of: "/", with: "\\") }
         return "Z:" + p.replacingOccurrences(of: "/", with: "\\")
     }
-    var ashitaCLI: URL { gameDir.appendingPathComponent("Ashita-cli.exe") }
+    /// Which generation of Ashita this world's client ships.
+    ///
+    /// Ashita **v4** is `Ashita-cli.exe` driven by `config/boot/<name>.ini`; that is what
+    /// HorizonXI, CatsEyeXI and Gaia XI ship and what this launcher was built against.
+    /// Ashita **v3** is `injector.exe` driven by `config/boot/<name>.xml`, and Eden's client
+    /// (Eden534, 2023) ships that one -- with the loader under `Ashita/ffxi-bootmod/` rather than
+    /// `bootloader/`. Both have a command-line injector, so both can be launched unattended; only
+    /// the file names and the config format differ.
+    enum AshitaGeneration: String { case v4, v3 }
+
+    var ashitaGeneration: AshitaGeneration {
+        FileManager.default.fileExists(atPath: gameDir.appendingPathComponent("Ashita-cli.exe").path)
+            ? .v4 : .v3
+    }
+
+    /// The command-line injector to run, whichever generation this client is.
+    var ashitaCLI: URL {
+        gameDir.appendingPathComponent(ashitaGeneration == .v4 ? "Ashita-cli.exe" : "injector.exe")
+    }
+
+    /// The folder holding this client's boot loader. v4 keeps it in `bootloader/`, Eden's v3
+    /// client in `ffxi-bootmod/`.
+    var bootLoaderDir: URL {
+        let fm = FileManager.default
+        for name in ["bootloader", "ffxi-bootmod"] {
+            let u = gameDir.appendingPathComponent(name)
+            if fm.fileExists(atPath: u.path) { return u }
+        }
+        return gameDir.appendingPathComponent("bootloader")
+    }
+
+    /// Extension a boot profile takes for this client: `.ini` on v4, `.xml` on v3.
+    var bootProfileExtension: String { ashitaGeneration == .v4 ? "ini" : "xml" }
+
+    /// `profile` with the extension this client's Ashita actually reads, so a world configured
+    /// as `eden.ini` still works against a v3 client.
+    func bootProfileName(_ profile: String) -> String {
+        let base = (profile as NSString).deletingPathExtension
+        return base + "." + bootProfileExtension
+    }
     var frameworks: URL { wrapper.appendingPathComponent("Contents/Frameworks") }
     var d3dMetal: URL { wrapper.appendingPathComponent("Contents/Frameworks/renderer/d3dmetal/external") }
     var systemReg: URL { prefix.appendingPathComponent("system.reg") }
@@ -222,6 +258,13 @@ struct Install: Identifiable, Hashable {
     /// "Has the game" means Ashita-cli.exe is there, not merely that the folder exists — the
     /// folder is created the moment the user picks a location, long before anything is in it.
     var hasGame: Bool { FileManager.default.fileExists(atPath: ashitaCLI.path) }
+
+    /// Does this folder hold an Ashita command-line injector of either generation?
+    static func isAshitaDir(_ u: URL) -> Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: u.appendingPathComponent("Ashita-cli.exe").path)
+            || fm.fileExists(atPath: u.appendingPathComponent("injector.exe").path)
+    }
 
     /// Volume the wrapper lives on — the usual failure is that it simply is not mounted.
     var volume: URL? {

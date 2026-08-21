@@ -495,7 +495,7 @@ final class Runner: ObservableObject {
         // Every launch: make sure no addon can take the LuaJIT trace-patch fault that Ashita 4.3
         // hits on this Mac (see LuaJITGuard). Idempotent, so this is cheap after the first run.
         LuaJITGuard.apply(install) { [weak self] in self?.appendLine($0) }
-        appendLine("==> launching \(profile)")
+        appendLine("==> launching \(install.bootProfileName(profile)) (Ashita \(install.ashitaGeneration.rawValue))")
         var env = perf.environment(for: install)
         // x87 acceleration, two generations:
         //  * Cooperative (preferred): x87sidecar --cooperative launching the patched CX wine
@@ -523,14 +523,17 @@ final class Runner: ObservableObject {
         // log pane.
         let exe: URL
         let args: [String]
+        // Ashita v4 injects with `Ashita-cli.exe <profile>.ini`; Eden's v3 client with
+        // `injector.exe <profile>.xml`. Same shape, different names — see Install.AshitaGeneration.
+        let injector = install.gameDirWine + "\\" + install.ashitaCLI.lastPathComponent
+        let bootFile = install.bootProfileName(profile)
         if let coop {
             exe = coop.sidecar
-            args = ["--cooperative", coop.wine.path,
-                    install.gameDirWine + "\\Ashita-cli.exe", profile]
+            args = ["--cooperative", coop.wine.path, injector, bootFile]
             appendLine("==> x87 cooperative: \(coop.wine.path)")
         } else {
             exe = install.wine
-            args = [install.gameDirWine + "\\Ashita-cli.exe", profile]
+            args = [injector, bootFile]
         }
         spawnViaShell(exe,
               args: args,
