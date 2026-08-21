@@ -49,6 +49,19 @@ struct Server: Codable, Identifiable, Hashable {
     /// UninstallAshita(204)) on the DXVK pathway that every other world runs fine, so the
     /// choice has to be per world rather than global.
     var renderer: Renderer? = nil
+    /// May this world's client run under the x87 acceleration sidecar? Default yes — it is worth
+    /// roughly 2.5x. Measured 2026-08-21: Gaia XI's client logs in and then prints "Closing…"
+    /// about a second later under the cooperative x87 wine, and boots to its title screen under
+    /// the wrapper's own wine with everything else identical. A world that exits is worth less
+    /// than a slow one, so this is per world.
+    var x87: Bool = true
+    /// May this world's client run with wine's msync fast synchronisation? Default yes.
+    /// Measured 2026-08-21 by bisecting the launch environment one variable at a time: Gaia XI's
+    /// client logs in and prints "Closing…" a second later with `WINEMSYNC=1`, and boots to its
+    /// title screen without it. Everything else in the environment (the x87 sidecar,
+    /// DYLD_FALLBACK_LIBRARY_PATH, WINE_LARGE_ADDRESS_AWARE, FFXI_FPS_DIVISOR, the MVK knobs)
+    /// was ruled out individually.
+    var msync: Bool = true
 
     /// How a world's client is obtained.
     /// - `clientZip`: a plain archive of the finished client, unpacked straight into `dataPath`.
@@ -66,13 +79,13 @@ struct Server: Codable, Identifiable, Hashable {
          era: String = "", population: Int = 0, pinned: Bool = false, local: Bool = false,
          requiredClientURL: String = "", requiredClient: String = "",
          installURL: String = "", installKind: InstallKind = .website, installNote: String = "",
-         renderer: Renderer? = nil) {
+         renderer: Renderer? = nil, x87: Bool = true, msync: Bool = true) {
         self.name = name; self.host = host; self.bootProfile = bootProfile
         self.verified = verified; self.note = note; self.era = era
         self.population = population; self.pinned = pinned; self.local = local
         self.requiredClientURL = requiredClientURL; self.requiredClient = requiredClient
         self.installURL = installURL; self.installKind = installKind; self.installNote = installNote
-        self.renderer = renderer
+        self.renderer = renderer; self.x87 = x87; self.msync = msync
     }
 
     init(from decoder: Decoder) throws {
@@ -93,6 +106,8 @@ struct Server: Codable, Identifiable, Hashable {
         installKind = try c.decodeIfPresent(InstallKind.self, forKey: .installKind) ?? .website
         installNote = try c.decodeIfPresent(String.self, forKey: .installNote) ?? ""
         renderer    = try c.decodeIfPresent(Renderer.self, forKey: .renderer)
+        x87         = try c.decodeIfPresent(Bool.self, forKey: .x87) ?? Server.builtins.first { $0.name == name }?.x87 ?? true
+        msync       = try c.decodeIfPresent(Bool.self, forKey: .msync) ?? Server.builtins.first { $0.name == name }?.msync ?? true
         // A world the user has not renamed inherits a renderer the project has since measured
         // for it -- otherwise a servers.json written before this field existed keeps launching
         // Gaia XI on the pathway that is known to kill it.
@@ -169,7 +184,7 @@ struct Server: Codable, Identifiable, Hashable {
                // Their client dies about a second after login on the DXVK pathway and boots on
                // wined3d/OpenGL. Slower, but a slow world beats a world that exits. See
                // docs/SERVERS-WORKLOG.md, 2026-08-19.
-               renderer: .openGL),
+               renderer: .openGL, msync: false),
         Server(name: "ValhallaXI", host: "logon.valhalla.group", bootProfile: "valhallaxi.ini",
                verified: false,
                note: "Login host from Valhalla's own connect page (2026-08). Untested by this project.",

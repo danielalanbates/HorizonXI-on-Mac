@@ -140,7 +140,8 @@ enum RendererSetup {
     private static func dllDirs(_ i: Install) -> [URL] {
         [i.driveC.appendingPathComponent("windows/syswow64"),
          i.gameDir,
-         i.gameDir.appendingPathComponent("bootloader"),
+         // v3 clients (Eden, ValhallaXI, FFEra) call it ffxi-bootmod, not bootloader.
+         i.bootLoaderDir,
          i.squareEnix.appendingPathComponent("PlayOnlineViewer"),
          i.squareEnix.appendingPathComponent("FINAL FANTASY XI")]
     }
@@ -185,8 +186,17 @@ enum RendererSetup {
                 }
             }
         }
-        regDelete(i, key: #"HKCU\Software\Wine\DllOverrides"#, name: "*d3d8")
-        regDelete(i, key: #"HKCU\Software\Wine\DllOverrides"#, name: "*d3d9")
+        // Both spellings. This launcher writes `*d3d8`, but a prefix set up by an older build
+        // (or by hand, or by install.sh) carries a plain `d3d8` = native, and *that* is the one
+        // that was left behind: switching to Classic then leaves d3d8 forced native with no
+        // native d3d8.dll anywhere the loader looks. Measured 2026-08-21 on Gaia XI, whose
+        // client folder ships no d3d8.dll:
+        //   err:module:import_dll Library d3d8.dll (which is needed by …\Ashita.dll) not found
+        //   [E] Injection failed!
+        // Deleting only the asterisked name is why that survived a renderer switch.
+        for name in ["*d3d8", "*d3d9", "d3d8", "d3d9"] {
+            regDelete(i, key: #"HKCU\Software\Wine\DllOverrides"#, name: name)
+        }
         linkMoltenVK(i, toCX: false)
     }
 

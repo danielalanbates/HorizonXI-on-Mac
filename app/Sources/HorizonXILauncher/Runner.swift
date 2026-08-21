@@ -461,7 +461,8 @@ final class Runner: ObservableObject {
         }
     }
 
-    func launch(_ install: Install, perf: PerfSettings, profile: String = "horizonxi.ini") {
+    func launch(_ install: Install, perf: PerfSettings, profile: String = "horizonxi.ini",
+                useX87: Bool = true) {
         guard !running else { return }
         running = true
         loginFailure = ""
@@ -509,8 +510,12 @@ final class Runner: ObservableObject {
         // ROSETTA_DISABLE_AOT only pays off when a sidecar actually patches x87; without one
         // it forces Rosetta's slow path and costs ~half the stock frame rate (measured
         // 2026-08-19: ~5 fps vs ~11 stock). Set it only when acceleration will engage.
-        let coop = X87Sidecar.cooperative()
-        if coop != nil || X87Sidecar.binary() != nil {
+        // A world may have to run without x87 acceleration (see Server.x87).
+        let coop = useX87 ? X87Sidecar.cooperative() : nil
+        if !useX87 {
+            appendLine("i  x87 acceleration is off for this world — its client exits at boot with it on.")
+        }
+        if useX87, coop != nil || X87Sidecar.binary() != nil {
             for (k, v) in X87Sidecar.requiredEnvironment { env[k] = v }
         }
         // Spawned through a shell with a *file* redirect, not Foundation.Process pipes.
@@ -555,7 +560,7 @@ final class Runner: ObservableObject {
         // at stock speed. (The 2026-08-19 attach crashes were a stale sidecar binary built for
         // pre-26.5.2 Rosetta, not the timing — rebuild the sidecar after every macOS update.)
         // Cooperative mode needs no attach at all: the patched wine handshakes on its own.
-        if coop == nil {
+        if useX87, coop == nil {
             Task { [weak self] in
                 let p = await X87Sidecar.attachWhenReady { [weak self] in self?.appendLine($0) }
                 self?.x87Proc = p
@@ -651,6 +656,13 @@ final class Runner: ObservableObject {
         var e = ProcessInfo.processInfo.environment
         for (k, v) in env { e[k] = v }
         p.environment = e
+        // Record exactly what was spawned. Diffing this against a hand-run that works is how
+        // the launch-death and Gaia XI exits were bisected; it costs one small file per launch.
+        let spawnLog = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("HorizonXI-on-Mac/last-spawn.txt")
+        let dump = "exe: \(exe.path)\nargs: \(args)\ncwd: \(cwd.path)\n"
+            + e.keys.sorted().map { "\($0)=\(e[$0] ?? "")" }.joined(separator: "\n") + "\n"
+        try? dump.write(to: spawnLog, atomically: true, encoding: .utf8)
         p.terminationHandler = { pr in
             Task { @MainActor in done(pr.terminationStatus) }
         }

@@ -1322,13 +1322,18 @@ struct ContentView: View {
         // its client, OpenGL boots it). Applied here rather than by mutating the user's setting,
         // so switching worlds never silently rewrites what they chose.
         var effective = perf
+        if !server.msync, effective.msync {
+            effective.msync = false
+            runner.appendLine("i  \(server.name) runs with msync off — its client exits about a "
+                              + "second after login with it on.")
+        }
         if let r = server.renderer, r != perf.renderer {
             effective.renderer = r
             runner.appendLine("i  \(server.name) is pinned to the \(r.title) renderer "
                               + "(your setting, \(perf.renderer.title), is left alone). "
                               + "Clear it in the server's settings to override.")
         }
-        runner.launch(i, perf: effective, profile: server.bootProfile)
+        runner.launch(i, perf: effective, profile: server.bootProfile, useX87: server.x87)
     }
 
     private func refresh() { Task { await refreshAsync() } }

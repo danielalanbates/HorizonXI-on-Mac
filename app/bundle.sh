@@ -83,8 +83,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>NSDesktopFolderUsageDescription</key><string>To find a wrapper you keep on the Desktop.</string>
   <key>NSDocumentsFolderUsageDescription</key><string>To find a wrapper you keep in Documents.</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>2.8</string>
-  <key>CFBundleVersion</key><string>9</string>
+  <key>CFBundleShortVersionString</key><string>2.9</string>
+  <key>CFBundleVersion</key><string>10</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
