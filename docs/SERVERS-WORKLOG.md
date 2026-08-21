@@ -363,3 +363,22 @@ login server. Now blocked with that sentence.
 
 **Not claimed:** none of Eden / ValhallaXI / FFEra has been driven to a 3D world, because none has
 a usable account. "Connects and is refused at auth" is exactly as far as this got, and no further.
+
+### 2026-08-21 — the v3 launch path, verified end to end
+
+Not just the loader: the whole chain the launcher's new code builds, run exactly as `Runner`
+now spells it (`injector.exe <profile>.xml` from the Ashita folder):
+
+```
+Ashita v3 - Command Line Injector (c) 2016 - 2017 atom0s
+[SUCCESS] Injected!
+[08/21/26 08:17:42] Connected to server!
+[08/21/26 08:17:42] Autologin activated!
+[08/21/26 08:17:42] Invalid username or password.
+```
+
+That covers: profile seeded from the world's own XML at the widest `window_x`
+(`Eden1600900.xml`, 1600 — confirming the name-sort bug, since sorting names picks
+`Eden800600.xml`), credentials written into `boot_command`, `boot_file` resolved to
+`ffxi-bootmod/xiloader.exe`, the v3 injector run and succeeding, and the loader reaching Eden's
+auth. The only step not exercised is the one that needs an account.
