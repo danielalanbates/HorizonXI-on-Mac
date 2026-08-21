@@ -1,6 +1,25 @@
 # Which emulator each world runs, and why the list is shorter
 
-**Decision (2026-08-21, Daniel's call): the launcher offers LandSandBoat worlds only.**
+**Corrected 2026-08-21, later the same day.** The launcher lists every world that is still
+running. `codebase` is shown to the player, not used as a filter.
+
+The first version of this cut removed every non-LandSandBoat world, reasoning that only LSB
+receives upstream development. The emulator part is true. The inference — that a world on another
+codebase is therefore deprecated — is not, and checking the servers themselves said so:
+
+| World | Players online | Discord members / online | Verdict |
+|---|---|---|---|
+| Eden | **835** (their own `/api/v1/misc/active`) | 9,889 / 2,642 | very much alive |
+| FFEra | not published | 1,204 / 313 | alive |
+| ValhallaXI | not published | 1,362 / 271 | alive |
+| Tabula Rasa XI | — | no invite; `TabulaRasaXI/TabulaRasa` last pushed 2024-05-21, domain parked | **dead — withheld** |
+
+For comparison at the same moment: HorizonXI 2,517 online, CatsEyeXI ~3,894 in Discord. Eden is
+the second-largest community on the list. Withholding it would have been wrong.
+
+What survives from the original reasoning: a DarkStar-lineage server's content is entirely its own
+team's work, because DarkStar upstream ended in 2020 — worth knowing when choosing where to invest
+hundreds of hours, which is why the news banner now says so per world.
 
 LandSandBoat is the only FFXI server emulator still in development. Everything else in the family
 tree is frozen:
@@ -38,8 +57,9 @@ the whole test in about ten seconds.
 
 ## What "retired" means in the code
 
-`Server.all` still holds all ten. `Server.builtins` — what the picker shows — is
-`all.filter { $0.codebase == .landSandBoat }`; `Server.retired` is the complement. Nothing was
+`Server.builtins` — what the picker shows — is `all.filter { !$0.retired }`, and `retired` means
+**the server has stopped**, which today is Tabula Rasa XI alone. `codebase` is a separate field
+that only feeds the news banner. Nothing was
 deleted: the retired entries keep their install pathways, boot profiles, client-version sources and
 signup routes, because that was all real work and none of it is wrong — those worlds simply do not
 meet the LSB bar.

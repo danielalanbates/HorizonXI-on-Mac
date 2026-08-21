@@ -44,6 +44,10 @@ struct Server: Codable, Identifiable, Hashable {
     /// One line about the download: what it is and roughly how big.
     var installNote: String = ""
 
+    /// Dropped from the picker because the *server* is gone -- not because of its codebase.
+    /// Checked 2026-08-21 against live population counters and Discord member counts.
+    var retired: Bool = false
+
     /// Which server emulator this world runs. Decides whether it appears in the launcher at
     /// all: LandSandBoat is the only FFXI emulator still in development, so a world on anything
     /// else is frozen at whatever its fork inherited. Established 2026-08-21 by probing each
@@ -110,12 +114,12 @@ struct Server: Codable, Identifiable, Hashable {
     // throws the file away and silently resets the login hosts they typed in.
     init(name: String, host: String, bootProfile: String, verified: Bool, note: String,
          era: String = "", population: Int = 0, pinned: Bool = false,
-         codebase: Codebase = .unknown, local: Bool = false,
+         codebase: Codebase = .unknown, retired: Bool = false, local: Bool = false,
          requiredClientURL: String = "", requiredClient: String = "",
          installURL: String = "", installKind: InstallKind = .website, installNote: String = "",
          accountURL: String = "", accountHow: String = "", discordURL: String = "",
          renderer: Renderer? = nil, x87: Bool = true, msync: Bool = true) {
-        self.codebase = codebase
+        self.codebase = codebase; self.retired = retired
         self.name = name; self.host = host; self.bootProfile = bootProfile
         self.verified = verified; self.note = note; self.era = era
         self.population = population; self.pinned = pinned; self.local = local
@@ -143,6 +147,8 @@ struct Server: Codable, Identifiable, Hashable {
         installKind = try c.decodeIfPresent(InstallKind.self, forKey: .installKind) ?? .website
         accountURL  = try c.decodeIfPresent(String.self, forKey: .accountURL) ?? ""
         accountHow  = try c.decodeIfPresent(String.self, forKey: .accountHow) ?? ""
+        retired     = try c.decodeIfPresent(Bool.self, forKey: .retired)
+            ?? Server.all.first { $0.name == name }?.retired ?? false
         codebase    = try c.decodeIfPresent(Codebase.self, forKey: .codebase)
             ?? Server.all.first { $0.name == name }?.codebase ?? .unknown
         discordURL  = try c.decodeIfPresent(String.self, forKey: .discordURL) ?? ""
@@ -180,15 +186,19 @@ struct Server: Codable, Identifiable, Hashable {
     /// tested-by-this-project are different claims, and only the second earns the badge. Two
     /// servers (Gaia XI, Tabula Rasa XI) publish no login host anywhere this project could find;
     /// those stay blank on purpose rather than guessing.
-    /// The worlds the launcher offers. LandSandBoat only, as of 2026-08-21: it is the one FFXI
-    /// emulator still being developed, so a world on anything else stops receiving content and
-    /// fixes from upstream. The rest are kept in `retired` rather than deleted -- their install
-    /// pathways, boot profiles and client versions were all real work, and a world that turns
-    /// out to be on LSB after all comes back by changing one `codebase:`.
-    static var builtins: [Server] { all.filter { $0.codebase == .landSandBoat } }
+    /// The worlds the launcher offers: every one that is still running.
+    ///
+    /// An earlier cut here dropped every non-LandSandBoat world on the reasoning that only LSB
+    /// still receives upstream development. The emulator claim is true, but it does not follow
+    /// that those *servers* are dead, and checking said so plainly (2026-08-21): Eden had 835
+    /// players online and 2,642 people in its Discord at the time of the check, FFEra 313
+    /// online, ValhallaXI 271. A world with a thousand players in it is not deprecated, whatever
+    /// its codebase — so `codebase` is now shown to the player as information rather than used
+    /// as a filter. Only a world that has actually stopped is withheld.
+    static var builtins: [Server] { all.filter { !$0.retired } }
 
-    /// Cut for running a non-LSB emulator, or defunct. See docs/CODEBASE.md.
-    static var retired: [Server] { all.filter { $0.codebase != .landSandBoat } }
+    /// Worlds withheld because the server itself is gone. See docs/CODEBASE.md.
+    static var retiredWorlds: [Server] { all.filter(\.retired) }
 
     static let all: [Server] = [
         Server(name: "HorizonXI", host: "play.horizonxi.com", bootProfile: "horizonxi.ini",
@@ -312,7 +322,7 @@ struct Server: Codable, Identifiable, Hashable {
         Server(name: "Tabula Rasa XI", host: "", bootProfile: "tabularasa.ini", verified: false,
                note: "No login host published anywhere this project could find — get it from "
                      + "their own launcher.",
-               era: "75 cap", population: 70, codebase: .unknown,
+               era: "75 cap", population: 70, codebase: .unknown, retired: true,
                installKind: .none,
                installNote: "Server appears defunct: site parked and their GitHub last touched 2024-05 (checked 2026-08-16). Kept on the list so an existing install can still be pointed at a host from their Discord.",
                accountHow: "No signup anywhere: tabularasaxi.com is a parked domain (checked "
@@ -351,7 +361,7 @@ final class ServerStore: ObservableObject {
         // A servers.json written before the LSB-only cut still lists the retired worlds. Drop
         // those by name -- but only ones this project shipped and has since retired, never a
         // server the user added themselves.
-        let retiredNames = Set(Server.retired.map(\.name))
+        let retiredNames = Set(Server.retiredWorlds.map(\.name))
         var out = saved.filter { !retiredNames.contains($0.name) }
         for b in Server.builtins where !saved.contains(where: { $0.name == b.name }) {
             out.append(b)

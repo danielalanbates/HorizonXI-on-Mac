@@ -53,7 +53,10 @@ if [[ -f "$REPO/vendor/x87sidecar-coop" ]]; then
 fi
 # attach-by-pid sidecar: BROKEN on macOS 26.5.2+ (cross-process i-cache flush), so it is no
 # longer bundled by default. Restore this block only for older macOS.
-if false && [[ -f "$REPO/vendor/x87sidecar_entitled" ]]; then
+# Bundled again 2026-08-21: cooperative mode does not survive into the client (it exits with the
+# injector and leaves the game at stock Rosetta x87, ~5 fps -- see docs/X87-WALL.md). attach-by-pid
+# is the mode that measured 11.3 -> 28.5 fps, so it is preferred again and this binary has to ship.
+if [[ -f "$REPO/vendor/x87sidecar_entitled" ]]; then
   cp "$REPO/vendor/x87sidecar_entitled" "$APP/Contents/Resources/x87sidecar_entitled"
   chmod +x "$APP/Contents/Resources/x87sidecar_entitled"
 fi
@@ -83,8 +86,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>NSDesktopFolderUsageDescription</key><string>To find a wrapper you keep on the Desktop.</string>
   <key>NSDocumentsFolderUsageDescription</key><string>To find a wrapper you keep in Documents.</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>3.1</string>
-  <key>CFBundleVersion</key><string>12</string>
+  <key>CFBundleShortVersionString</key><string>3.2</string>
+  <key>CFBundleVersion</key><string>13</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.games</string>

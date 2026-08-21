@@ -94,6 +94,75 @@ ashita.events.register('load', 'load_cb', function ()
     log('active: ' .. winfo(ffi.C.GetActiveWindow()));
 end);
 
+
+-- Win32's cursor show-count is held one step above visible; see the present callback.
+local CURSOR_COUNT_TARGET = 1;
+
+-- Message numbers and the button bits that ride in wParam.
+local WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0200, 0x0201, 0x0202;
+local WM_RBUTTONDOWN, WM_RBUTTONUP = 0x0204, 0x0205;
+local MK_LBUTTON, MK_RBUTTON = 0x0001, 0x0002;
+local VK_LBUTTON, VK_RBUTTON = 0x01, 0x02;
+
+--- Synthesise the mouse message stream Ashita never receives.
+---
+--- Under this Wine the client window gets **no** mouse messages at all: Ashita's ImGui sees
+--- `MouseDown=nil` and `hovered=false` forever, which is why addon windows cannot be clicked or
+--- even hovered. Position is fine, because Ashita polls GetCursorPos for that -- it is only the
+--- message stream that is missing. So read the real pointer and the real button state, and post
+--- the messages Windows would have posted.
+---
+--- Two guards, both learned the hard way:
+---  * Only ever post while FFXI is the foreground window. GetAsyncKeyState is global: without
+---    this, clicking in another app (WoW, a browser) posts those clicks into FFXI as well.
+---  * lParam must be *client* coordinates of the FFXiClass window found here. An earlier version
+---    of this used whatever window happened to be active, which is what made io.MousePos read as
+---    ImGui's -FLT_MAX "no mouse" sentinel (docs/MOUSE.md, "known rough edge").
+local function inject_mouse_messages()
+    local hwnd = state.client_hwnd;
+    if hwnd == nil then
+        hwnd = ffi.C.FindWindowA('FFXiClass', nil);
+        state.client_hwnd = hwnd;
+    end
+    if hwnd == nil then return; end
+    if ffi.C.GetForegroundWindow() ~= hwnd then
+        -- Release anything held, so a button never latches down while the player is elsewhere.
+        if state.ldown then
+            ffi.C.PostMessageA(hwnd, WM_LBUTTONUP, 0, state.lastlparam or 0);
+            state.ldown = false;
+        end
+        if state.rdown then
+            ffi.C.PostMessageA(hwnd, WM_RBUTTONUP, 0, state.lastlparam or 0);
+            state.rdown = false;
+        end
+        return;
+    end
+
+    local p = ffi.new('POINT'); ffi.C.GetCursorPos(p);
+    local c = ffi.new('POINT'); c.x = p.x; c.y = p.y;
+    ffi.C.ScreenToClient(hwnd, c);
+    local lparam = bit.bor(bit.lshift(bit.band(c.y, 0xFFFF), 16), bit.band(c.x, 0xFFFF));
+
+    local l = bit.band(ffi.C.GetAsyncKeyState(VK_LBUTTON), 0x8000) ~= 0;
+    local r = bit.band(ffi.C.GetAsyncKeyState(VK_RBUTTON), 0x8000) ~= 0;
+    local wparam = 0;
+    if l then wparam = bit.bor(wparam, MK_LBUTTON); end
+    if r then wparam = bit.bor(wparam, MK_RBUTTON); end
+
+    if lparam ~= state.lastlparam then
+        ffi.C.PostMessageA(hwnd, WM_MOUSEMOVE, wparam, lparam);
+        state.lastlparam = lparam;
+    end
+    if l ~= state.ldown then
+        ffi.C.PostMessageA(hwnd, l and WM_LBUTTONDOWN or WM_LBUTTONUP, wparam, lparam);
+        state.ldown = l;
+    end
+    if r ~= state.rdown then
+        ffi.C.PostMessageA(hwnd, r and WM_RBUTTONDOWN or WM_RBUTTONUP, wparam, lparam);
+        state.rdown = r;
+    end
+end
+
 ashita.events.register('mouse', 'mouse_cb', function (e)
     state.msgcount = state.msgcount + 1;
     state.lastmouse = string.format('msg=%03X x=%d y=%d delta=%d blocked=%s', e.message, e.x, e.y, e.delta or 0, tostring(e.blocked));
@@ -106,18 +175,21 @@ ashita.events.register('d3d_present', 'present_cb', function ()
     pump_commands();
     if state.arrow == nil then state.arrow = ffi.C.LoadCursorA(nil, ffi.cast('const char*', 32512)); end
     ffi.C.SetCursor(state.arrow);
-    -- Drive Win32's cursor show-count to exactly 0 (visible) without letting it
-    -- grow unbounded: FFXI re-hides the cursor every frame, so this re-asserts.
+    -- Hold Win32's cursor show-count at +1, not 0.
+    --
+    -- The count is a counter, not a flag: the cursor is drawn while it is >= 0. FFXI calls
+    -- ShowCursor(FALSE) itself every frame, so parking the count at exactly 0 means the game's
+    -- own call takes it to -1 and the cursor vanishes until this callback runs again -- once per
+    -- frame, which is precisely the blink. One step of headroom absorbs the game's decrement and
+    -- the cursor stays drawn; the clamp below stops it growing without bound.
     local n = ffi.C.ShowCursor(1);
     local guard = 0;
-    while n > 0 and guard < 16 do n = ffi.C.ShowCursor(0); guard = guard + 1; end
-    while n < 0 and guard < 32 do n = ffi.C.ShowCursor(1); guard = guard + 1; end
+    while n > CURSOR_COUNT_TARGET and guard < 16 do n = ffi.C.ShowCursor(0); guard = guard + 1; end
+    while n < CURSOR_COUNT_TARGET and guard < 32 do n = ffi.C.ShowCursor(1); guard = guard + 1; end
     if state.curlog == nil then state.curlog = true; log('ShowCursor count -> ' .. tostring(n)); end
     local io = imgui.GetIO();
-    -- Mouse-message injection removed: posting synthetic WM_* into FFXI's message
-    -- loop is a suspected client-crash cause. The cursor fix above is kept.
-    -- HIDDEN UI: diagnostic window removed; cursor fix + cmd channel still run.
-    state.hovered = false;
+    inject_mouse_messages();
+    state.hovered = io.WantCaptureMouse;
     local now = os.clock();
     if now - state.lastlog > 2.0 then
         state.lastlog = now;

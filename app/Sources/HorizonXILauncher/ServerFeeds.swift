@@ -231,6 +231,24 @@ final class ServerFeeds: ObservableObject {
         guard let server else { return [] }
         var out = items.filter { $0.fetched }
 
+        // Which emulator this world runs, and what that means for it. Shown rather than acted
+        // on: it is the difference between a world that can pull fixes from a living upstream
+        // and one whose content is entirely its own team's work -- worth knowing, not worth
+        // hiding a thousand-player server over. See docs/CODEBASE.md.
+        switch server.codebase {
+        case .landSandBoat:
+            out.append(NewsItem(
+                title: "Runs LandSandBoat — the one FFXI emulator still in development, so this "
+                     + "world can pull upstream fixes and content.",
+                source: server.name, url: nil, fetched: false))
+        case .darkStarLineage:
+            out.append(NewsItem(
+                title: "Runs a DarkStar-lineage fork. DarkStar itself ended in 2020, so "
+                     + "everything new here is \(server.name)'s own team's work.",
+                source: server.name, url: nil, fetched: false))
+        case .unknown:
+            break
+        }
         if !server.era.isEmpty {
             out.append(NewsItem(title: "\(server.name) — \(server.era)",
                                 source: server.name, url: nil, fetched: false))

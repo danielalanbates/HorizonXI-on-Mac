@@ -511,7 +511,15 @@ final class Runner: ObservableObject {
         // it forces Rosetta's slow path and costs ~half the stock frame rate (measured
         // 2026-08-19: ~5 fps vs ~11 stock). Set it only when acceleration will engage.
         // A world may have to run without x87 acceleration (see Server.x87).
-        let coop = useX87 ? X87Sidecar.cooperative() : nil
+        // Preference order reversed 2026-08-21. Cooperative mode reads better on paper -- no
+        // entitlement, every wine process handshakes for itself -- but in practice the sidecar
+        // exits when the *injector* it launched exits, seconds after boot, and the client that
+        // Ashita spawns afterwards runs unpatched at stock Rosetta x87: ~5 fps, measured twice
+        // in-world. attach-by-pid attaches to horizon-loader.exe itself, which is the process
+        // that renders, and is the mode that measured 11.3 -> 28.5 fps. So: attach first,
+        // cooperative only when the entitled binary is missing.
+        let attach = useX87 ? X87Sidecar.binary() : nil
+        let coop = (useX87 && attach == nil) ? X87Sidecar.cooperative() : nil
         if !useX87 {
             appendLine("i  x87 acceleration is off for this world — its client exits at boot with it on.")
         }
