@@ -290,3 +290,12 @@ if __name__ == "__main__":
         main()
     finally:
         unhide_terminal()
+        # Put the player's own addon list back so a later human session is not stuck
+        # with the benchmark profile (missing mousediag = broken mouse).
+        try:
+            import shutil
+            orig = f"{b.GAME}/scripts/default.txt.user-orig"
+            if os.path.exists(orig):
+                shutil.copyfile(orig, f"{b.GAME}/scripts/default.txt")
+        except Exception:
+            pass
