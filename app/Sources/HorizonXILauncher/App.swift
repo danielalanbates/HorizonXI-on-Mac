@@ -1176,6 +1176,10 @@ struct ContentView: View {
             guard let u = URL(string: s.installURL) else { return }
             runner.installPageFallback = Self.homePages[s.name].flatMap(URL.init(string:))
             runner.runInstaller(from: u, in: i, dataPath: s.dataPath, name: s.name)
+        case .clientZip:
+            guard let u = URL(string: s.installURL) else { return }
+            runner.installPageFallback = Self.homePages[s.name].flatMap(URL.init(string:))
+            runner.installClientZip(from: u, into: s.dataPath, name: s.name)
         case .retail:
             runner.installRetail(for: s, in: i)
         case .website:

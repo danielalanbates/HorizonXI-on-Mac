@@ -215,6 +215,45 @@ final class Runner: ObservableObject {
         }
     }
 
+    /// Download a plain client archive and unpack it into the world's data folder. No Windows
+    /// installer is involved, so nothing has to be driven and no second prefix is needed.
+    /// Resumable: a part-downloaded archive is continued, and the size is checked against what
+    /// the server reports before unpacking, because a truncated archive that is never verified is
+    /// how "Eden didn't work" happened (3.30 GB of 5.77 GB, silently).
+    func installClientZip(from url: URL, into dataPath: String, name nm: String) {
+        guard !busy, !running else { return }
+        guard !dataPath.isEmpty else { appendLine("!! no folder chosen for \(nm)"); return }
+        busy = true
+        let dest = URL(fileURLWithPath: dataPath, isDirectory: true)
+        let dl = dest.appendingPathComponent("installer-downloads", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dl, withIntermediateDirectories: true)
+        let file = dl.appendingPathComponent(Self.downloadName(for: url, world: nm))
+        appendLine("==> downloading \(nm)'s client\n    \(url.absoluteString)\n    to \(file.path)")
+        spawn(URL(fileURLWithPath: "/usr/bin/curl"),
+              args: ["-fL", "--retry", "5", "--retry-delay", "3", "-C", "-", "--progress-bar",
+                     "-A", "FFXI-on-Mac", "-o", file.path, url.absoluteString],
+              env: [:], cwd: dl) { [weak self] code in
+            guard let self else { return }
+            guard code == 0 || (code == 33 && FileManager.default.fileExists(atPath: file.path)) else {
+                self.appendLine("!! download failed (curl \(code)).")
+                self.busy = false
+                if let page = self.installPageFallback { NSWorkspace.shared.open(page) }
+                return
+            }
+            self.appendLine("==> unpacking \(file.lastPathComponent) into \(dest.path) — this takes a while for a client-sized archive")
+            self.spawn(URL(fileURLWithPath: "/usr/bin/ditto"),
+                       args: ["-x", "-k", file.path, dest.path], env: [:], cwd: dest) { [weak self] rc in
+                guard let self else { return }
+                self.busy = false
+                if rc == 0 {
+                    self.appendLine("==> \(nm) unpacked. Press ↻ — the checks re-run against the new files.")
+                } else {
+                    self.appendLine("!! unpacking failed (ditto \(rc)). The archive is kept at \(file.path); a truncated download is the usual cause — run this again and it resumes.")
+                }
+            }
+        }
+    }
+
     /// Where to send the user if the direct download for the world dies (set by the caller).
     var installPageFallback: URL? = nil
 

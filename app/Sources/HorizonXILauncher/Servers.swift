@@ -50,7 +50,13 @@ struct Server: Codable, Identifiable, Hashable {
     /// choice has to be per world rather than global.
     var renderer: Renderer? = nil
 
-    enum InstallKind: String, Codable { case website, installerExe, catseyeLauncher, horizonTorrent, retail, none }
+    /// How a world's client is obtained.
+    /// - `clientZip`: a plain archive of the finished client, unpacked straight into `dataPath`.
+    ///   No Windows installer runs at all. Several worlds ship their "installer" as a small
+    ///   downloader whose only job is to fetch exactly such an archive (ValhallaXI's is a .NET
+    ///   WinForms app that downloads `mirror.valhalla.group/ValhallaXI.zip`); going to the
+    ///   archive directly skips a GUI that cannot be driven unattended under wine.
+    enum InstallKind: String, Codable { case website, installerExe, catseyeLauncher, horizonTorrent, retail, clientZip, none }
 
     // A hand-written decoder because the synthesised one treats a missing key as an error rather
     // than as "use the default". `servers.json` on disk was written by whichever build the user
@@ -170,8 +176,12 @@ struct Server: Codable, Identifiable, Hashable {
                era: "90 cap", population: 216,
                // Their web installer zip (3.6 MB, 2026r14 as of 2026-08-16); the installer then
                // downloads the client. If this exact file goes away the launcher opens their page.
-               installURL: "https://www.valhalla.group/site/download/ValhallaWebInstaller_2026r14.zip", installKind: .installerExe,
-               installNote: "Valhalla's own web installer (small zip; it downloads the client). Runs inside the wrapper; install into C:\\Games\\ValhallaXI. Accounts: ucp.valhalla.group."),
+               // Their web installer is a .NET WinForms downloader; its strings name the file it
+               // fetches. Checked 2026-08-21: 7,879,409,522 bytes, no auth, ranges supported.
+               // Google Drive mirrors of the same zip: 1LPNOf8rvYRmGlnlaKD9lYvnSG4ygOe9r and
+               // 1Y014QyqSTnNQJA7HgjXHDZrsGXudqU_Q.
+               installURL: "https://mirror.valhalla.group/ValhallaXI.zip", installKind: .clientZip,
+               installNote: "Valhalla's client, straight from their own mirror (a 7.9 GB zip; their web installer only downloads this). Accounts: ucp.valhalla.group."),
         Server(name: "Supernova", host: "login.supernovaffxi.com", bootProfile: "supernova.ini",
                verified: false,
                note: "Login host from Supernova's own Ashita setup guide. Untested by this "
