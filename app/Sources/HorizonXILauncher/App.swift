@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 
 @main
 struct HorizonXILauncherApp: App {
+    init() { Headless.runIfAsked() }
+
     var body: some Scene {
         WindowGroup("FFXI on Mac") {
             ContentView()

@@ -28,10 +28,20 @@ struct Install: Identifiable, Hashable {
     /// (`clientAmbiguity`); the launch itself keys off `gameDirOverride`.
     var worldName: String? = nil
 
+    /// May this world use the client that lives inside the wrapper? True only for HorizonXI and
+    /// the local server. For anyone else an empty `dataPath` does not mean "default" -- it means
+    /// the world has no client, and launching would run HorizonXI's data against their login
+    /// server. See `clientAmbiguity`.
+    var ownsWrapperClient: Bool = true
+
     /// The same wrapper and prefix, pointed at a world's own game folder.
     func forServer(_ s: Server) -> Install {
         var c = self
         c.worldName = s.name
+        // Only HorizonXI (whose client the wrapper was built around) and the local server, which
+        // plays through that same client, may legitimately run with no folder of their own.
+        c.ownsWrapperClient = s.local || s.name == "HorizonXI"
+
         c.gameDirOverride = s.dataPath.isEmpty ? nil : Self.resolveAshitaDir(URL(fileURLWithPath: s.dataPath), world: s.name)
         c.dataRoot = s.dataPath.isEmpty ? nil : URL(fileURLWithPath: s.dataPath)
         return c
@@ -66,7 +76,6 @@ struct Install: Identifiable, Hashable {
     /// play.edenxi.com, with nothing in the UI saying so. When a world name is given, a candidate
     /// whose path names that world wins; `clientAmbiguity` reports the cases with no safe guess.
     static func resolveAshitaDir(_ root: URL, world: String? = nil) -> URL {
-        let fm = FileManager.default
         if Self.isAshitaDir(root) { return root }
         let key = root.path + "#" + (world ?? "")
         if let c = ashitaCache[key], Self.isAshitaDir(c) { return c }
@@ -98,7 +107,13 @@ struct Install: Identifiable, Hashable {
     /// clients, none named for the world, is exactly the wrong-client case: there is no safe
     /// guess, so it must not be guessed.
     var clientAmbiguity: String? {
-        guard let root = dataRoot, let world = worldName else { return nil }
+        guard let world = worldName else { return nil }
+        guard let root = dataRoot else {
+            guard !ownsWrapperClient else { return nil }
+            return "\(world) has no game folder set, so this would run the client inside the "
+                 + "wrapper — which is HorizonXI's, with HorizonXI's game data. Install \(world)'s "
+                 + "own client (Download…) or point it at the folder that already holds one."
+        }
         let hits = Self.ashitaCandidates(under: root)
         guard hits.count > 1 else { return nil }
         if hits.contains(where: { Self.matches(world: world, path: $0, under: root) }) { return nil }

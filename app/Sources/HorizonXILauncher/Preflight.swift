@@ -69,7 +69,7 @@ enum Preflight {
         // August 2026. Blocking, not a warning: there is no safe guess to fall back to.
         if let why = install.clientAmbiguity {
             add("worldclient", "Client belongs to this world", false, "", why)
-        } else if let w = install.worldName, install.dataRoot != nil {
+        } else if let w = install.worldName, install.dataRoot != nil || !install.ownsWrapperClient {
             add("worldclient", "Client belongs to this world", true, install.gameDir.path,
                 "not \(w)'s own client")
         }
