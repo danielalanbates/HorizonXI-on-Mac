@@ -382,3 +382,63 @@ That covers: profile seeded from the world's own XML at the widest `window_x`
 `Eden800600.xml`), credentials written into `boot_command`, `boot_file` resolved to
 `ffxi-bootmod/xiloader.exe`, the v3 injector run and succeeding, and the loader reaching Eden's
 auth. The only step not exercised is the one that needs an account.
+
+## 2026-08-21 — every world actually pressed Play, one at a time
+
+Daniel: *"eden didn't launch. verify all of them actually launch."* He was right, and the reason
+was mundane: **every fix above was in the source, not in the app he pressed Play on.**
+`/Applications/FFXI-on-Mac.app` was still 2.8, so `eden.ini` ran with HorizonXI's
+`horizon-loader.exe`, exactly as before. Built and installed **2.9**; 2.8 archived to
+`archive/app-builds/`.
+
+Method: a script (`/tmp/testworld.sh`, reproduced below in spirit) sets `server.selected`, opens
+the launcher, clicks PLAY at the button's real screen position, waits, and reads the verdict out
+of `launcher.log`. Every result below is from that, on this Mac, today — screenshots where a
+window appeared.
+
+| World | Result |
+|---|---|
+| HorizonXI | **launches and renders** — HORIZON XI title + User Agreement (screenshot). No regression from 2.9. |
+| Local server | **launches and renders** — FFXI title + User Agreement (screenshot). |
+| Eden | **launches its own v3 client**: `launching eden.xml (Ashita v3)` → `[SUCCESS] Injected!` → Eden's `xiloader` → `Connected to server!` → `Invalid username or password.` Needs an Eden account. |
+| ValhallaXI | launches its own v3 client, `Connected to server!`, refused at auth; the launcher surfaces "login refused" and stops the loader. Needs a Valhalla account. |
+| CatsEyeXI | launches its own client, connects, sits at their account menu (Login / Create / Change Password / 2FA). Needs the *game account* their web dashboard issues. |
+| Gaia XI | injects, **`Successfully logged in as …!`**, then the client exits before creating its window. Renders fine when launched by hand (screenshot: GAIA title + Terms). See below. |
+| FFEra | client still installing at time of writing (14 GB in). |
+| Supernova / OmicronXI | no client; Square Enix's retail parts (7.7 GB) downloaded, installer not yet run. |
+| Tabula Rasa XI | defunct. |
+
+### Two real bugs found by doing this
+
+**1. `d3d8.dll not found` — Gaia could not inject at all.** `removeDXVK` deleted the DllOverrides
+named `*d3d8`/`*d3d9`, but this prefix carried a plain `d3d8`/`d3d9` = `native` from an older
+setup. Switching to Classic therefore left d3d8 forced native with no native `d3d8.dll` anywhere
+Gaia's loader looks, and Ashita's injector died with
+`err:module:import_dll Library d3d8.dll (which is needed by …\Ashita.dll) not found`. Both
+spellings are now cleared, and `dllDirs` uses `Install.bootLoaderDir` so v3 clients get the shim.
+
+**2. `--play` does not work, and never did.** `open -a FFXI-on-Mac --args --play --world X`
+produces no window and no log line, on **2.8 as well as 2.9** — verified by running the archived
+2.8 the same way. Any other argument (`--foo`, `--world` alone) shows the window normally. So the
+unattended path documented in this file was never exercised the way it is written. Not fixed;
+the GUI click harness was used instead. **Whoever picks this up: that is a real bug, and it is
+the reason the earlier sessions' "unattended tests" proved less than they appear to.**
+
+### Gaia XI: what was ruled out
+
+Bisected one variable at a time, comparing a hand-run that works against the app run that does
+not. **Ruled out:** the whole launch environment (an identical env reproduced from Terminal runs
+fine, including `DYLD_FALLBACK_LIBRARY_PATH`, `D3DMETAL_FRAMEWORK_PATH`, the MVK knobs,
+`WINE_LARGE_ADDRESS_AWARE`, `FFXI_FPS_DIVISOR`, `WINEMSYNC=0`), the absolute `Z:\…` argument, the
+cwd, the x87 sidecar, and the renderer. `WINEMSYNC=1` *does* kill it (hence `Server.msync`), but
+Daniel's settings already had msync off, so that is a second, independent fault.
+
+Ashita's own logs pin the divergence exactly. Good run:
+`Mine_CreateWindowExA … Creating Final Fantasy XI window` → `Direct3DCreate8` → `GameLoaded`.
+Bad run: hooks install, then `UninstallAshita … (228)` at that same point — **the client never
+gets a window.** Also visible in both: Gaia's `winefix.dll` fails to load (built against Ashita
+4.30, Gaia ships 4.16). The remaining difference is the process context the wine child is spawned
+from (GUI app vs terminal); that is where to look next.
+
+`spawnViaShell` now writes `last-spawn.txt` (exe, args, cwd, full environment) on every launch —
+it was referenced in a comment but nothing wrote it, and diffing it is what made this possible.
