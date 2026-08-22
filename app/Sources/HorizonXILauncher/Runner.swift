@@ -483,7 +483,7 @@ final class Runner: ObservableObject {
     }
 
     func launch(_ install: Install, perf: PerfSettings, profile: String = "horizonxi.ini",
-                useX87: Bool = true, world: String = "") {
+                useX87: Bool = true, world: String = "", addonPolicy: AddonPolicy = .unknown) {
         guard !running else { return }
         running = true
         loginFailure = ""
@@ -519,7 +519,9 @@ final class Runner: ObservableObject {
         LuaJITGuard.apply(install) { [weak self] in self?.appendLine($0) }
         // Cutscene narration, if the user asked for it: install VanaVoice's addon and start the
         // narrator. Never fatal -- a failure here leaves the game exactly as silent as before.
-        Narration.prepare(install, enabled: perf.narrateCutscenes) { [weak self] in self?.appendLine($0) }
+        Narration.prepare(install, enabled: perf.narrateCutscenes, policy: addonPolicy) {
+            [weak self] in self?.appendLine($0)
+        }
         appendLine("==> launching \(install.bootProfileName(profile)) (Ashita \(install.ashitaGeneration.rawValue))")
         // Make the Dock tile say which world is running, under this project's own icon.
         DockIcon.apply(to: install, world: world.isEmpty ? "Vana'diel" : world) { [weak self] in self?.appendLine($0) }

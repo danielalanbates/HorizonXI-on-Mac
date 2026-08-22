@@ -21,6 +21,17 @@ enum Narration {
     /// Is the narrator app installed on this Mac?
     static var isAvailable: Bool { FileManager.default.fileExists(atPath: appPath) }
 
+    /// May this world run it at all?
+    ///
+    /// VanaVoice is on nobody's published allowlist. On a server that runs one -- HorizonXI and
+    /// CatsEyeXI both do, and both say an unlisted addon can cost you the account -- the answer
+    /// is no, and it is not a warning or a checkbox: the launcher simply will not install it.
+    /// Balloon is approved on HorizonXI and does the same dialogue capture on screen; that is
+    /// the route to ask them about, not this one.
+    static func allowed(by policy: AddonPolicy) -> Bool {
+        !policy.isRestricting || policy.allows("vanavoice")
+    }
+
     static var addonSource: URL? {
         let u = URL(fileURLWithPath: appPath).appendingPathComponent("Contents/Resources/vanavoice")
         return FileManager.default.fileExists(atPath: u.path) ? u : nil
@@ -28,9 +39,23 @@ enum Narration {
 
     /// Called on every launch. Never fatal: if any part of this fails the game still starts,
     /// silent, exactly as it did before.
-    static func prepare(_ install: Install, enabled: Bool, log: (String) -> Void) {
+    static func prepare(_ install: Install, enabled: Bool, policy: AddonPolicy,
+                        log: (String) -> Void) {
         let fm = FileManager.default
         let scripts = install.gameDir.appendingPathComponent("scripts/default.txt")
+
+        // The server's rules come first, ahead of the user's own setting: an allowlist server
+        // gets the addon removed, not merely left uninstalled, in case an older build of this
+        // launcher (or the player) put it there.
+        guard allowed(by: policy) else {
+            let dest = install.gameDir.appendingPathComponent("addons/vanavoice", isDirectory: true)
+            if fm.fileExists(atPath: dest.path) { try? fm.removeItem(at: dest) }
+            if removeLoadLine(from: scripts) || enabled {
+                log("==> narration: not allowed here — this world runs an addon allowlist and "
+                    + "VanaVoice is not on it")
+            }
+            return
+        }
 
         guard enabled else {
             if removeLoadLine(from: scripts) { log("==> narration: off") }

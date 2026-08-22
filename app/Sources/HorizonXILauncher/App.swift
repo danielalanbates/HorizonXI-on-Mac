@@ -333,6 +333,23 @@ struct ContentView: View {
         return AddonPolicies.policy(for: s, fetched: feeds.fetchedAddonLists)
     }
 
+    /// Why the narration toggle is on, off, or greyed out. The addon-rules case is the one
+    /// that matters: VanaVoice is on nobody's published allowlist, and on a server that runs
+    /// one -- HorizonXI, CatsEyeXI -- loading it risks the account, so the launcher will not
+    /// offer it there at all.
+    private var narrationHelp: String {
+        if !Narration.isAvailable {
+            return "Install VanaVoice.app to use this: github.com/danielalanbates/vanavoice"
+        }
+        if !Narration.allowed(by: addonPolicy) {
+            return "\(store.selected?.name ?? "This server") allows only the addons on its "
+                 + "published list, and VanaVoice is not on it. Running it there risks your "
+                 + "account, so the launcher will not install it."
+        }
+        return "Installs VanaVoice's addon into this world and starts the narrator, which "
+             + "reads NPC and cutscene dialogue aloud in a neural voice."
+    }
+
     /// A rotating strip of what the launcher knows about the selected world.
     ///
     /// Every line here is something the launcher actually holds -- the server's era, its own
@@ -1085,12 +1102,8 @@ struct ContentView: View {
                               + "is running and the sound moves with it. Without this, wine keeps "
                               + "playing to whichever device was default when the game started.")
                     Toggle("Read cutscenes aloud (VanaVoice)", isOn: $perf.narrateCutscenes)
-                        .disabled(!Narration.isAvailable)
-                        .help(Narration.isAvailable
-                              ? "Installs VanaVoice's addon into this world and starts the "
-                                + "narrator, which reads NPC and cutscene dialogue aloud in a "
-                                + "neural voice."
-                              : "Install VanaVoice.app to use this: github.com/danielalanbates/vanavoice")
+                        .disabled(!Narration.isAvailable || !Narration.allowed(by: addonPolicy))
+                        .help(narrationHelp)
                     Toggle("Large address aware", isOn: $perf.largeAddressAware)
                     Toggle("Fast lens flares (skip occlusion wait) — glitches", isOn: $perf.flareReadbackNoWait)
                         .help("Roughly doubles the frame rate: FFXI stops the whole frame four "
@@ -1542,7 +1555,7 @@ struct ContentView: View {
                               + "Clear it in the server's settings to override.")
         }
         runner.launch(i, perf: effective, profile: server.bootProfile, useX87: server.x87,
-                      world: server.name)
+                      world: server.name, addonPolicy: addonPolicy)
     }
 
     private func refresh() { Task { await refreshAsync() } }
