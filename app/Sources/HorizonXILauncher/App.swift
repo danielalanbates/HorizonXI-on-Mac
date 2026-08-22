@@ -66,6 +66,11 @@ struct ContentView: View {
     @StateObject private var feeds = ServerFeeds()
     @StateObject private var updater = Updater()
     @State private var bannerIndex = 0
+    /// One timer for the life of the view. Built inline in `newsBanner`'s body it was a *new*
+    /// publisher on every body evaluation, so any re-render (hovering the window, a population
+    /// refresh, changing world) restarted the 7-second countdown and the banner could sit on one
+    /// item indefinitely -- watched it stay frozen for 28 seconds straight after a world change.
+    private let bannerTick = Timer.publish(every: 7, on: .main, in: .common).autoconnect()
     @State private var worldHover = false
     @State private var forceSetup = false
     @State private var newServer = false
@@ -391,12 +396,14 @@ struct ContentView: View {
                 }
                 Spacer(minLength: 0)
             }
-            .frame(minHeight: 46, alignment: .top)
+            // Tall enough for the longest item (three lines): sized to the two-line items, the
+            // whole page nudged up and down as the banner rotated onto a three-line one.
+            .frame(minHeight: 66, alignment: .top)
             .padding(.top, 4)
             .id(item.id)
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.45), value: bannerIndex)
-            .onReceive(Timer.publish(every: 7, on: .main, in: .common).autoconnect()) { _ in
+            .onReceive(bannerTick) { _ in
                 bannerIndex = (bannerIndex + 1) % max(items.count, 1)
             }
         }
