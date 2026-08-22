@@ -55,6 +55,10 @@ struct PerfSettings: Codable {
     /// random. A correct version reads a *completed* copy from an earlier frame rather than an
     /// in-flight one; see docs/MAX4K.md.
     var flareReadbackNoWait = false
+    /// Read FFXI's cutscene and NPC dialogue aloud through VanaVoice (see Narration.swift).
+    /// Off by default: it installs an addon into the game folder and starts a second app, and
+    /// neither should happen to somebody who never asked for a narrator.
+    var narrateCutscenes = false
     /// Large address aware heap hint for the 32-bit client.
     var largeAddressAware = true
     /// Extra environment, one KEY=VALUE per line, for experiments.
@@ -81,6 +85,7 @@ struct PerfSettings: Codable {
         fpsDivisorOne = b(.fpsDivisorOne, true)
         flareReadbackNoWait = b(.flareReadbackNoWait, false)
         largeAddressAware = b(.largeAddressAware, true)
+        narrateCutscenes = b(.narrateCutscenes, false)
         extraEnv = ((try? c.decodeIfPresent(String.self, forKey: .extraEnv)) ?? nil) ?? ""
         renderer = ((try? c.decodeIfPresent(Renderer.self, forKey: .renderer)) ?? nil) ?? .metal
     }

@@ -1,0 +1,96 @@
+import Foundation
+import AppKit
+
+/// VanaVoice: cutscene dialogue read aloud.
+///
+/// FFXI's story is entirely silent text. VanaVoice (a separate menu-bar app, in this project's
+/// own repository at github.com/danielalanbates/vanavoice) narrates it with a neural voice.
+/// The split is deliberate: speech synthesis has nothing to do with launching a game, it wants
+/// to keep running while the launcher is closed, and OCR mode needs a Screen Recording grant
+/// this app should not be asking for.
+///
+/// All this file does is wire the two together at launch — put the Lua addon in the game
+/// folder, switch it on in Ashita's start-up script, and make sure the narrator is running.
+/// Everything it writes is confined to the addon folder and one line in `scripts/default.txt`,
+/// outside the block AddonSuite owns, so the two never fight over the file.
+enum Narration {
+    static let appPath = "/Applications/VanaVoice.app"
+    static let loadLine = "/addon load vanavoice"
+    static let marker = "# VanaVoice narrator"
+
+    /// Is the narrator app installed on this Mac?
+    static var isAvailable: Bool { FileManager.default.fileExists(atPath: appPath) }
+
+    static var addonSource: URL? {
+        let u = URL(fileURLWithPath: appPath).appendingPathComponent("Contents/Resources/vanavoice")
+        return FileManager.default.fileExists(atPath: u.path) ? u : nil
+    }
+
+    /// Called on every launch. Never fatal: if any part of this fails the game still starts,
+    /// silent, exactly as it did before.
+    static func prepare(_ install: Install, enabled: Bool, log: (String) -> Void) {
+        let fm = FileManager.default
+        let scripts = install.gameDir.appendingPathComponent("scripts/default.txt")
+
+        guard enabled else {
+            if removeLoadLine(from: scripts) { log("==> narration: off") }
+            return
+        }
+        guard isAvailable, let src = addonSource else {
+            log("==> narration: VanaVoice.app is not installed; skipping")
+            return
+        }
+
+        // The addon and the app meet in /tmp/vanavoice. Create it before the game starts so the
+        // addon's first write lands there rather than in the game folder.
+        try? fm.createDirectory(atPath: "/tmp/vanavoice", withIntermediateDirectories: true,
+                                attributes: [.posixPermissions: 0o777])
+
+        let dest = install.gameDir.appendingPathComponent("addons/vanavoice", isDirectory: true)
+        // Copy every launch: the app updates, and a stale addon beside a new app is the kind of
+        // mismatch nobody thinks to check.
+        if fm.fileExists(atPath: dest.path) { try? fm.removeItem(at: dest) }
+        do { try fm.copyItem(at: src, to: dest) }
+        catch { log("==> narration: could not install the addon — \(error.localizedDescription)"); return }
+
+        addLoadLine(to: scripts)
+        launchNarrator(log: log)
+        log("==> narration: on (VanaVoice)")
+    }
+
+    /// Append the load line after everything AddonSuite manages, so rewriting that block never
+    /// drops it and this never lands inside it.
+    private static func addLoadLine(to scripts: URL) {
+        var text = (try? String(contentsOf: scripts, encoding: .utf8)) ?? "/load Addons\n"
+        guard !text.contains(loadLine) else { return }
+        if !text.hasSuffix("\n") { text += "\n" }
+        text += "\n\(marker)\n\(loadLine)\n"
+        try? text.write(to: scripts, atomically: true, encoding: .utf8)
+    }
+
+    @discardableResult
+    private static func removeLoadLine(from scripts: URL) -> Bool {
+        guard let text = try? String(contentsOf: scripts, encoding: .utf8),
+              text.contains(loadLine) else { return false }
+        let kept = TextFile.lines(of: text).filter {
+            let t = $0.trimmingCharacters(in: .whitespaces)
+            return t != loadLine && t != marker
+        }
+        try? kept.joined(separator: "\n").write(to: scripts, atomically: true, encoding: .utf8)
+        return true
+    }
+
+    /// Start the narrator if it is not already up. VanaVoice refuses to run twice itself, but
+    /// asking for a second copy would still steal focus, so check first.
+    private static func launchNarrator(log: (String) -> Void) {
+        let running = NSWorkspace.shared.runningApplications
+            .contains { $0.bundleIdentifier == "org.batesai.vanavoice" }
+        guard !running else { return }
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.activates = false
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: appPath),
+                                           configuration: cfg) { _, error in
+            if let error { NSLog("VanaVoice launch failed: \(error.localizedDescription)") }
+        }
+    }
+}

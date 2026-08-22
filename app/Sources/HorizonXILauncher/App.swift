@@ -1084,6 +1084,13 @@ struct ContentView: View {
                         .help("Switch headphones, speakers or a Bluetooth device while the game "
                               + "is running and the sound moves with it. Without this, wine keeps "
                               + "playing to whichever device was default when the game started.")
+                    Toggle("Read cutscenes aloud (VanaVoice)", isOn: $perf.narrateCutscenes)
+                        .disabled(!Narration.isAvailable)
+                        .help(Narration.isAvailable
+                              ? "Installs VanaVoice's addon into this world and starts the "
+                                + "narrator, which reads NPC and cutscene dialogue aloud in a "
+                                + "neural voice."
+                              : "Install VanaVoice.app to use this: github.com/danielalanbates/vanavoice")
                     Toggle("Large address aware", isOn: $perf.largeAddressAware)
                     Toggle("Fast lens flares (skip occlusion wait) — glitches", isOn: $perf.flareReadbackNoWait)
                         .help("Roughly doubles the frame rate: FFXI stops the whole frame four "
@@ -1157,6 +1164,7 @@ struct ContentView: View {
                 .onChange(of: perf.disableAppNap) { _ in perf.save() }
                 .onChange(of: perf.followSoundOutput) { _ in perf.save() }
                 .onChange(of: perf.largeAddressAware) { _ in perf.save() }
+                .onChange(of: perf.narrateCutscenes) { _ in perf.save() }
                 .onChange(of: perf.metalHUD) { _ in perf.save() }
             } label: {
                 Text("SETUP & DIAGNOSTICS").font(.caption).tracking(2.5)
