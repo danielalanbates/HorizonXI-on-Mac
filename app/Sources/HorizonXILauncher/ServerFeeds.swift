@@ -275,6 +275,15 @@ final class ServerFeeds: ObservableObject {
                      + "from the server's own published setup guide.",
                 source: server.name, url: nil, fetched: false))
         }
+        // Asked for by Daniel: the most common question about this list is why somebody's own
+        // world is missing from it. Rotated on *every* server's banner, not just one, because
+        // whoever is looking for the missing world will be sitting on whatever world is selected.
+        out.append(NewsItem(
+            title: "Not seeing your server? It is almost certainly not built on LandSandBoat — "
+                 + "the community-led codebase this launcher targets, and the only FFXI server "
+                 + "emulator still being actively developed.",
+            source: "FFXI on Mac",
+            url: URL(string: "https://github.com/LandSandBoat/server"), fetched: false))
         return out
     }
 }

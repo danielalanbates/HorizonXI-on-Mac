@@ -8,8 +8,8 @@
 # idempotent (re-run to resume):
 #
 #   1. FFXIFullSetup_US.part1.exe + part2..5.rar (7.7 GB) from gdl.square-enix.com  -> <data>/retail-downloads
-#   2. Unpack the 5-part RAR SFX with 7-Zip if installed (brew install sevenzip), else run
-#      part1.exe under wine and let its own extractor unpack (GUI: pick the folder, Install).
+#   2. Unpack the 5-part RAR SFX with unar (installed on demand via brew), else run part1.exe
+#      under wine and let its own extractor unpack (GUI: pick the folder, Install).
 #   3. Run the unpacked FFXISetup.exe under wine (Square Enix's InstallShield installer, GUI).
 #      Install into C:\Games\<world>\SquareEnix when it asks — that is <data>/SquareEnix.
 #   4. Ashita v4 (Ashita-v4beta release zip) + LandSandBoat xiloader.exe   -> <data>/Ashita
@@ -52,22 +52,46 @@ for f in $PARTS; do
   touch "$DL/$f.done"
 done
 
-# 2. Unpack. 7-Zip reads the multi-part RAR SFX directly (no wine, no GUI); without it, the SFX
-#    is run under wine and the user clicks Install.
+# 2. Unpack. The five parts are a RAR SFX whose payload uses RAR 7's compression method ("v6"),
+#    and that is the whole story of this step:
+#      - 7-Zip 26.02 LISTS the archive and then fails every single file with
+#        "Unsupported Method", leaving a tree of correctly-named ZERO-BYTE files. It also cannot
+#        follow the volume chain out of an SFX stub at all ("Missing volume : [1]"). The old code
+#        checked only that FFXISetup.exe existed, so an entirely empty unpack looked like success
+#        and the install died several steps later with no explanation. Hence -s below.
+#      - unar (brew install unar) reads the SFX stub, all five volumes and the v6 method. It is
+#        the only extractor here that actually works, so it is tried first.
+#      - RARLAB's own unrar is NOT an option: the homebrew cask ships an unsigned binary that
+#        macOS kills on sight (SIGKILL), and it is deprecated for exactly that reason.
+#    Wine running Square Enix's own extractor stays as the last resort; it needs a GUI click.
 UNPACK="$DL/FFXIFullSetup_US"
+unpacked_ok() {  # a real unpack, not 7-Zip's zero-byte skeleton
+  local setup
+  setup=$(find "$1" -iname 'FFXISetup.exe' -o -iname 'setup.exe' 2>/dev/null | head -1)
+  [[ -n "$setup" && -s "$setup" ]]
+}
 if [[ ! -f "$UNPACK/.unpacked" ]]; then
-  say "step 2/6: unpacking the installer"
-  if command -v 7zz >/dev/null 2>&1 || command -v 7z >/dev/null 2>&1; then
+  say "step 2/6: unpacking the installer (7.7 GB — several minutes)"
+  mkdir -p "$UNPACK"
+  # unar is small and this is the only thing that reliably reads the archive, so fetch it rather
+  # than dumping the user into the GUI extractor.
+  if ! command -v unar >/dev/null 2>&1 && command -v brew >/dev/null 2>&1; then
+    say "  installing unar (the only extractor that reads this archive)"
+    brew install unar >/dev/null 2>&1 || true
+  fi
+  if command -v unar >/dev/null 2>&1; then
+    unar -f -q -o "$UNPACK" "$DL/FFXIFullSetup_US.part1.exe" || true
+  elif command -v 7zz >/dev/null 2>&1 || command -v 7z >/dev/null 2>&1; then
     SEVEN=$(command -v 7zz || command -v 7z)
-    mkdir -p "$UNPACK"
-    "$SEVEN" x -y -o"$UNPACK" "$DL/FFXIFullSetup_US.part1.exe" >/dev/null || die "7-Zip could not unpack the SFX"
-  else
-    say "  7-Zip not installed (brew install sevenzip) — running Square Enix's self-extractor under wine; choose $UNPACK and press Install"
-    mkdir -p "$UNPACK"
+    say "  unar not installed (brew install unar) — trying 7-Zip, which usually cannot read this archive"
+    "$SEVEN" x -y -o"$UNPACK" "$DL/FFXIFullSetup_US.part1.exe" >/dev/null || true
+  fi
+  if ! unpacked_ok "$UNPACK"; then
+    say "  falling back to Square Enix's self-extractor under wine; choose $UNPACK and press Install"
+    say "  (install unar first for an unattended unpack: brew install unar)"
     "$WINE" "$(winepath "$DL/FFXIFullSetup_US.part1.exe")" || true
   fi
-  # any of the known layouts counts as unpacked
-  find "$UNPACK" -iname 'FFXISetup.exe' -o -iname 'setup.exe' | head -1 | grep -q . || die "unpacked folder has no setup executable — re-run to try again"
+  unpacked_ok "$UNPACK" || die "the installer did not unpack (no non-empty setup executable under $UNPACK) — install unar (brew install unar) and run Download again"
   touch "$UNPACK/.unpacked"
 fi
 SETUP=$(find "$UNPACK" -iname 'FFXISetup.exe' | head -1); [[ -n "$SETUP" ]] || SETUP=$(find "$UNPACK" -iname 'setup.exe' | head -1)
