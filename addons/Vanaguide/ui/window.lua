@@ -8,7 +8,7 @@ local G = require('core.guide')
 local P = require('core.progress')
 local R = require('routing.router')
 
-local W = { open = { true }, picker = { false }, upcoming = 5 }
+local W = { open = { true }, picker = { false }, upcoming = 4 }
 
 local VERB_LABEL = {
     accept = 'Accept', turnin = 'Turn in', complete = 'Do', kill = 'Kill', buy = 'Buy',
@@ -16,9 +16,24 @@ local VERB_LABEL = {
     level = 'Level',
 }
 
+-- Step text is a sentence, not a label, so it has to wrap: ImGui will happily draw it off
+-- the edge of the window otherwise.  TextWrapped is used where it exists, and the coloured
+-- lines set a wrap position around the plain coloured call, which has no wrapped variant.
+local function wrapped(s)
+    local imgui = _G.imgui
+    if imgui.TextWrapped ~= nil then imgui.TextWrapped(s) else imgui.Text(s) end
+end
+
 local function text_colored(colour, s)
     local imgui = _G.imgui
-    if imgui.TextColored ~= nil then imgui.TextColored(colour, s) else imgui.Text(s) end
+    if imgui.TextColored == nil then return wrapped(s) end
+    if imgui.PushTextWrapPos ~= nil then
+        imgui.PushTextWrapPos(0)
+        imgui.TextColored(colour, s)
+        imgui.PopTextWrapPos()
+    else
+        imgui.TextColored(colour, s)
+    end
 end
 
 --- One frame.  `w` is a world snapshot; `on_pick` is called with a guide name.
@@ -67,7 +82,7 @@ function W.draw(w, on_pick)
                 local next_steps = P.upcoming(W.upcoming + 1, w)
                 for i = 2, #next_steps do
                     local s = next_steps[i]
-                    imgui.Text((' %s %s'):format(VERB_LABEL[s.kind] or '-', s.text))
+                    wrapped((' %s %s'):format(VERB_LABEL[s.kind] or '-', s.text))
                 end
             end
         end
