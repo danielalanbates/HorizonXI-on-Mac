@@ -1,100 +1,186 @@
-# Setting up — the plain-English version
+# START HERE — setting up, in plain English
 
-No Terminal, for most people. Three things have to be on your Mac, and the launcher tells you
-which one is missing at any moment — and builds one of the three for you.
+You do not need Terminal. You do not need to know what Wine is. You press four buttons.
+
+## The short version
+
+1. **Drag *FFXI on Mac* into your Applications folder** and open it. Apple signed and notarised
+   it, so it opens normally — no scary warning, no right-click trick.
+2. **Press *Install wine…*** on the front screen. About five minutes. It asks for your Mac
+   password once (that's Rosetta, Apple's own translation layer). Four steps go green and you're
+   done with it forever.
+3. **Pick your world** from the **CHANGE WORLD** menu.
+4. **Press *Download…*** and choose where to put the game. This downloads 15–30 GB, so it takes a
+   while — start it and go do something else. You can close the laptop lid.
+5. **Make an account** on that world's website. The launcher has a link straight to it.
+6. **Type your account name and password, press PLAY.**
+
+That's the whole thing. Everything below is detail you only need if something goes wrong.
+
+---
+
+## Do I need to already own FFXI?
+
+**No.** You do not need a Square Enix account, a PlayOnline ID, a disc, or an existing copy of the
+game. Every world the launcher supports can get you a client for free, and the *Download…* button
+does the fetching.
+
+The game files aren't inside the launcher's 5 MB download for one reason: they're Square Enix's
+property and nobody may hand them out. So the launcher fetches them the same way that world's own
+Windows launcher would. You still just press a button. Anyone offering you one file with the game
+already inside it is giving away Square Enix's client, which they may not do.
+
+## What ends up on your Mac
+
+| Piece | Size | How you get it |
+| --- | --- | --- |
+| **FFXI on Mac** (the launcher) | 5 MB | the `.dmg` you already opened |
+| **Wine** (runs Windows programs on a Mac) | ~250 MB | press ***Install wine…*** |
+| **The FFXI game** | 15–30 GB | press ***Download…*** |
+
+Wine is free and open source ([Sikarugir](https://github.com/Sikarugir-App/Sikarugir), the
+successor to Wineskin, LGPL 2.1). It is not CrossOver and costs nothing. The launcher fetches it
+fresh from Sikarugir's own GitHub releases and assembles it on your Mac, which is why it isn't
+just bundled in.
+
+> **`sikarugir.com` is not that project.** The real one is the GitHub link above. Sikarugir's own
+> README tells anyone who arrived from that domain to scan their Mac for malware.
+
+## What *Install wine…* is doing
+
+Four steps, each shown as it finishes:
+
+1. **Rosetta 2** — Apple's translation layer. FFXI is a 32-bit Intel game from 2002, so it's
+   required. Installed automatically via the normal system password prompt.
+2. **Downloading Wine** — about 250 MB from Sikarugir's GitHub releases. Checked against a pinned
+   SHA-256 before anything is built from it.
+3. **Building the wrapper** — the pieces are assembled at `~/Applications/FFXI on Mac Wine.app`.
+4. **Creating the Windows drive** — a blank `C:` drive, ready for the game.
+
+If a step fails partway, press **Install wine…** again. Finished steps are skipped, so it picks up
+where it stopped rather than starting over.
+
+## What *Download…* is doing
+
+Whatever your world's own launcher does — the app just does it for you, inside the wrapper,
+into the folder you picked:
+
+- **HorizonXI** — their 9.4 GB client download, then their update chain.
+- **CatsEyeXI** — runs CatsEyeXI's own launcher, which installs their ~15 GB client.
+- **Supernova / OmicronXI** — downloads Square Enix's own free client (7.7 GB), installs it,
+  updates it through PlayOnline, then puts the world's files on top. This one takes hours. It's
+  still just the one button.
+- **Eden / FFEra / ValhallaXI** — downloads and runs their installer.
+- **Gaia XI** — their download is behind a login, so it opens their site; save the file, then use
+  **Setup & Diagnostics → Run installer…** on it.
+
+**Already downloaded an installer yourself?** **Setup & Diagnostics → Run installer…** takes any
+`.exe` (or a `.zip` with one inside) and runs it in the right place.
+
+**Where it goes.** You choose the folder the first time, per world. Any drive works, external
+included — but it must be Mac-formatted (APFS or Mac OS Extended). An exFAT or FAT32 drive will
+not work.
+
+## Choosing a renderer
+
+**Leave it on *Metal / DXVK (recommended)*.** That's the one that draws the game correctly. The
+other options exist for debugging and are known to draw wrong in various ways — the launcher says
+how under each one, and [`PATHWAYS.md`](PATHWAYS.md) has the measurements.
 
 ## Do not update the client unless you have to
 
-**Being a version or two behind is normal, and the game plays fine.** HorizonXI's login server
-accepts a slightly older client; the launcher says so in the log and lets you Play.
+**Being a version or two behind is normal, and the game plays fine.** Servers accept a slightly
+older client; the launcher says so in the log and lets you Play.
 
-Only use **Setup & Diagnostics › Update HorizonXI…** when the world has actually published an
-update *and* the game is turning you away — the login server answers "The game's data has been
-updated" and refuses the connection. That is the signal. Nothing else is.
+Only use **Setup & Diagnostics › Update…** when the world has actually published an update *and*
+the game is turning you away — the login server answers *"The game's data has been updated"* and
+refuses to connect. That is the signal. Nothing else is.
 
-Why the caution: the update is a multi-hour BitTorrent fetch that rewrites files inside a
-working install. If it stalls part-way the client is left mid-update, which is a worse problem
-than being one version behind. The launcher keeps the renderer DLLs and the x87 loader across an
-update, but it cannot un-break a half-applied one.
+Why the caution: the update is a multi-hour download that rewrites files inside a working install.
+If it stalls part-way the client is left mid-update, which is a worse problem than being one
+version behind. The launcher keeps the renderer files and the speed-up loader across an update,
+but it cannot un-break a half-applied one. The same rule applies to CatsEyeXI, whose client can
+only be updated by their own launcher.
 
-The same rule applies to CatsEyeXI (their client can only be updated by their own launcher) and
-to the bring-your-own-retail worlds.
+## When something goes wrong
 
+Open **Setup & Diagnostics** in the app. Every check names the exact file or setting it couldn't
+find, and **Repair** re-runs the whole configuration for you.
 
-## What you need
+**"FFXI on Mac would like access to Developer Tools."** Say yes. It's Apple's oddly-worded way of
+asking *"may this app run Wine?"* — Wine's developers don't notarise their builds, so macOS checks
+with you first. Nothing to do with Xcode.
 
-| Piece | Where it comes from | Roughly |
-| --- | --- | --- |
-| **FFXI on Mac** (this launcher) | the `.dmg` on the releases page | 5 MB |
-| **A Wine wrapper** | the launcher builds it — press **Install wine…** | ~250 MB download |
-| **The HorizonXI game client** | HorizonXI's own installer, run through **Install the game…** | ~27 GB |
+**The game window opens and closes immediately.** Press **Repair**.
 
-The last two are not *in* the download itself, and that is deliberate rather than laziness:
+**Red error lines at startup.** Three Ashita plugins (`Nameplate`, `PacketFlow`, `Deeps`) were
+built for an older Ashita and don't load. Harmless.
 
-- The **game client** is Square Enix's data. Nobody may redistribute it, so you get it from your
-  server's own installer (details below).
-- The **Wine wrapper** is built from Wine's own upstream releases (Sikarugir, LGPL 2.1). Shipping
-  a pre-built copy inside this app would mean taking on Wine's LGPL relink obligations properly
-  rather than as an afterthought, so instead the launcher fetches it fresh and assembles it on
-  your Mac the first time you ask it to. That takes about five minutes, once, and needs nothing
-  from you but a click and (for Rosetta) your Mac password.
+**The world is black or untextured.** Renderer is on the wrong setting — see above.
 
-Anyone offering you one file with all three in it is redistributing Square Enix's client, which
-they may not do.
+## Running your own server
 
-## Installing Wine — press the button
+Pick **Local server** in the World menu: instead of logging into somebody else's world, the
+launcher builds [LandSandBoat](https://github.com/LandSandBoat/server) on this Mac and the client
+connects to `127.0.0.1`. You still need a game client — a server is not a game.
 
-Open **FFXI on Mac** with nothing installed yet, and the main screen offers **Install wine…**
-directly. Press it and the launcher does four things, showing each as it finishes:
+Press **Set up server** and it will, in order: install Apple's command line tools and Homebrew if
+missing, install LandSandBoat's dependencies (cmake, luajit, zeromq, openssl, mariadb, pkgconf),
+clone the source, create and import the database, and compile the four server processes. Budget
+half an hour or more the first time. Finished steps are skipped, so if it stops you press the
+button again.
 
-1. **Rosetta 2** — Apple's translation layer; FFXI is a 32-bit Intel game. Installed automatically
-   if it's missing, via the normal system password prompt.
-2. **Downloading Wine** — two files, about 250 MB total, fetched from
-   [Sikarugir](https://github.com/Sikarugir-App/Sikarugir)'s own GitHub releases (a template `.app`
-   and a wine engine). The engine is checked against a pinned SHA-256 before anything is built
-   from it.
-3. **Building the wrapper** — the two pieces are unpacked into each other at
-   `~/Applications/FFXI on Mac Wine.app`, and Wine's internal library paths are fixed up so it
-   runs from that location.
-4. **Creating the Windows drive** — `wineboot` sets up a blank `drive_c`, ready for the game.
+**Disk space:** about 12 GB. The launcher shows what's free and refuses to start a build below
+9 GB, because running the disk to zero halfway through a compile is a worse failure than not
+starting one.
 
-When all four are green you have a working Wine wrapper and nothing left to configure. This is the
-same Wine build the manual route below produces — Sikarugir, the successor to Wineskin, an
-ordinary open-source build of Wine (LGPL 2.1). It is not CrossOver and costs nothing.
+After setup, **Play** starts the server and then the client. The first login with a new account
+name creates that account.
 
-If a step fails partway through, press **Install wine…** again — completed steps are skipped, so
-it picks up where it stopped rather than starting over.
+Everything lives in `~/Games/lsb`, and all of it is the shell script
+[`scripts/lsb-server.sh`](../scripts/lsb-server.sh) — run `./lsb-server.sh status|setup|start|stop`
+by hand if you'd rather watch it work.
 
-## Installing Wine by hand
+Two things this changes about the client, only in your local copy: the server accepts the older
+xiloader that ships with private-server clients, and the client-version lock is turned off. Both
+are needed for a client built for one server to talk to another, and neither is something you
+would do to a server other people use.
 
-Only worth doing if the button above fails and you want to see each piece yourself, or if you're
-troubleshooting the wrapper the app built (it lives at the same place either way:
-`~/Applications/FFXI on Mac Wine.app`, or older manual installs under `~/Applications/Sikarugir/`).
+## About these servers
 
-A "wrapper" is just a Mac app with Wine and a Windows C: drive inside it. You make one once, put
-FFXI in it, and never think about it again. Every step below was done on this Mac in about ten
-minutes, most of it waiting on downloads.
+HorizonXI, CatsEyeXI, Eden and the rest run
+[LandSandBoat](https://github.com/LandSandBoat/server) or a fork of it — an open-source server,
+written independently, that speaks FFXI's network protocol. It contains none of Square Enix's
+code. What it *needs* is Square Enix's client, which is why every one of them installs the real
+game rather than handing you a repack.
 
-The Wine used here is [Sikarugir](https://github.com/Sikarugir-App/Sikarugir) — the successor to
-Wineskin, an ordinary open-source build of Wine (LGPL 2.1). It is not CrossOver and costs nothing.
+Square Enix has not licensed or endorsed any of this. These communities have run openly for years,
+and retail FFXI has been in maintenance mode for a long time, but "long tolerated" is not the same
+as "permitted", and this project doesn't claim otherwise. What it does claim is narrower and firm:
+**no Square Enix data is redistributed here.**
 
-### 1. Install Homebrew, if you do not have it
+---
 
-Paste this into Terminal (Applications → Utilities → Terminal) and press Return:
+# Appendix: doing it all by hand
+
+**You almost certainly don't need this.** It's here for when the buttons fail, or you want to see
+each piece. Ten minutes, mostly waiting on downloads.
+
+### 1. Homebrew, if you don't have it
+
+Paste into Terminal (Applications → Utilities → Terminal) and press Return:
 
 ```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-### 2. Install Rosetta 2
-
-FFXI is a 32-bit Windows game from 2002, so an Apple Silicon Mac needs Apple's translation layer:
+### 2. Rosetta 2
 
 ```sh
 softwareupdate --install-rosetta --agree-to-license
 ```
 
-### 3. Install Sikarugir
+### 3. Sikarugir (Wine for macOS)
 
 ```sh
 brew trust Sikarugir-App/sikarugir
@@ -103,129 +189,51 @@ brew install --cask Sikarugir-App/sikarugir/sikarugir
 
 That puts **Sikarugir Creator** in your Applications folder.
 
-> **`sikarugir.com` is not this project.** The real one is the GitHub organisation linked above.
-> Sikarugir's own README tells anyone who arrived from that domain to scan their Mac for malware.
-
 ### 4. Make the wrapper
 
-Open **Sikarugir Creator**. The window has three parts: a template on the left, an engine in the
-middle, a **Create** button on the right.
+Open **Sikarugir Creator**. Under *No engine selected*, click **Change**, pick
+**`WS12WineSikarugir10.0_6`** — the exact build this project is tested on. It downloads ~160 MB;
+the arrow next to it disappears when it's done, then click the name again to select it.
+**Do not pick anything with `CX` in the name** — those are CrossOver-derived and commercial.
+Click **Create**, name it `FFXI`, leave the location alone.
 
-1. Under *No engine selected*, click **Change**.
-2. Pick **`WS12WineSikarugir10.0_6`** — the top entry, and the exact build this project is tested
-   on. It downloads about 160 MB, which takes a minute; the arrow next to it disappears when it
-   has finished, and then you click the name again to select it.
-   **Do not pick anything with `CX` in the name.** Those are CrossOver-derived and commercial.
-3. **Create** turns blue. Click it.
-4. It asks where to save. Type **`FFXI`** and press Return. Leave the location alone — the default
-   is `~/Applications/Sikarugir/`, which is one of the places the launcher looks.
+You get `~/Applications/Sikarugir/FFXI.app`, about 1.4 GB — Wine and a blank Windows drive, no
+game yet. Nothing to configure; close Sikarugir Creator.
 
-Wait a minute or two. When it finishes you have `~/Applications/Sikarugir/FFXI.app`, about 1.4 GB.
-That is your wrapper. It is empty — Wine and a blank Windows drive, no game yet.
+### 5. Put the game in it
 
-Nothing to configure. Close Sikarugir Creator; you are done with it.
-
-## Installing the game
-
-FFXI itself comes from the server you intend to play on. HorizonXI's installer downloads about
-9.4 GB over BitTorrent and unpacks to roughly 27 GB, so start it before you do anything else and
-leave it running.
-
-You have two ways in:
-
-**Press Install the game… in the launcher.** With a Wine wrapper already built (by the button
-above, or by hand), the main screen offers this once nothing is found. Point it at HorizonXI's
-Windows installer `.exe` and the launcher runs it inside the wrapper it manages — no separate
-Sikarugir window to find.
-
-**Or run the server's installer inside the wrapper directly.** If you built the wrapper by hand,
-double-click your `FFXI.app` wrapper — it opens Sikarugir's own window with an **Install
-Software** button. Point that at the `.exe` you downloaded and let it run. It behaves like a
-Windows PC from there.
-
-**Or copy an install you already have.** Drag the whole `HorizonXI` folder off a Windows machine
-into:
+Double-click your `FFXI.app` wrapper → **Install Software** → point it at your server's Windows
+installer and let it run. Or drag an existing game folder off a Windows PC into:
 
 ```
 ~/Applications/Sikarugir/FFXI.app/Contents/SharedSupport/prefix/drive_c/
 ```
 
-To get there in Finder: right-click `FFXI.app` → *Show Package Contents* → `SharedSupport` →
-`prefix` → `drive_c`. Drop the folder in so you end up with `drive_c/HorizonXI`.
+(Right-click `FFXI.app` → *Show Package Contents* → `SharedSupport` → `prefix` → `drive_c`.)
 
-Either way, when the game files are in place, open **FFXI on Mac** and it finds the wrapper on its
-own. If it doesn't, open **Setup & Diagnostics** — it names the exact thing it could not find.
+### 6. Renderer files
 
-**A word on what these servers are**, since the wording elsewhere has been muddled: private
-servers like HorizonXI, CatsEyeXI and Eden run [LandSandBoat](https://github.com/LandSandBoat/server)
-or a fork of it — an open-source, independently written server that speaks FFXI's network
-protocol. It contains none of Square Enix's code. What it *needs* is Square Enix's client, which
-is why every one of them makes you install the real game rather than handing you a repack.
+The launcher's **Renderer** menu does this. By hand: copy `vendor/d3d8to9.dll` as `d3d8.dll` and
+`vendor/dxvk-1.10.3-x32-d3d9-horizonxi.dll` as `d3d9.dll` into both the game folder and its
+`SquareEnix/FINAL FANTASY XI/` subfolder, then in the wrapper:
 
-Square Enix has not licensed or endorsed any of this. These communities have run openly for
-years, and retail FFXI has been in maintenance mode for a long time, but "long tolerated" is not
-the same as "permitted", and this project does not claim otherwise. What it does claim is
-narrower and firm: **no Square Enix data is redistributed here.** You supply the client.
+```sh
+wine reg add "HKCU\Software\Wine\DllOverrides" /v "*d3d8" /d native /f
+wine reg add "HKCU\Software\Wine\DllOverrides" /v "*d3d9" /d native /f
+```
 
-## Steps
+### 7. Register the game's COM servers
 
-1. **Install the launcher.** Open the `.dmg`, drag *FFXI on Mac* to Applications, and open
-   it. The download is signed with a Developer ID and notarised by Apple, so it opens with no
-   warning and no right-click trick.
-2. **Press Install wine…** if nothing is found. Four steps, all automatic: Rosetta 2, downloading
-   Wine, building the wrapper, creating the Windows drive. See above.
-3. **Press Install the game…** and point it at your server's Windows installer — or, if you
-   already have a wrapper from elsewhere, copy an existing `HorizonXI` folder into
-   `<wrapper>/Contents/SharedSupport/prefix*/drive_c/` by hand. The launcher also looks in
-   `/Applications`, `~/Applications` and every mounted volume on its own, so an existing install
-   is usually found without either step.
-4. **Type your account name and password**, tick *Remember me* if you want them kept — they go
-   into the macOS Keychain, never into a file in this project.
-5. **Press PLAY.**
+```sh
+wine regsvr32 /s "C:\HorizonXI\SquareEnix\FINAL FANTASY XI\FFXi.dll"
+```
 
-If something is missing, open **Setup & Diagnostics** — every check names the exact file or
-setting it could not find, and **Repair** re-runs the whole prefix configuration.
+…and likewise `FFXiMain.dll`, `FFXiVersions.dll`, and
+`"C:\HorizonXI\SquareEnix\PlayOnlineViewer\viewer\com\polcore.dll"`.
 
-## Choosing a renderer
+[`scripts/install.sh`](../scripts/install.sh) is the exact sequence **Repair** runs.
 
-**Leave this on Metal / DXVK (recommended).** It draws the game correctly — full textures, fog,
-UI — at around 24 fps in the world at 4K with every setting maxed on an M1 with 8 GB.
+### 8. Open FFXI on Mac
 
-The other options are there for debugging and draw the game wrong in various ways. The launcher
-says how under each one, and [`PATHWAYS.md`](PATHWAYS.md) has the measurements and the reasons.
-
-## Which server
-
-The **World** dropdown lists the FFXI private servers this project knows about, HorizonXI first.
-Only HorizonXI is verified here — its login host is the one that has actually been tested. For any
-other server, fill in the login host from that server's own installer; the field appears under the
-dropdown as soon as you pick an unverified world.
-
-## Running your own server
-
-Picking **Local server** in that dropdown means not logging into anyone else's world: the launcher
-builds [LandSandBoat](https://github.com/LandSandBoat/server) on this Mac and the client connects
-to `127.0.0.1`. You still need the FFXI client itself — a server is not a game.
-
-Press **Set up server** and the launcher will, in order: install Apple's command line tools and
-Homebrew if they are missing, `brew install` LandSandBoat's dependencies (cmake, luajit, zeromq,
-openssl, mariadb, pkgconf), clone the source, create the database and import the schema, and
-compile the four server processes. Budget half an hour or more the first time. Every step is
-skipped if it is already done, so if it stops you press the button again rather than starting over.
-
-**Disk space.** It needs about 12 GB — roughly 5 GB of source and git history, 3 GB of build
-output, and headroom for the database and the compiler's temporaries. The launcher shows what is
-free before you start and refuses to begin a build below 9 GB, because running the disk to zero
-half way through a compile is a worse failure than not starting one.
-
-After setup, **Play** starts the server if it is not already up, then launches the client. The
-first login with a new account name creates that account.
-
-Everything lives in `~/Games/lsb`, and all of it is the shell script
-[`scripts/lsb-server.sh`](../scripts/lsb-server.sh) — run `./lsb-server.sh status|setup|start|stop`
-by hand if you would rather watch it work in a terminal.
-
-Two things this changes about the client, both only in your local copy: the server accepts the
-xiloader version that ships with the HorizonXI client rather than the newer one LandSandBoat
-expects, and the client-version lock is turned off. Both are needed for a client built for one
-server to talk to another, and neither is something you would do to a server other people use.
+It finds the wrapper on its own — it looks in `/Applications`, `~/Applications` and every mounted
+volume. If it doesn't, **Setup & Diagnostics** names exactly what's missing.
