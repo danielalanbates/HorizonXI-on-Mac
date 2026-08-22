@@ -67,6 +67,8 @@ local vg = {
     settings = settings.load(default_settings),
     last_zone = nil,
     last_advance = 0,
+    was_logged_in = false,
+    d3d8 = nil,
 };
 
 local function save_progress()
@@ -207,7 +209,17 @@ ashita.events.register('command', 'vg_command', function (e)
 end);
 
 ashita.events.register('d3d_present', 'vg_present', function ()
-    if (not U.logged_in()) then return; end
+    if (not U.logged_in()) then
+        -- Back at the character select.  The quest flags belong to whoever was logged in,
+        -- and keeping them would silently mark the next character's steps done.
+        if (vg.was_logged_in) then
+            story.reset();
+            vg.was_logged_in = false;
+            vg.last_zone = nil;
+        end
+        return;
+    end
+    vg.was_logged_in = true;
 
     local w = C.world();
     w.yaw = U.heading();
@@ -235,7 +247,8 @@ ashita.events.register('d3d_present', 'vg_present', function ()
         if (step ~= nil) then
             local rec = R.recommend(step, w);
             local ok, vp = pcall(function ()
-                local res, v = require('d3d8').get_device():GetViewport();
+                if (vg.d3d8 == nil) then vg.d3d8 = require('d3d8'); end
+                local res, v = vg.d3d8.get_device():GetViewport();
                 if (res == 0) then return v; end
                 return nil;
             end);
