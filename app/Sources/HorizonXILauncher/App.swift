@@ -1080,6 +1080,10 @@ struct ContentView: View {
                     Toggle("Fast synchronisation (msync)", isOn: $perf.msync)
                     Toggle("Silence wine debug channels", isOn: $perf.silenceWineDebug)
                     Toggle("Keep awake (no App Nap)", isOn: $perf.disableAppNap)
+                    Toggle("Follow the Mac's sound output", isOn: $perf.followSoundOutput)
+                        .help("Switch headphones, speakers or a Bluetooth device while the game "
+                              + "is running and the sound moves with it. Without this, wine keeps "
+                              + "playing to whichever device was default when the game started.")
                     Toggle("Large address aware", isOn: $perf.largeAddressAware)
                     Toggle("Fast lens flares (skip occlusion wait) — glitches", isOn: $perf.flareReadbackNoWait)
                         .help("Roughly doubles the frame rate: FFXI stops the whole frame four "
@@ -1151,6 +1155,7 @@ struct ContentView: View {
                 .onChange(of: perf.msync) { _ in perf.save() }
                 .onChange(of: perf.silenceWineDebug) { _ in perf.save() }
                 .onChange(of: perf.disableAppNap) { _ in perf.save() }
+                .onChange(of: perf.followSoundOutput) { _ in perf.save() }
                 .onChange(of: perf.largeAddressAware) { _ in perf.save() }
                 .onChange(of: perf.metalHUD) { _ in perf.save() }
             } label: {

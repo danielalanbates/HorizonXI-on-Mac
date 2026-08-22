@@ -16,6 +16,17 @@ struct PerfSettings: Codable {
     var metalHUD = false
     /// Keep the game off macOS App Nap / timer coalescing when it loses focus.
     var disableAppNap = true
+    /// Follow the Mac's Sound Output setting while the game is running.
+    ///
+    /// Wine's CoreAudio backend pins its AUHAL output unit to whichever device was default when
+    /// the game started its audio, and macOS's Sound Output control only changes the *default* —
+    /// so plugging in headphones mid-session used to leave FFXI talking to the speakers with no
+    /// remedy short of quitting. `audiofollow.dylib` (see `audio/audiofollow.c`) is inserted into
+    /// the wine process, watches `kAudioHardwarePropertyDefaultOutputDevice`, and re-points the
+    /// unit when it changes. Verified A/B on both arm64 and x86_64/Rosetta —
+    /// `scripts/tests/audiofollow-test.sh`. Harmless if it fails: the audio keeps playing exactly
+    /// where it already was.
+    var followSoundOutput = true
     /// FFXI limits itself to 60/n fps, n=2 by default (30 fps) -- but under wine the limiter
     /// overshoots and the client spends more than the 33.3ms budget per frame even while only
     /// ~52% busy. Our d3d9.dll patches the divisor at start-up (see docs/PERFORMANCE.md);
@@ -153,6 +164,18 @@ struct PerfSettings: Codable {
         // every fps number came from a shell that did not match what Play actually did.
         if ProcessInfo.processInfo.environment["FFXI_ON_MAC_FPSLOG"] == "1" {
             env["DXVK_FPS_LOG"] = "C:\\" + install.gameDir.lastPathComponent + "\\fps.csv"
+        }
+        // Sound-output following. Only set when the dylib is really there and really has the
+        // slice this Mac will run wine as — a DYLD_INSERT_LIBRARIES pointing at a missing or
+        // wrong-architecture file makes dyld noisy at best and aborts the process at worst, and
+        // nothing here is worth risking a launch over.
+        //
+        // GOTCHA for anyone reworking the launch: this variable does NOT survive an exec through
+        // `arch(1)` or any other system binary — dyld strips DYLD_* across those. The wine
+        // command has to be exec'd directly.
+        if followSoundOutput, let dylib = AudioFollow.dylib() {
+            let existing = env["DYLD_INSERT_LIBRARIES"]
+            env["DYLD_INSERT_LIBRARIES"] = existing.map { $0 + ":" + dylib.path } ?? dylib.path
         }
         if disableAppNap { env["LSAppNapIsDisabled"] = "1" }
         if largeAddressAware { env["WINE_LARGE_ADDRESS_AWARE"] = "1" }

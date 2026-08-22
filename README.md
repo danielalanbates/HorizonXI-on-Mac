@@ -137,6 +137,11 @@ translation layer. FFXI is a 32-bit Intel game and needs it.
 `Deeps`) were built for an older Ashita and don't load. Harmless — everything else works.
 Details: [`docs/ADDONS.md`](docs/ADDONS.md).
 
+**The sound doesn't move when I change my Mac's output device.** It should now — the launcher
+follows your Sound Output setting while the game runs (*Follow the Mac's sound output*, on by
+default). If it doesn't, say so in an issue; the mechanism is at
+[`docs/AUDIO.md`](docs/AUDIO.md).
+
 **The world looks black or has no textures.** Set the **Renderer** menu back to
 *Metal / DXVK (recommended)*. The other options exist for debugging and draw incorrectly.
 
@@ -188,6 +193,8 @@ Everything above happens automatically. If you'd rather do it by hand, or you're
 - [`docs/MAX4K.md`](docs/MAX4K.md) — where the remaining frames go, and the fast trick that turned
   out to break the game.
 - [`docs/FINDINGS.md`](docs/FINDINGS.md) — why the game exited silently for weeks.
+- [`docs/AUDIO.md`](docs/AUDIO.md) — why a running game used to ignore the Mac's sound-output
+  setting, and the CoreAudio interposer that fixes it.
 - [`docs/ADDONS.md`](docs/ADDONS.md), [`docs/BRANDING.md`](docs/BRANDING.md),
   [`docs/PATHWAYS.md`](docs/PATHWAYS.md) — addons, title art, the three renderers compared.
 

@@ -61,6 +61,14 @@ if [[ -f "$REPO/vendor/x87sidecar_entitled" ]]; then
   chmod +x "$APP/Contents/Resources/x87sidecar_entitled"
 fi
 
+# audiofollow.dylib -- inserted into wine so a running game follows the Mac's Sound Output
+# setting (see audio/audiofollow.c). Built here if it is missing so a fresh clone still gets it.
+if [[ ! -f "$REPO/app/Resources/audiofollow.dylib" ]]; then
+  "$REPO/scripts/build-audiofollow.sh" >/dev/null 2>&1 || true
+fi
+[[ -f "$REPO/app/Resources/audiofollow.dylib" ]] && \
+  cp "$REPO/app/Resources/audiofollow.dylib" "$APP/Contents/Resources/audiofollow.dylib"
+
 # Dock/Finder icon: an original crystal mark in the launcher's own Vana'diel palette (see
 # scripts/make_icon.py), not extracted from Square Enix's client -- this project's own art.
 [[ -f "$HERE/AppIcon.icns" ]] && cp "$HERE/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
@@ -114,6 +122,7 @@ find "$APP" -exec xattr -c {} \; 2>/dev/null || true
 
 X87SC="$APP/Contents/Resources/x87sidecar_entitled"
 X87COOP="$APP/Contents/Resources/x87sidecar-coop"
+AUDIOFOLLOW="$APP/Contents/Resources/audiofollow.dylib"
 if [[ -n "${HXI_SIGN_ID:-}" ]]; then
   # The cooperative sidecar has no entitlements, so it can carry the hardened runtime and the
   # secure timestamp the notary demands of nested executables. --timestamp is required here:
@@ -121,10 +130,14 @@ if [[ -n "${HXI_SIGN_ID:-}" ]]; then
   [[ -f "$X87COOP" ]] && codesign --force --options runtime --timestamp -s "$HXI_SIGN_ID" "$X87COOP"
   [[ -f "$X87SC" ]] && codesign --force --options runtime -s "$HXI_SIGN_ID" \
     --entitlements "$REPO/vendor/x87sidecar-entitlements.plist" "$X87SC"
+  # Nested dylibs need the hardened runtime and a secure timestamp too, or the notary rejects
+  # the whole bundle on this one file.
+  [[ -f "$AUDIOFOLLOW" ]] && codesign --force --options runtime --timestamp -s "$HXI_SIGN_ID" "$AUDIOFOLLOW"
   codesign --force --options runtime -s "$HXI_SIGN_ID" "$APP"
 else
   [[ -f "$X87SC" ]] && codesign --force -s - \
     --entitlements "$REPO/vendor/x87sidecar-entitlements.plist" "$X87SC" >/dev/null 2>&1 || true
+  [[ -f "$AUDIOFOLLOW" ]] && codesign --force -s - "$AUDIOFOLLOW" >/dev/null 2>&1 || true
   codesign --force -s - "$APP" >/dev/null 2>&1 || true
 fi
 
