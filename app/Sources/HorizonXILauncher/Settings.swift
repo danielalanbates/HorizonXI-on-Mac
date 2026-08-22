@@ -74,6 +74,12 @@ struct PerfSettings: Codable {
     /// Decoded field by field rather than by the synthesised initialiser, which treats every key
     /// as required: adding a knob would then fail to decode the settings already on disk, and
     /// `load()`'s `try?` would quietly reset everything the user had chosen.
+    ///
+    /// **Every field added above must be listed below.** A field left out of this initialiser is
+    /// not merely undecoded -- it silently reverts to its declared default on *every* load, so
+    /// the toggle appears to work and then forgets. That is not hypothetical: `followSoundOutput`
+    /// was missing here, which is why Daniel's menu sound could not be switched back on after
+    /// 3.8 (see docs/AUDIO.md and docs/MOUSE.md).
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         func b(_ k: CodingKeys, _ d: Bool) -> Bool { (try? c.decodeIfPresent(Bool.self, forKey: k)) .flatMap { $0 } ?? d }

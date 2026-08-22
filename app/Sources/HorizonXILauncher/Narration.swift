@@ -18,6 +18,32 @@ enum Narration {
     static let loadLine = "/addon load vanavoice"
     static let marker = "# VanaVoice narrator"
 
+    /// Which start-up script the world being launched actually runs.
+    ///
+    /// Not always `default.txt`. A boot profile names its own script (`script=` in the v4 .ini,
+    /// `boot_script` in the v3 .xml), and worlds in the same install can name different ones --
+    /// this project's local LandSandBoat profile does exactly that, so that an addon enabled for
+    /// the local world cannot load on HorizonXI. Assuming the filename would put the load line
+    /// in a file nobody reads, or worse, in the one world where it must not appear.
+    static func scriptName(in install: Install, profile: String) -> String {
+        let name = install.bootProfileName(profile)
+        let url = install.gameDir.appendingPathComponent("config/boot/\(name)")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return "default.txt" }
+
+        if name.hasSuffix(".xml") {
+            let v = Credentials.xmlSetting("boot_script", in: text) ?? ""
+            return v.isEmpty ? "default.txt" : v
+        }
+        for line in text.split(whereSeparator: \.isNewline) {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            guard !t.hasPrefix("#"), !t.hasPrefix(";"),
+                  t.lowercased().hasPrefix("script"), let eq = t.firstIndex(of: "=") else { continue }
+            let v = t[t.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+            if !v.isEmpty { return v }
+        }
+        return "default.txt"
+    }
+
     /// Is the narrator app installed on this Mac?
     static var isAvailable: Bool { FileManager.default.fileExists(atPath: appPath) }
 
@@ -40,9 +66,10 @@ enum Narration {
     /// Called on every launch. Never fatal: if any part of this fails the game still starts,
     /// silent, exactly as it did before.
     static func prepare(_ install: Install, enabled: Bool, policy: AddonPolicy,
-                        log: (String) -> Void) {
+                        profile: String = "horizonxi.ini", log: (String) -> Void) {
         let fm = FileManager.default
-        let scripts = install.gameDir.appendingPathComponent("scripts/default.txt")
+        let script = scriptName(in: install, profile: profile)
+        let scripts = install.gameDir.appendingPathComponent("scripts/\(script)")
 
         // The server's rules come first, ahead of the user's own setting: an allowlist server
         // gets the addon removed, not merely left uninstalled, in case an older build of this
@@ -80,7 +107,7 @@ enum Narration {
 
         addLoadLine(to: scripts)
         launchNarrator(log: log)
-        log("==> narration: on (VanaVoice)")
+        log("==> narration: on (VanaVoice, via scripts/\(script))")
     }
 
     /// Append the load line after everything AddonSuite manages, so rewriting that block never
