@@ -28,13 +28,24 @@ Not "it launched once." All of these, verified, not assumed:
    Right now the cursor fix and the shell->game command channel both live inside
    `mousediag`, which is a debug tool, not a shipping component.
 4. Tag and cut a GitHub release with real notes covering what changed and what is
-   still known-broken. There is NO release cadence (the old "roughly weekly" rule is
-   gone, per Daniel 2026-08-19): a release goes out only when the launcher is
-   extremely stable and vetted — every criterion above verified fresh, and several
-   real play sessions on the current build without a single manual intervention.
-   Rare, well-vetted releases beat frequent ones.
+   still known-broken. Stability gates the release; a clock only caps it (Daniel,
+   2026-08-22): the published .app is NOT re-cut for every fix — at most about once
+   a week, and only once the build has been judged stable. Every criterion above
+   verified fresh, plus several real play sessions on the current build without a
+   single manual intervention. If a week passes and the tree is not stable, no
+   release goes out — the cadence is a ceiling, never an obligation.
 5. Say plainly in the notes what was verified and what wasn't. No "works" claims that
    were not actually tested.
+
+## The local .app is a different thing from the release
+`/Applications/FFXI-on-Mac.app` must stay playable at ALL times — Daniel plays on it
+during development. It tracks the working tree: rebuild and reinstall it (`app/bundle.sh`,
+then copy into `/Applications`) as soon as a fix lands, so his session is never stuck on a
+stale build. Never replace the bundle while the launcher or a client is running; check
+with `pgrep -fl "FFXI-on-Mac|horizon-loader|wine"` first and wait for an idle moment.
+
+The GitHub release is the opposite: slow, gated, at most weekly. Fast local .app,
+rare public release.
 
 ## Why this note exists
 This project has repeatedly reached a good state mid-session and then lost it to the
