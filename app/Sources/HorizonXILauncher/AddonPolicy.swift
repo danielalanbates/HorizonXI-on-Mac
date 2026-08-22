@@ -39,8 +39,16 @@ enum AddonPolicy: Hashable {
     /// addon anybody chooses — it is what makes addons work at all. `Addons` is the Lua host:
     /// filtering it out and switching it off, which an allowlist would otherwise do, silently
     /// disables every Lua addon in the game. These are never hidden and never force-disabled.
+    ///
+    /// `winecursor` is here for the same reason as `winefix`: it is this project's wine
+    /// compatibility shim, not a feature anybody chose. FFXI calls `ShowCursor(FALSE)` every
+    /// frame and draws its own pointer, which does not render under wine, so without it the
+    /// game has no visible mouse at all. Leaving it out of this set is not theoretical — the
+    /// cursor fix used to live in `mousediag`, an Apply rewrote the managed block from the
+    /// allowlist, `mousediag` is on nobody's published list because it is ours, and Daniel
+    /// lost his cursor mid-session.
     static let infrastructure: Set<String> = [
-        "addons", "thirdparty", "screenshot", "winefix", "libs",
+        "addons", "thirdparty", "screenshot", "winefix", "winecursor", "libs",
     ]
 
     func allows(_ installedName: String) -> Bool {
