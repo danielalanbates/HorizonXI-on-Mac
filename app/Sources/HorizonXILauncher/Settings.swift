@@ -89,6 +89,7 @@ struct PerfSettings: Codable {
         metalHUD = b(.metalHUD, false)
         disableAppNap = b(.disableAppNap, true)
         fpsDivisorOne = b(.fpsDivisorOne, true)
+        followSoundOutput = b(.followSoundOutput, true)
         flareReadbackNoWait = b(.flareReadbackNoWait, false)
         largeAddressAware = b(.largeAddressAware, true)
         narrateCutscenes = b(.narrateCutscenes, false)
