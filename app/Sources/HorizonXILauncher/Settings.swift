@@ -126,6 +126,14 @@ struct PerfSettings: Codable {
         // 32 px bounds it to the small visibility-test surfaces; anything the game reads back at
         // a size it could actually display still waits.
         if flareReadbackNoWait { env["D3D9_RT_READBACK_NOWAIT"] = "32" }
+        // Frame-rate log, on demand: FFXI_ON_MAC_FPSLOG=1 in the launcher's own environment
+        // makes the vendored DXVK write one CSV row per second (fps, draws, passes, barriers,
+        // submits) next to the client. This is how a launch on the *shipped* path gets measured
+        // rather than a hand-built shell run -- which is how a 19x x87 regression went unnoticed:
+        // every fps number came from a shell that did not match what Play actually did.
+        if ProcessInfo.processInfo.environment["FFXI_ON_MAC_FPSLOG"] == "1" {
+            env["DXVK_FPS_LOG"] = "C:\\" + install.gameDir.lastPathComponent + "\\fps.csv"
+        }
         if disableAppNap { env["LSAppNapIsDisabled"] = "1" }
         if largeAddressAware { env["WINE_LARGE_ADDRESS_AWARE"] = "1" }
         for (k, v) in renderer.environment { env[k] = v }

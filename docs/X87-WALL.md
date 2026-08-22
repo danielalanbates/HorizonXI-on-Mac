@@ -280,3 +280,24 @@ Also fixed while here: `Runner.gameIsRunning()` and that keep-alive loop both us
 `pgrep -f horizon-loader.exe`, which happily matches any shell whose command line merely *contains*
 that string — including the wrapper itself. Anything that greps for the client by name needs the
 `[h]orizon-loader` bracket trick or an exact match.
+
+## 2026-08-21 (later): fps verified on the shipped path, 57.8 median
+
+The numbers above came from hand-built shell runs. That is exactly how a 19x regression reached
+Daniel in the first place -- the shell used one wine and Play used another -- so the launcher now
+has its own switch:
+
+    FFXI_ON_MAC_FPSLOG=1 open -a /Applications/FFXI-on-Mac.app --args --world HorizonXI --play
+
+which makes the vendored DXVK write `fps.csv` next to the client (one row per second: fps, draws,
+passes, barriers, submits). Measured that way, on the shipped Play path, 3.6:
+
+    45 samples, 382-draw screen: median 57.8 fps, p10 54.5, max 58.9
+
+against 2.98 with the cooperative sidecar. The frame rate is back where it belongs and the
+measurement no longer depends on reproducing the launch by hand.
+
+Still unmeasured in-world: this is the rules-of-conduct screen, the same scene as the A/B above,
+which makes it comparable but not a gameplay number. An in-world figure needs a character logged
+in; the 2026-08-11 baseline for that scene was 11.3 fps pre-x87 and 28.5 with the sidecar working,
+so in-world on this build should be read fresh rather than inferred from either.
