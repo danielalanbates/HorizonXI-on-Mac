@@ -1,5 +1,56 @@
 # The Dock tile a running world wears
 
+## The mechanism, from wine's source (2026-08-21)
+
+No guessing needed — `dlls/winemac.drv` says exactly what it does:
+
+    window.c:1234   pthread_once(&app_icon_once, set_app_icon);   // once, at first window creation
+    window.c:795    set_app_icon()  -> create_app_icon_images()
+    image.c:250     create_app_icon_images() -> KeUserDispatchCallback(app_icon_callback)
+    dllmain.c:255   macdrv_app_icon() -> EnumResourceNamesW(NULL, RT_GROUP_ICON, get_first_resource, ...)
+
+So the Dock tile is **the first `RT_GROUP_ICON` resource of the running .exe**, read once, when the
+first window appears. That settles three things at once:
+
+* `WM_SETICON` can never move it (window icons are a different thing entirely), which is why the
+  addon's attempt logged success and changed nothing.
+* No addon can fix it either: the icon is latched before any Lua runs.
+* `exeIcon.icns` is a CrossOver-ism, not this path.
+
+And the reason FFXI in particular gets a generic tile:
+
+    $ wrestool -l bootloader/horizon-loader.exe
+    --type=16 ... [type=version]
+    --type=24 ... [manifest]
+
+**`horizon-loader.exe` carries no icon resource at all.** wine logs "found no RT_GROUP_ICON
+resource" and falls back to its own tile. The game is not being denied its icon; it has none.
+
+## What was built, and where it stopped
+
+`tools/icon-into-exe.c` (i686-mingw, runs under wine) adds an .ico to an exe through Windows' own
+`BeginUpdateResource`/`UpdateResource`/`EndUpdateResource`, so there is no hand-rolled PE surgery.
+It works: six icon images plus the group directory land in a **copy** of the loader, `wrestool`
+lists them, and the patched copy behaves identically standalone (byte-identical `--help` output).
+
+    ./scripts/theme-loader.sh     # builds the tool, patches a copy, leaves the original alone
+
+**Ashita will not boot the patched copy.** The injector prints its banner and then nothing — no
+injection, no login, no window — both when the copy is renamed (`horizon-loader-ffxi.exe`) and when
+it keeps the original name in a sibling folder (`bootloader-ffxi/horizon-loader.exe`). The exe
+itself is fine, so something in the Ashita/loader boot chain rejects a modified binary.
+
+**Next**, in the order worth trying:
+
+1. Find out what rejects it. Ashita's own log for those runs is the place to look — if the loader
+   is hashed or signature-checked, this pathway is closed and step 2 is the answer.
+2. **Patch winemac.drv instead of the game.** `wine-coop` is this project's own wine build, and a
+   small patch there could read the app name *and* icon from environment variables — fixing the
+   generic tile and the "wine" in Cmd-Tab together, for every world, without touching a single
+   third-party binary. It needs a wine source build, which is the real cost.
+3. Check whether `pol.exe` / `xiloader.exe` in the same folder already carry icons and whether
+   Horizon accepts being booted through one of them.
+
 Goal: every game launch shows an FFXI-themed tile instead of a generic one.
 
 **Status: partly done.** The launcher's own tile is this project's crystal. The *game's* tile is
