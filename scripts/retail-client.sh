@@ -31,7 +31,20 @@ export WINEPREFIX="$SHARED/$PFX" WINEDEBUG=-all
 unset DYLD_FALLBACK_LIBRARY_PATH DYLD_LIBRARY_PATH
 [[ -x "$WINE" ]] || die "no wine at $WINE"
 mkdir -p "$DATA"
-DL="$DATA/retail-downloads"; mkdir -p "$DL"
+# Square Enix's client is byte-identical for every world, and each retail world used to fetch
+# and unpack its own copy: 7.7 GB downloaded plus 7.3 GB unpacked, PER WORLD. Two worlds had
+# already eaten 20 GB of an internal disk with 17 GB left. So the download and the unpack are
+# shared, in a sibling of the world folders (same volume, so the migration below is a rename and
+# the installer reads from the same disk it writes to). RETAIL_CACHE overrides it.
+DL="${RETAIL_CACHE:-${DATA:h}/_shared-retail}"; mkdir -p "$DL"
+# Move any per-world cache from before this change into the shared one rather than re-downloading.
+if [[ -d "$DATA/retail-downloads" && ! -L "$DATA/retail-downloads" ]]; then
+  say "moving this world's private 7.7 GB download cache into the shared one at $DL"
+  for f in "$DATA/retail-downloads"/*(N) "$DATA/retail-downloads"/.[^.]*(N); do
+    [[ -e "$DL/${f:t}" ]] || mv "$f" "$DL/" 2>/dev/null || true
+  done
+  rmdir "$DATA/retail-downloads" 2>/dev/null && ln -sfn "$DL" "$DATA/retail-downloads" || true
+fi
 UA="FFXI-on-Mac launcher"
 
 SE_BASE="${SE_BASE:-https://gdl.square-enix.com/ffxi/download/us}"
@@ -101,9 +114,28 @@ SETUP=$(find "$UNPACK" -iname 'FFXISetup.exe' | head -1); [[ -n "$SETUP" ]] || S
 #    C:\Games\<world>\SquareEnix keeps every world's client separate.
 mkdir -p "$WINEPREFIX/drive_c/Games"
 ln -sfn "$DATA" "$WINEPREFIX/drive_c/Games/$WORLD" 2>/dev/null || true
-if [[ ! -d "$DATA/SquareEnix/FINAL FANTASY XI" && ! -d "$WINEPREFIX/drive_c/Program Files (x86)/PlayOnline/SquareEnix/FINAL FANTASY XI" ]]; then
-  say "step 3/6: Square Enix's installer — install into C:\\Games\\$WORLD\\SquareEnix (that is $DATA/SquareEnix)"
-  "$WINE" "$(winepath "$SETUP")" || true
+# FFXISetup.exe is only a chooser: tick the components, press Install, and it shells out to
+# msiexec for each one. Under wine it exits the moment Install is pressed and installs nothing --
+# no error, no window, and the script then died at the check below with "the installer did not
+# finish". That is the whole of "I pressed Download and it still says Download".
+# The two MSIs it would have run work perfectly under wine's own msiexec, unattended (/qn), so
+# they are run directly and the chooser is skipped entirely. No GUI, nothing to click. Verified:
+# PlayOnlineViewer.msi installs to Program Files (x86)/PlayOnline/SquareEnix in about a minute.
+# DirectX (redist/Directx_Jun2010) is deliberately not installed -- DXVK provides d3d here.
+POL_MSI="$UNPACK/PlayOnline/PlayOnlineViewer.msi"
+FFXI_MSI="$UNPACK/FINAL_FANTASY_XI/FINAL_FANTASY_XI.msi"
+[[ -f "$POL_MSI" ]] || POL_MSI=$(find "$UNPACK" -iname 'PlayOnlineViewer.msi' | head -1)
+[[ -f "$FFXI_MSI" ]] || FFXI_MSI=$(find "$UNPACK" -iname 'FINAL_FANTASY_XI.msi' | head -1)
+PFDIR="$WINEPREFIX/drive_c/Program Files (x86)/PlayOnline/SquareEnix"
+if [[ ! -d "$DATA/SquareEnix/FINAL FANTASY XI" && ! -d "$PFDIR/FINAL FANTASY XI" ]]; then
+  say "step 3/6: installing Square Enix's client (unattended — no window to click; the FFXI half is 7 GB and takes a while)"
+  if [[ -f "$POL_MSI" && ! -d "$PFDIR/PlayOnlineViewer" ]]; then
+    say "  PlayOnline Viewer"
+    "$WINE" msiexec /i "$(winepath "$POL_MSI")" /qn || say "  !! PlayOnline Viewer's installer returned an error — continuing"
+  fi
+  [[ -f "$FFXI_MSI" ]] || die "FINAL_FANTASY_XI.msi is missing from $UNPACK — delete that folder and run Download again to re-unpack"
+  say "  FINAL FANTASY XI"
+  "$WINE" msiexec /i "$(winepath "$FFXI_MSI")" /qn || say "  !! the FFXI installer returned an error — checking what landed anyway"
 fi
 # If it went to the default place anyway, move it under the world's folder.
 if [[ ! -d "$DATA/SquareEnix/FINAL FANTASY XI" && -d "$WINEPREFIX/drive_c/Program Files (x86)/PlayOnline/SquareEnix/FINAL FANTASY XI" ]]; then

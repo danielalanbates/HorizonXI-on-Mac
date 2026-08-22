@@ -2,8 +2,26 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+/// Quitting the launcher kills every download and install it started, because they are its child
+/// processes. Silently, and with the UI reverting to its "nothing installed yet" state -- so the
+/// only evidence a 6 GB download ever happened was the folder on disk. Ask first.
+final class LauncherDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard Runner.workInFlight else { return .terminateNow }
+        let a = NSAlert()
+        a.messageText = "A download or install is still running."
+        a.informativeText = "Quitting stops it. It is resumable — pressing Download again picks "
+                          + "up where it left off — but nothing more will download until you do."
+        a.addButton(withTitle: "Quit anyway")
+        a.addButton(withTitle: "Keep running")
+        a.alertStyle = .warning
+        return a.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+}
+
 @main
 struct HorizonXILauncherApp: App {
+    @NSApplicationDelegateAdaptor(LauncherDelegate.self) private var delegate
     init() { Headless.runIfAsked() }
 
     var body: some Scene {
@@ -1253,12 +1271,27 @@ struct ContentView: View {
                 Text(s.installNote).font(.caption2).foregroundStyle(Vana.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 8) {
+            // Three buttons never fit this panel's width: they rendered as "Downloa…",
+            // "Choose fold…", "Run installer…" -- the primary action unreadable. The action that
+            // matters gets its own full-width row; the alternatives share the one below.
+            VStack(alignment: .leading, spacing: 6) {
                 if s.installKind != .none {
+                    // The button used to read "Download…" whether or not a download was already
+                    // going, and a second press was silently ignored -- so a download that had
+                    // been killed (quitting the launcher kills its child processes) and one that
+                    // was running looked exactly the same. It now says which it is.
                     Button { downloadGameData(for: s, install: i) } label: {
-                        Label("Download…", systemImage: "arrow.down.circle")
-                    }.buttonStyle(.borderedProminent)
+                        Label(runner.busy ? "Downloading…" : "Download…",
+                              systemImage: runner.busy ? "arrow.down.circle.dotted" : "arrow.down.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(runner.busy || runner.running)
+                    .help(runner.busy
+                          ? "Another download or install is running — watch the log on the left. It resumes where it left off if it is interrupted."
+                          : "Downloads are resumable: if this is interrupted, press Download again and it continues.")
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                HStack(spacing: 8) {
                 Button("Choose folder…") { chooseGameData(for: s) }
                 if !s.local {
                     Button("Run installer…") { runLocalInstaller(for: s, install: i) }
@@ -1268,7 +1301,8 @@ struct ContentView: View {
                     Button("Install into wrapper…") { showSetup = true }
                         .help("The classic route: run HorizonXI's installer inside the wrapper.")
                 }
-            }.font(.caption)
+                }
+            }.font(.caption).lineLimit(1)
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.25)))

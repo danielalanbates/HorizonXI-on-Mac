@@ -7,7 +7,23 @@ import AppKit
 final class Runner: ObservableObject {
     @Published var log: String = ""
     @Published var running = false
-    @Published var busy = false
+    @Published var busy = false { didSet { Runner.workInFlight = busy } }
+
+    /// Read by the app delegate on quit. Downloads and installs are child processes of this app,
+    /// so quitting kills them -- a 7.7 GB download that was 6 GB in simply vanished, and the card
+    /// went back to saying "Download…" with nothing to say why. Quitting mid-download now asks.
+    static var workInFlight = false
+
+    /// Every long-running action refuses to start while another one is going. That refusal used
+    /// to be a silent `return`, so pressing Download on a second world did nothing at all and
+    /// said nothing about why -- which is exactly what "I pressed Download on all the servers and
+    /// they still say Download" looked like. Now it says so in the log.
+    private func refuseWhileBusy(_ what: String) -> Bool {
+        guard busy || running else { return false }
+        appendLine("!! not starting \(what): something else is already running in the wrapper. "
+                 + "Wait for it to finish (or press Stop), then try again.")
+        return true
+    }
 
     private var proc: Process?
     /// Executable Ashita boots the game in for the current launch (the boot profile's
@@ -183,7 +199,7 @@ final class Runner: ObservableObject {
     /// install into (and the same link is made in the game prefix, so a path the installer wrote
     /// into a config file resolves at play time too).
     func runInstaller(from url: URL, in gameInstall: Install, dataPath: String, name: String = "") {
-        guard !busy, !running else { return }
+        if refuseWhileBusy("the installer for \(name.isEmpty ? url.lastPathComponent : name)") { return }
         busy = true
         let nm = name.isEmpty ? url.deletingPathExtension().lastPathComponent : name
         Self.linkGamesFolder(nm, to: dataPath, in: gameInstall)
@@ -225,7 +241,7 @@ final class Runner: ObservableObject {
     /// the server reports before unpacking, because a truncated archive that is never verified is
     /// how "Eden didn't work" happened (3.30 GB of 5.77 GB, silently).
     func installClientZip(from url: URL, into dataPath: String, name nm: String) {
-        guard !busy, !running else { return }
+        if refuseWhileBusy("the \(nm) client download") { return }
         guard !dataPath.isEmpty else { appendLine("!! no folder chosen for \(nm)"); return }
         busy = true
         let dest = URL(fileURLWithPath: dataPath, isDirectory: true)
@@ -389,7 +405,7 @@ final class Runner: ObservableObject {
     /// `scripts/retail-client.sh`: Square Enix's free client + PlayOnline update + Ashita/xiloader
     /// (+ the world's patch/DATs) into the world's folder. Bring-your-own-retail worlds only.
     func installRetail(for s: Server, in gameInstall: Install) {
-        guard !busy, !running else { return }
+        if refuseWhileBusy("the retail client install for \(s.name)") { return }
         let dev = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("scripts/retail-client.sh")
@@ -424,7 +440,8 @@ final class Runner: ObservableObject {
 
     /// Fresh HorizonXI client into `dir` via their published torrent + updates (update-client.sh install).
     func installHorizon(into dir: URL) {
-        guard !busy, !running, let script = Self.updateScript() else { return }
+        if refuseWhileBusy("the HorizonXI client install") { return }
+        guard let script = Self.updateScript() else { return }
         busy = true
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         appendLine("==> installing HorizonXI into \(dir.path) (9.4 GB torrent — leave this running)")
