@@ -16,6 +16,17 @@ struct PerfSettings: Codable {
     var metalHUD = false
     /// Keep the game off macOS App Nap / timer coalescing when it loses focus.
     var disableAppNap = true
+    /// Follow the Mac's Sound Output setting while the game is running.
+    ///
+    /// Wine's CoreAudio backend pins its AUHAL output unit to whichever device was default when
+    /// the game started its audio, and macOS's Sound Output control only changes the *default* —
+    /// so plugging in headphones mid-session used to leave FFXI talking to the speakers with no
+    /// remedy short of quitting. `audiofollow.dylib` (see `audio/audiofollow.c`) is inserted into
+    /// the wine process, watches `kAudioHardwarePropertyDefaultOutputDevice`, and re-points the
+    /// unit when it changes. Verified A/B on both arm64 and x86_64/Rosetta —
+    /// `scripts/tests/audiofollow-test.sh`. Harmless if it fails: the audio keeps playing exactly
+    /// where it already was.
+    var followSoundOutput = true
     /// FFXI limits itself to 60/n fps, n=2 by default (30 fps) -- but under wine the limiter
     /// overshoots and the client spends more than the 33.3ms budget per frame even while only
     /// ~52% busy. Our d3d9.dll patches the divisor at start-up (see docs/PERFORMANCE.md);
@@ -93,7 +104,8 @@ struct PerfSettings: Codable {
     }
 
     /// Environment applied to the wine process.
-    func environment(for install: Install) -> [String: String] {
+    /// - Parameter x87: whether this world may use x87 acceleration (`Server.x87`).
+    func environment(for install: Install, x87: Bool = true) -> [String: String] {
         var env: [String: String] = [:]
         env["WINEPREFIX"] = install.prefix.path
         env["D3DMETAL_FRAMEWORK_PATH"] = install.d3dMetal.path
@@ -110,6 +122,14 @@ struct PerfSettings: Codable {
         // Metal command buffer objects rather than reallocating them per frame -- so neither
         // can produce visual glitches. Always on.
         env["MVK_CONFIG_FAST_MATH_ENABLED"] = "1"
+        // FFXI locks a 16x16 visibility render target ~4x/frame; stock DXVK makes that lock
+        // wait behind the retirement thread's one-at-a-time fence processing (~15
+        // submissions/frame x ~0.85 ms measured 2026-08-20 = most of a 26 ms stall). The
+        // vendored DXVK's fence fast path waits on the lock's own submission fence instead —
+        // exact (same bytes as the slow path; it is NOT the broken NOWAIT approximation),
+        // in-world wait fell 28.8 -> 9 ms/frame, best run 25.1 vs 23.7 fps. Bounded to
+        // surfaces <= 32 px. See patches/dxvk-1.10.3-horizonxi-fencewait.patch.
+        env["D3D9_RT_READBACK_FENCE"] = "32"
         env["MVK_CONFIG_USE_COMMAND_POOLING"] = "1"
         if metalHUD { env["MTL_HUD_ENABLED"] = "1" }
         // Only our patched d3d9.dll reads this; harmless (silently ignored) on the other
@@ -118,6 +138,45 @@ struct PerfSettings: Codable {
         // 32 px bounds it to the small visibility-test surfaces; anything the game reads back at
         // a size it could actually display still waits.
         if flareReadbackNoWait { env["D3D9_RT_READBACK_NOWAIT"] = "32" }
+        // x87 acceleration, the way athei's patched wine actually wants to be told about it.
+        //
+        // `ROSETTA_X87_PATH` is read by wine's own loader (athei/wine commit 3804c30b, "ntdll:
+        // HACK: Recognize ROSETTA_X87_PATH and attach x87sidecar cooperatively"): **every** i386
+        // wine process re-execs itself through the named sidecar and does the task-port handshake
+        // in __wine_main. That is the whole point — the client this project cares about is a
+        // *grandchild* (Ashita-cli.exe injects into horizon-loader.exe and exits), and only this
+        // pathway reaches it.
+        //
+        // Wrapping the command instead — `x87sidecar-coop --cooperative wine Ashita-cli.exe` —
+        // accelerates exactly one process: the injector, which exits within seconds, taking the
+        // sidecar with it and leaving the game unaccelerated. Measured 2026-08-21: one handshake
+        // with the wrapper, two with this variable, and the difference in-world is the whole 2.5x.
+        // That misuse is what made x87 look broken for a day, and it cost the frame rate twice —
+        // once by not accelerating, and once more because ROSETTA_DISABLE_AOT was being set by
+        // hand on top of it. The sidecar disables AOT itself when it attaches; do not set it here.
+        if x87, let sidecar = X87Sidecar.coopBinary() {
+            env["ROSETTA_X87_PATH"] = sidecar.path
+        }
+        // Frame-rate log, on demand: FFXI_ON_MAC_FPSLOG=1 in the launcher's own environment
+        // makes the vendored DXVK write one CSV row per second (fps, draws, passes, barriers,
+        // submits) next to the client. This is how a launch on the *shipped* path gets measured
+        // rather than a hand-built shell run -- which is how a 19x x87 regression went unnoticed:
+        // every fps number came from a shell that did not match what Play actually did.
+        if ProcessInfo.processInfo.environment["FFXI_ON_MAC_FPSLOG"] == "1" {
+            env["DXVK_FPS_LOG"] = "C:\\" + install.gameDir.lastPathComponent + "\\fps.csv"
+        }
+        // Sound-output following. Only set when the dylib is really there and really has the
+        // slice this Mac will run wine as — a DYLD_INSERT_LIBRARIES pointing at a missing or
+        // wrong-architecture file makes dyld noisy at best and aborts the process at worst, and
+        // nothing here is worth risking a launch over.
+        //
+        // GOTCHA for anyone reworking the launch: this variable does NOT survive an exec through
+        // `arch(1)` or any other system binary — dyld strips DYLD_* across those. The wine
+        // command has to be exec'd directly.
+        if followSoundOutput, let dylib = AudioFollow.dylib() {
+            let existing = env["DYLD_INSERT_LIBRARIES"]
+            env["DYLD_INSERT_LIBRARIES"] = existing.map { $0 + ":" + dylib.path } ?? dylib.path
+        }
         if disableAppNap { env["LSAppNapIsDisabled"] = "1" }
         if largeAddressAware { env["WINE_LARGE_ADDRESS_AWARE"] = "1" }
         for (k, v) in renderer.environment { env[k] = v }

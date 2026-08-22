@@ -12,7 +12,7 @@ struct Check: Identifiable {
 
 enum Preflight {
 
-    static func run(_ install: Install) -> [Check] {
+    static func run(_ install: Install, profile: String = "horizonxi.ini") -> [Check] {
         let fm = FileManager.default
         var out: [Check] = []
 
@@ -51,12 +51,28 @@ enum Preflight {
         add("wine", "Wine binary", fm.isExecutableFile(atPath: install.wine.path),
             install.wine.path, "missing \(install.wine.path)")
 
-        add("client", "HorizonXI client", fm.fileExists(atPath: install.gameDir.path),
+        add("client", "Game folder", fm.fileExists(atPath: install.gameDir.path),
             install.gameDir.path, "no client at \(install.gameDir.path)")
+
+        let se = install.squareEnix
+        add("squareenix", "FINAL FANTASY XI data", fm.fileExists(atPath: se.appendingPathComponent("FINAL FANTASY XI").path),
+            se.path, "no SquareEnix/FINAL FANTASY XI under \(se.deletingLastPathComponent().path)")
 
         add("ashita", "Ashita-cli.exe", fm.fileExists(atPath: install.ashitaCLI.path),
             "present — launch must go through Ashita, not xiloader",
             "missing \(install.ashitaCLI.path)")
+
+        // The wrong-client trap. A world pointed at a folder that holds several clients gets
+        // whichever one the search reached first, and every downstream step then succeeds --
+        // Ashita injects, the loader connects, the registry points somewhere valid -- against
+        // another world's game data. It cost this project a full "Eden doesn't work" cycle in
+        // August 2026. Blocking, not a warning: there is no safe guess to fall back to.
+        if let why = install.clientAmbiguity {
+            add("worldclient", "Client belongs to this world", false, "", why)
+        } else if let w = install.worldName, install.dataRoot != nil || !install.ownsWrapperClient {
+            add("worldclient", "Client belongs to this world", true, install.gameDir.path,
+                "not \(w)'s own client")
+        }
 
         // FINDINGS #1/#2: the wrapper's rpath points at SharedSupport/wine/lib, the dylibs ship in
         // Contents/Frameworks. Symlinking is what removes the DYLD_* dependency that SIP strips.
@@ -97,6 +113,19 @@ enum Preflight {
             .appendingPathComponent("PlayOnlineViewer/viewer/com/polcore.dll")
         add("polcore", "polcore.dll", fm.fileExists(atPath: polcore.path),
             "present", "missing \(polcore.path)", warnOnly: true)
+
+        // The single setting that silently kills the game: Sandbox's patch.ver interface-id
+        // bypass. Off + sandbox loaded == "Successfully logged in", then exit two seconds later,
+        // with no window and no error anywhere. See Sandbox.swift for the measured table.
+        let sbOn = Sandbox.isEnabled(in: install, profile: profile)
+        let sbBypass = Sandbox.interfaceBypass(install)
+        if sbOn {
+            add("sandbox", "Sandbox interface bypass", sbBypass != false,
+                sbBypass == nil ? "not set — Ashita's default (on) applies" : "on",
+                "off, while the Sandbox POL plugin is loaded — the game will log in and then "
+                + "exit about two seconds later with no error. Run Repair, or set "
+                + "use_interface_bypass = 1 in config/sandbox/sandbox.ini.")
+        }
 
         add("d3dmetal", "D3DMetal renderer", fm.fileExists(atPath: install.d3dMetal.path),
             install.d3dMetal.path,

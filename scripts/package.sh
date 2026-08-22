@@ -10,14 +10,14 @@
 #   START HERE.md          the non-technical setup guide
 #
 # What does NOT ship, and why:
-#   * The HorizonXI client (~27GB) — it is Square Enix's game data. Users install it with
-#     HorizonXI's own Windows launcher or by copying an existing install.
+#   * The game client (15-30 GB, per world) — it is Square Enix's data and may not be
+#     redistributed. The launcher fetches it with one *Download...* button per world.
 #   * The Wine wrapper (~1GB+) — Sikarugir wine is LGPL 2.1 and may be redistributed, but doing
-#     it properly means carrying the LGPL's source/relink obligations, so for now the launcher
-#     points at a wrapper the user installs (docs/SETUP.md tells them how, in two commands).
+#     it properly means carrying the LGPL's source/relink obligations, so the launcher fetches
+#     it from Sikarugir's own releases and assembles it on the user's Mac (*Install wine...*).
 #
-# So this is a launcher package, not a one-click "install everything" bundle. Making it one
-# requires a first-run downloader for both of the above; that work is not done.
+# So the 5 MB image is the launcher, and the launcher gets the other two itself. Nothing here
+# leaves the user at a Terminal prompt.
 set -euo pipefail
 
 HERE="${0:A:h}"

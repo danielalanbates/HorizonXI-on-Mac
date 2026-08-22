@@ -45,6 +45,41 @@ final class ServerFeeds: ObservableObject {
     @Published private(set) var requiredClients: [String: String] = [:]
     /// Newest HorizonXI marketing version per api.horizonxi.com/api/v1/launcher/install-game.
     @Published private(set) var horizonLatest: String?
+    /// Server name -> players online right now, from the server's own public counter. Only the
+    /// servers that publish one appear here; absence means "don't show a number", never zero.
+    @Published private(set) var populations: [String: Int] = [:]
+
+    /// Where each server publishes its live online count, and how the payload reads. All three
+    /// are the same numbers the servers' own websites display (verified 2026-08-19); nothing is
+    /// scraped from HTML, so a redesign of their pages cannot silently break this.
+    private static let populationSources: [(server: String, url: String, jsonKey: String?)] = [
+        // Plain integer body, the counter horizonxi.com shows.
+        ("HorizonXI", "https://api.horizonxi.com/api/v1/misc/status", nil),
+        // {"online":true,"playerCount":647,...} — catseyexi.com's homepage counter.
+        ("CatsEyeXI", "https://www.catseyexi.com/api/online-count", "playerCount"),
+        // Plain integer body — edenxi.com's "active" counter.
+        ("Eden", "https://edenxi.com/api/v1/misc/active", nil),
+    ]
+
+    /// Fetch every published online counter. Cheap (three tiny GETs), silent on failure, and a
+    /// stale number is worse than none: a failed fetch removes the entry rather than keeping it.
+    func refreshPopulations() async {
+        for src in Self.populationSources {
+            var count: Int?
+            if let url = URL(string: src.url),
+               let (data, resp) = try? await URLSession.shared.data(from: url),
+               (resp as? HTTPURLResponse)?.statusCode == 200 {
+                if let key = src.jsonKey {
+                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    count = json?[key] as? Int
+                } else {
+                    count = Int(String(decoding: data, as: UTF8.self)
+                        .trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+            }
+            populations[src.server] = count
+        }
+    }
 
     private static var cacheURL: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -196,6 +231,24 @@ final class ServerFeeds: ObservableObject {
         guard let server else { return [] }
         var out = items.filter { $0.fetched }
 
+        // Which emulator this world runs, and what that means for it. Shown rather than acted
+        // on: it is the difference between a world that can pull fixes from a living upstream
+        // and one whose content is entirely its own team's work -- worth knowing, not worth
+        // hiding a thousand-player server over. See docs/CODEBASE.md.
+        switch server.codebase {
+        case .landSandBoat:
+            out.append(NewsItem(
+                title: "Runs LandSandBoat — the one FFXI emulator still in development, so this "
+                     + "world can pull upstream fixes and content.",
+                source: server.name, url: nil, fetched: false))
+        case .darkStarLineage:
+            out.append(NewsItem(
+                title: "Runs a DarkStar-lineage fork. DarkStar itself ended in 2020, so "
+                     + "everything new here is \(server.name)'s own team's work.",
+                source: server.name, url: nil, fetched: false))
+        case .unknown:
+            break
+        }
         if !server.era.isEmpty {
             out.append(NewsItem(title: "\(server.name) — \(server.era)",
                                 source: server.name, url: nil, fetched: false))
@@ -222,6 +275,15 @@ final class ServerFeeds: ObservableObject {
                      + "from the server's own published setup guide.",
                 source: server.name, url: nil, fetched: false))
         }
+        // Asked for by Daniel: the most common question about this list is why somebody's own
+        // world is missing from it. Rotated on *every* server's banner, not just one, because
+        // whoever is looking for the missing world will be sitting on whatever world is selected.
+        out.append(NewsItem(
+            title: "Not seeing your server? It is almost certainly not built on LandSandBoat — "
+                 + "the community-led codebase this launcher targets, and the only FFXI server "
+                 + "emulator still being actively developed.",
+            source: "FFXI on Mac",
+            url: URL(string: "https://github.com/LandSandBoat/server"), fetched: false))
         return out
     }
 }

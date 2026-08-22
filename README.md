@@ -1,237 +1,202 @@
 # FFXI on Mac
 
-Play Final Fantasy XI on an Apple Silicon Mac. No Windows, no virtual machine, no Boot Camp.
-
-You get a normal Mac app: press **Install wine…**, press **Install the game…**, type your account
-name and password, pick your server, press **Play**.
+Play Final Fantasy XI on an Apple Silicon Mac. No Windows, no virtual machine, no Boot Camp,
+no Terminal.
 
 <div align="center">
 
-### [⬇️ Download FFXI on Mac 2.6 (.dmg)](https://github.com/danielalanbates/HorizonXI-on-Mac/releases/download/v2.6/FFXI-on-Mac-2.6.dmg)
+### [⬇️ Download FFXI on Mac (.dmg)](https://github.com/danielalanbates/HorizonXI-on-Mac/releases/latest)
 
-[![Download](https://img.shields.io/badge/Download-FFXI%20on%20Mac%202.6-2ea44f?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/danielalanbates/HorizonXI-on-Mac/releases/download/v2.6/FFXI-on-Mac-2.6.dmg)
+[![Download](https://img.shields.io/badge/Download-FFXI%20on%20Mac-2ea44f?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/danielalanbates/HorizonXI-on-Mac/releases/latest)
 
 5 MB · Apple Silicon · macOS 13 or later · signed and notarised by Apple, so it just opens
 
 </div>
 
-That file is the whole setup now. There's no Homebrew, no separate Wine app to install, no engine
-to pick from a list — the launcher fetches and builds its own Wine wrapper the first time you press
-**Install wine…**. You still need the game client itself, explained in
-[What you need](#what-you-need) below. Figure five to ten minutes the first time, mostly spent
-waiting on downloads.
-
 ![Murn in Selbina](docs/img/murn-in-selbina.png)
 
-It works with **HorizonXI**, CatsEyeXI, Eden and other FFXI private servers, and it can also run
-a server on your own Mac if you want to play offline.
+Works with **HorizonXI**, CatsEyeXI, Eden, Supernova, OmicronXI and other FFXI private servers.
+It can also run a server on your own Mac if you want to play offline.
+
+---
+
+## How to play — the whole thing
+
+1. **Open the `.dmg` and drag *FFXI on Mac* into Applications.** Open it. No right-click trick,
+   no security warning — Apple signed and notarised it.
+2. **Press *Install wine…*** It's the button on the front screen. Go make coffee; it takes about
+   five minutes and asks for your Mac password once.
+3. **Pick the world you want** from the **CHANGE WORLD** menu.
+4. **Press *Download…*** on the card that appears, and choose a folder to put the game in.
+   That's it — the launcher fetches that world's game files for you and sets everything up.
+   This part is big (15–30 GB) and slow. Leave it running; you can close the lid.
+5. **Make an account** on that world's website — the launcher links you straight to it.
+6. **Type your account name and password, press PLAY.**
+
+Nothing else. No Terminal, no Homebrew, no downloading a client from somewhere else first.
+
+If anything goes wrong, open **Setup & Diagnostics** inside the app. Every check names the exact
+thing it couldn't find, and **Repair** fixes the usual causes automatically.
 
 ---
 
 ## Is it good enough to actually play?
 
-Yes, with one caveat: it is not a smooth 60 fps game.
+Yes — with one honest caveat about speed.
 
-| Measured on an M1 MacBook Pro, 8 GB | Frame rate |
+| Measured on an M1 MacBook Pro, 8 GB (the only Mac this has been tested on) | Frame rate |
 | --- | --- |
 | Out in the world, every setting maxed at 4K | ~24 fps |
-| Out in the world, max settings (benchmark zone) | ~28 fps |
+| Out in the world, max settings, lighter zone | ~28 fps |
 
-That's playable for questing, crafting, chatting and most party content. If you want to know why
-it isn't faster, the whole investigation is written up in [`docs/MAX4K.md`](docs/MAX4K.md) — short
-version: the game itself pauses waiting on the graphics card, and it is not something the Mac side
-can skip without breaking the game.
+That's perfectly playable for questing, crafting, chatting and most party content.
 
-More powerful Macs (M2/M3/M4, more memory) have not been tested yet. **If you have one, please
-try it and open an issue with your numbers** — that is the single most useful thing anyone can
-contribute right now.
+**A faster Mac will likely do better, possibly a lot better.** The slowdown is the graphics card
+waiting, not the Mac-compatibility layer, and 8 GB of memory on an M1 is the weakest machine
+Apple Silicon comes in. FFXI's own ceiling is 60 fps, and this launcher already unlocks the
+client's 30 fps limiter — so 60 fps at 4K on an M2 Pro / M3 / M4 with 16 GB or more is a
+realistic hope. **Nobody has measured it yet.** If you have one of those Macs, please
+[open an issue](../../issues) with your model, memory, and the fps you see — that is the single
+most useful thing anyone can contribute right now.
+
+Why it isn't already faster, in full detail: [`docs/MAX4K.md`](docs/MAX4K.md).
 
 ---
 
-## What you need
+## What you're downloading, and why it isn't all one file
 
-Three pieces. The app tells you which one is missing at any moment, and builds one of the three
-for you.
+Three pieces end up on your Mac. **The launcher gets two of them for you** — you only ever press
+buttons.
 
-| Piece | Size | Where it comes from |
+| Piece | Size | How you get it |
 | --- | --- | --- |
-| **FFXI on Mac** (this app) | 5 MB | the Releases page here |
-| **Wine** | ~250 MB download | the app fetches and builds it — press **Install wine…** |
-| **The FFXI game client** | ~27 GB | your server's own installer, run through **Install the game…** |
+| **FFXI on Mac** (this launcher) | 5 MB | the download button above |
+| **Wine** (runs Windows programs on a Mac) | ~250 MB | press ***Install wine…*** — automatic |
+| **The FFXI game itself** | 15–30 GB | press ***Download…*** — automatic |
 
-Neither of the last two is in the download itself. The client is Square Enix's data and nobody
-may redistribute it, so you install it through your server's own installer. Wine is free and open
-source (Sikarugir, LGPL 2.1) — the app downloads it from Sikarugir's own GitHub releases and
-assembles it into a wrapper on your Mac, so you never touch Homebrew, a cask, or Sikarugir Creator
-yourself. If anyone offers you a single file with all three in it, they are handing out Square
-Enix's client, which they may not do.
+The game files aren't inside the 5 MB download because they're Square Enix's property and nobody
+is allowed to hand them out. So the launcher fetches them the same way your server's own Windows
+launcher would. **You still don't have to do anything by hand** — that's what the *Download…*
+button is. If someone offers you a single file with the game already in it, they are giving away
+Square Enix's client, which they may not do.
 
-**What these servers are:** HorizonXI, CatsEyeXI and Eden run
+**Do I need to own FFXI already?** No. You don't need a Square Enix account, a PlayOnline ID, or
+a copy of the game. Every world the launcher supports gets you a client for free, and the launcher
+does the fetching.
+
+**What are these servers?** HorizonXI, CatsEyeXI, Eden and the rest run
 [LandSandBoat](https://github.com/LandSandBoat/server) or a fork of it — an open-source server
-written independently, containing none of Square Enix's code. It needs Square Enix's *client*,
-which is why they all make you install the real game. Square Enix has not licensed or endorsed
-any of it; these communities have simply run openly for years while retail FFXI sits in
-maintenance mode. This project redistributes no Square Enix data at all.
+written from scratch, containing none of Square Enix's code. It needs Square Enix's *client*,
+which is why they all install the real game. Square Enix has not licensed or endorsed any of it;
+these communities have simply run openly for years while retail FFXI sits in maintenance mode.
+This project redistributes no Square Enix data at all.
 
-## Setting it up
+---
 
-1. **Install the app.** Open the `.dmg`, drag *FFXI on Mac* to Applications, open it. It's signed
-   and notarised by Apple, so no right-click-to-open trick needed.
-2. **Press Install wine…** With nothing installed yet, the launcher offers this straight on its
-   main screen. It installs Rosetta 2 if needed, downloads Wine from Sikarugir's GitHub releases
-   (~250 MB), assembles the wrapper, and creates a blank Windows drive — four steps, shown as they
-   go green. No Terminal, no Homebrew, no picking an engine off a list.
-3. **Press Install the game…** Point it at your server's Windows installer and let it run inside
-   the wrapper the app just built — or copy an existing `HorizonXI` folder from a Windows PC into
-   the wrapper's `drive_c` by hand. Detail in
-   [Installing the game](docs/SETUP.md#installing-the-game).
-4. **Type your account name and password.** Tick *Remember me* and they go into the macOS
-   Keychain — never into a file, never into this repo.
-5. **Press Play.**
+## The worlds
 
-Stuck? Open **Setup & Diagnostics** in the app. Every check names the exact file or setting it
-couldn't find, and **Repair** re-runs the whole setup for you.
+Pick one from **CHANGE WORLD**. Each world keeps its own game folder and its own login, so you can
+have several installed side by side. **Every one of them is a single *Download…* button** — the
+differences below are just what happens behind it.
 
-**"FFXI on Mac would like access to Developer Tools"** — you may see this macOS prompt the first
-time the app starts Wine. It is Apple's wording for *"this app wants to run a program that
-isn't from an identified developer"*: the Wine binaries come from Sikarugir's GitHub releases and
-are ad-hoc signed, not notarised, so macOS asks before letting a notarised app run them. Allow
-it. The app doesn't touch Xcode or anything else under that heading; the permission is exactly
-"may run Wine". Terminal shows the same prompt for the same reason.
-
-### Doing it by hand
-
-If the buttons fail, or you want to see each piece, this is everything the app does. Ten minutes,
-mostly downloads. Everything below is free and open source; the only non-free thing involved is
-the game client, which comes from your server.
-
-1. **Rosetta 2** (FFXI is a 32-bit Windows game; Apple Silicon needs the translation layer).
-   In Terminal (Applications → Utilities):
-   ```sh
-   softwareupdate --install-rosetta --agree-to-license
-   ```
-2. **Homebrew**, if you don't have it:
-   ```sh
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-   ```
-3. **Sikarugir** (Wine for macOS, LGPL — the successor to Wineskin; *not* `sikarugir.com`, which
-   is unrelated to the real project):
-   ```sh
-   brew trust Sikarugir-App/sikarugir
-   brew install --cask Sikarugir-App/sikarugir/sikarugir
-   ```
-4. **Make the wrapper.** Open *Sikarugir Creator* → under *No engine selected* click **Change** →
-   pick **`WS12WineSikarugir10.0_6`** (the build this project is tested on; nothing with `CX` in
-   the name, those are CrossOver-derived) → wait for its download arrow to vanish, click the name
-   again → **Create** → name it `FFXI`, keep the default location. Result:
-   `~/Applications/Sikarugir/FFXI.app` (~1.4 GB, empty Windows drive inside).
-5. **Put the game in it.** Either double-click `FFXI.app` → **Install Software** → your server's
-   Windows installer `.exe` and let it run; or drag an existing `HorizonXI` folder from a Windows
-   PC into `FFXI.app/Contents/SharedSupport/prefix/drive_c/` (right-click the app → *Show Package
-   Contents*). HorizonXI's installer pulls ~9.4 GB by torrent and unpacks to ~27 GB.
-6. **Metal renderer (optional but recommended).** The app's **Renderer** menu does this for you;
-   by hand, copy `vendor/d3d8to9.dll` as `d3d8.dll` and `vendor/dxvk-1.10.3-x32-d3d9-horizonxi.dll`
-   as `d3d9.dll` into both `drive_c/HorizonXI/` and `drive_c/HorizonXI/SquareEnix/FINAL FANTASY XI/`,
-   then in the wrapper: `wine reg add "HKCU\Software\Wine\DllOverrides" /v "*d3d8" /d native /f`
-   and the same for `*d3d9`. Details: [`scripts/install.sh`](scripts/install.sh) is the exact
-   sequence Repair runs.
-7. **Register the game's COM servers** (Repair does this too):
-   `wine regsvr32 /s "C:\HorizonXI\SquareEnix\FINAL FANTASY XI\FFXi.dll"` and likewise
-   `FFXiMain.dll`, `FFXiVersions.dll`, and
-   `"C:\HorizonXI\SquareEnix\PlayOnlineViewer\viewer\com\polcore.dll"`.
-8. Open **FFXI on Mac**; it finds the wrapper. If not, **Setup & Diagnostics** names what's missing.
-
-### Where the game lives, and other worlds
-
-The app itself can live anywhere — Applications, a USB stick, your Desktop; everything it runs
-ships inside it. The game data is separate and big (a full client is ~27 GB), so **you choose
-where it goes**, per world, the first time you pick a world that isn't installed yet: the app
-shows a *Game data* card with **Download…** and **Choose folder…**. Any drive is fine, external
-included; the wrapper stays small and is shared by every world. The choice is remembered per
-world.
-
-Pick the world from the **CHANGE WORLD** menu; the app writes that server's login host into its own
-Ashita boot profile and keeps your account per world. How each world's client is obtained is
-different, because each community distributes it differently — the app does whichever applies:
-
-| World | Download… does | Then |
+| World | What *Download…* does | Tested end-to-end here |
 | --- | --- | --- |
-| HorizonXI | fetches their client the way their launcher does — a 9.4 GB torrent + their updates (needs `brew install aria2`) | Play |
-| CatsEyeXI | runs **CatsEyeXI's own launcher** inside the wrapper; it installs their client into the folder you chose | Play |
-| Eden, FFEra, Gaia XI, ValhallaXI | opens their download page — each ships a Windows installer/launcher | run it in the wrapper (**Setup & Diagnostics → Install the game…**), then **Choose folder…** |
-| Supernova, OmicronXI | opens their guide — both are *bring-your-own retail client* + their patch/DATs | **Choose folder…** at your retail install |
-| Tabula Rasa XI | nothing — their site is offline (2026-08); Discord only | — |
+| **HorizonXI** | fetches their client the way their own launcher does — a 9.4 GB download, then their updates, up to the current version | ✅ downloaded, launched, reached login |
+| **CatsEyeXI** | runs CatsEyeXI's own launcher for you; it installs their full client (~15 GB) | ✅ downloaded, launched, reached login |
+| **Supernova, OmicronXI** | downloads Square Enix's own **free** client (7.7 GB), installs it, updates it through PlayOnline, then adds the world's files on top. Slow — hours — but every step is automatic | ⚙️ fully automated, not yet run start-to-finish |
+| **Eden, FFEra** | downloads their installer (a 5–6 GB zip) and runs it | ⚙️ wired up, not yet run start-to-finish |
+| **ValhallaXI** | downloads their small web-installer, which pulls the client | ⚙️ wired up, not yet run start-to-finish |
+| **Gaia XI** | their zip is behind a login, so it opens their site — then press **Run installer…** on the file you saved | ⚙️ needs that one manual step |
 
-**Client version.** Each server insists on a minimum retail patch level of the FFXI client and
-answers an older one with *"The game's data has been updated. Please update to continue."* The
-app checks this before Play and tells you both numbers. HorizonXI's updates are public and the
-app applies them; other servers ship theirs only through their own launcher, which is why the
-CatsEye route runs theirs.
+"Tested end-to-end here" is deliberately honest: HorizonXI and CatsEyeXI were downloaded and
+launched on the test Mac all the way to the server's login screen. The others are coded from each
+server's published installer but haven't been driven start-to-finish yet — see
+[`docs/SERVERS-WORKLOG.md`](docs/SERVERS-WORKLOG.md) for exactly what is and isn't proven.
+Logging *in* always needs your own account, made on that server's own site.
 
-Status of the CatsEye route, honestly: their launcher opens and renders inside the wrapper, but
-in testing its **Continue** button did not respond to automated clicks — a real mouse hasn't been
-tried yet. If it works for you, please say so in an issue; if it doesn't, the fallback is to run
-their launcher on any Windows machine and copy the `catseyexi-client` folder to the folder you
-chose.
+**Where the game goes.** You choose the folder, per world, the first time you press *Download…*.
+Any drive works, including an external one. The launcher itself can live anywhere.
+
+**Already downloaded an installer?** **Setup & Diagnostics → Run installer…** runs any `.exe`
+(or a `.zip` containing one) you already have.
+
+---
+
+## Things you might run into
+
+**"FFXI on Mac would like access to Developer Tools."** Say yes. It's Apple's oddly-worded way of
+asking *"may this app run Wine?"* — Wine's own developers don't notarise their builds, so macOS
+checks with you. It has nothing to do with Xcode.
+
+**A macOS password prompt during *Install wine…*** That's Rosetta 2 installing — Apple's
+translation layer. FFXI is a 32-bit Intel game and needs it.
+
+**The game window opens and closes right away.** Press **Repair** in Setup & Diagnostics.
+
+**Red error lines when the game starts.** Three Ashita plugins (`Nameplate`, `PacketFlow`,
+`Deeps`) were built for an older Ashita and don't load. Harmless — everything else works.
+Details: [`docs/ADDONS.md`](docs/ADDONS.md).
+
+**The sound doesn't move when I change my Mac's output device.** It should now — the launcher
+follows your Sound Output setting while the game runs (*Follow the Mac's sound output*, on by
+default). If it doesn't, say so in an issue; the mechanism is at
+[`docs/AUDIO.md`](docs/AUDIO.md).
+
+**The world looks black or has no textures.** Set the **Renderer** menu back to
+*Metal / DXVK (recommended)*. The other options exist for debugging and draw incorrectly.
+
+**"The game's data has been updated."** That world wants a newer client version than yours. The
+launcher checks this before Play and tells you both numbers.
+
+**It can't find my game folder.** The game folder has to be on a normal Mac-formatted drive
+(APFS or Mac OS Extended). It will not work from an exFAT or FAT32 drive.
+
+Anything else — [open an issue](../../issues) with your Mac model, macOS version, your server,
+and whatever the log pane says.
+
+---
 
 ## Addons
 
-Ashita addons work — HXUI, statustimers, the usual set. The app's **Addons** screen only shows you
-the ones your server actually allows, and names where that list came from. On HorizonXI an
-unapproved addon can get you banned, so this matters more than it sounds.
-
-Three plugins still don't load: `Nameplate`, `PacketFlow` and `Deeps`. They were built against an
-older version of Ashita than the one shipped here, so you'll see red "different interface version"
-lines in the log at startup. Harmless — everything else loads. Details and the fix we're waiting
-on: [`docs/ADDONS.md`](docs/ADDONS.md).
+Ashita addons work — HXUI, statustimers, the usual set. The **Addons** screen only shows the ones
+your server actually allows, and says where that list came from. On HorizonXI an unapproved addon
+can get you banned, so this matters more than it sounds.
 
 ## Running your own server
 
-Pick **Local server** in the World dropdown and press **Set up server**. The app installs the
-tools it needs and builds [LandSandBoat](https://github.com/LandSandBoat/server) on your Mac —
-about half an hour and 12 GB of disk the first time. After that, pressing Play starts the server
-and the game together. You still need the FFXI client; a server isn't a game.
-
-## Troubleshooting
-
-**The game window opens and closes right away.** Almost always the prefix configuration. Hit
-**Repair** in Setup & Diagnostics.
-
-**Red plugin errors when the game starts.** Expected — see Addons above.
-
-**It won't find my wrapper.** The wrapper has to be a `.app` on an APFS or HFS+ volume. A Wine
-prefix cannot live on an exFAT drive, and won't work from one.
-
-**The world looks black or untextured.** Make sure the renderer is set to *Metal / DXVK
-(recommended)*. The other options are there for debugging and are known to draw incorrectly.
-
-Anything else — [open an issue](../../issues). Include your Mac model, macOS version, your server,
-and what the log pane says.
+Pick **Local server** in the World menu and press **Set up server**. The launcher builds
+[LandSandBoat](https://github.com/LandSandBoat/server) on your Mac — about half an hour and 12 GB
+the first time. After that, Play starts the server and the game together. You still need a game
+client; a server isn't a game.
 
 ## Helping out
 
-This has been tested on exactly one Mac. Useful contributions, roughly in order:
+This has been tested on exactly one Mac. Most useful, in order:
 
-- **Frame rates from other Macs.** Model, memory, macOS version, where you were standing.
-- **Servers other than HorizonXI.** Login hosts, addon rules, anything that didn't work.
+- **Frame rates from other Macs** — model, memory, macOS version, where you were standing.
+- **Worlds other than HorizonXI and CatsEyeXI** — what worked, what didn't.
 - **Bug reports with the log pane contents.** The log usually says exactly what went wrong.
-- **Code.** See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- **Code** — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 Questions are welcome, including basic ones. Nobody here was born knowing what a Wine prefix is.
 
-## Under the hood
+---
 
-For anyone curious, or working on something similar — the technical record lives in `docs/`:
+## For the technically inclined
 
+Everything above happens automatically. If you'd rather do it by hand, or you're debugging:
+
+- [`docs/SETUP.md`](docs/SETUP.md) — the step-by-step manual route (Homebrew, Rosetta, Sikarugir
+  Creator, building the wrapper, installing the client, registering the COM servers).
 - [`docs/X87-WALL.md`](docs/X87-WALL.md) — the big one. FFXI's floating-point math ran at ~1% of
-  native speed under Rosetta. Fixing that took the game from 11 fps to 28.
+  native speed under Rosetta. Fixing it took the game from 11 fps to 28.
 - [`docs/MAX4K.md`](docs/MAX4K.md) — where the remaining frames go, and the fast trick that turned
   out to break the game.
-- [`docs/FINDINGS.md`](docs/FINDINGS.md) — why the game exited silently for weeks, and the dozen
-  things that looked like the cause and weren't.
+- [`docs/FINDINGS.md`](docs/FINDINGS.md) — why the game exited silently for weeks.
+- [`docs/AUDIO.md`](docs/AUDIO.md) — why a running game used to ignore the Mac's sound-output
+  setting, and the CoreAudio interposer that fixes it.
 - [`docs/ADDONS.md`](docs/ADDONS.md), [`docs/BRANDING.md`](docs/BRANDING.md),
-  [`docs/PATHWAYS.md`](docs/PATHWAYS.md) — addons, title-screen art, and the three renderers
-  compared.
+  [`docs/PATHWAYS.md`](docs/PATHWAYS.md) — addons, title art, the three renderers compared.
 
 Building it yourself needs only Apple's Command Line Tools:
 
@@ -240,10 +205,7 @@ Building it yourself needs only Apple's Command Line Tools:
 ./scripts/package.sh     # build the .dmg
 ```
 
-Tested on: MacBook Pro M1, 8 GB, macOS 26.5, Wine 10.0 (Sikarugir), HorizonXI client 1.9.0,
-Ashita 4.3.1.2. The **Install wine…** button itself has only been verified up through a working
-`drive_c` — its wiring into a totally empty-Mac first run has not yet been driven end-to-end by
-a real user.
+Tested on: MacBook Pro M1, 8 GB, macOS 26.5, Wine 10.0 (Sikarugir), Ashita 4.3.1.2.
 
 ## Credits
 

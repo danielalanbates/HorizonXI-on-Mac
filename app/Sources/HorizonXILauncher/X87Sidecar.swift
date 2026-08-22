@@ -24,6 +24,45 @@ enum X87Sidecar {
     /// nothing left to hook. Belongs on the *game's* environment, set before it launches.
     static let requiredEnvironment = ["ROSETTA_DISABLE_AOT": "1"]
 
+    /// The patched CrossOver wine from athei/wine-build, installed per machine at this path.
+    ///
+    /// It arrived here for x87 cooperative mode, but it matters on its own: **the wrapper's own
+    /// wine kills the client one second after login.** Measured 2026-08-21, same prefix, same
+    /// profile, same environment, twice each -- `siku.app/Contents/SharedSupport/wine/bin/wine`
+    /// reaches "Successfully logged in", prints "Closing..." a second later and exits (it starts
+    /// Ashita-cli "in experimental wow64 mode"), while this wine runs on indefinitely. So this is
+    /// the launch wine whenever it is present, sidecar or no sidecar. See docs/WINE-BUILD.md.
+    static func patchedWine() -> URL? {
+        let u = URL(fileURLWithPath: "/Volumes/Games/FFXI/wine-coop/wine/bin/wine")
+        return FileManager.default.isExecutableFile(atPath: u.path) ? u : nil
+    }
+
+    /// The cooperative sidecar binary alone, for `ROSETTA_X87_PATH`.
+    ///
+    /// This — not wrapping the command — is how the patched wine wants to be told about the
+    /// sidecar. See `Settings.environment`.
+    static func coopBinary() -> URL? {
+        if let u = Bundle.main.url(forResource: "x87sidecar-coop", withExtension: nil) { return u }
+        let dev = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("vendor/x87sidecar-coop")
+        return FileManager.default.isExecutableFile(atPath: dev.path) ? dev : nil
+    }
+
+    /// Cooperative-mode pieces: the unentitled sidecar (bundled, or vendor/ under `swift run`)
+    /// plus the handshake-patched CX wine from athei/wine-build. Both must exist; the wine is
+    /// a per-machine install because it is 700 MB unpacked. See docs/X87-WALL.md.
+    static func cooperative() -> (sidecar: URL, wine: URL)? {
+        guard let wine = patchedWine() else { return nil }
+        if let u = Bundle.main.url(forResource: "x87sidecar-coop", withExtension: nil) {
+            return (u, wine)
+        }
+        let dev = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("vendor/x87sidecar-coop")
+        return FileManager.default.isExecutableFile(atPath: dev.path) ? (dev, wine) : nil
+    }
+
     /// Poll for horizon-loader.exe -- the process Ashita actually runs the client in, not the
     /// injector (Ashita-cli.exe) that launches it and exits within a second or two. Attaching to
     /// the injector is a silent no-op: it installs, logs success, and patches a process that
@@ -34,7 +73,7 @@ enum X87Sidecar {
             if let pid = await Task.detached(priority: .userInitiated, operation: {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-                p.arguments = ["-f", "horizon-loader.exe"]
+                p.arguments = ["-f", await MainActor.run { Runner.currentGameExe }]
                 let pipe = Pipe()
                 p.standardOutput = pipe
                 p.standardError = Pipe()
@@ -62,7 +101,7 @@ enum X87Sidecar {
             return nil
         }
         guard let pid = await findGamePID() else {
-            await log("!! x87sidecar: horizon-loader.exe never appeared, gave up after 40s")
+            await log("!! x87sidecar: \(await MainActor.run { Runner.currentGameExe }) never appeared, gave up after 40s")
             return nil
         }
         // Ashita-cli.exe is still writing into this same process's memory for a moment after

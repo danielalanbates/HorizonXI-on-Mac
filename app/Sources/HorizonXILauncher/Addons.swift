@@ -237,3 +237,65 @@ struct AddonSuite {
         return Array(Set(out)).sorted()
     }
 }
+
+/// Addons this project recommends for the local LandSandBoat world and can fetch on request.
+/// Only offered where the addon policy is unrestricted — nothing here is on HorizonXI's list.
+enum LocalWorldAddons {
+    struct Entry { let name, title, blurb, zip: String; let unzippedDir: String }
+
+    /// SQLCommit/GMTools — an ImGui browser for LandSandBoat's `!` GM commands: 184 commands in
+    /// 11 categories with typed inputs, item search by name, favorites, presets, per-job gear.
+    /// MIT. Requires `chars.gmlevel` on the character (lsb-server.sh's test accounts have 99).
+    static let gmtools = Entry(
+        name: "gmtools",
+        title: "GM Tools (SQLCommit)",
+        blurb: "GUI for LandSandBoat's !commands — browse 184 GM commands by category, search items "
+             + "by name, presets and job gear. Local world only; needs a GM-level character.",
+        zip: "https://github.com/SQLCommit/GMTools/archive/refs/heads/main.zip",
+        unzippedDir: "GMTools-main")
+
+    static let all = [gmtools]
+
+    static func isInstalled(_ e: Entry, in i: Install) -> Bool {
+        FileManager.default.fileExists(
+            atPath: i.gameDir.appendingPathComponent("addons/\(e.name)/\(e.name).lua").path)
+    }
+
+    /// Download the GitHub zip, unpack with ditto, move into addons/<name>, apply the JIT guard.
+    /// Fails cleanly: nothing is left in `addons` unless the whole thing worked.
+    static func install(_ e: Entry, into i: Install, log: @escaping (String) -> Void) async -> Bool {
+        guard let url = URL(string: e.zip) else { return false }
+        log("==> fetching \(e.title) from \(e.zip)")
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("hxi-addon-\(e.name)-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: tmp) }
+        do {
+            try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+            let (file, resp) = try await URLSession.shared.download(from: url)
+            guard (resp as? HTTPURLResponse)?.statusCode ?? 0 < 400 else {
+                log("==> download failed: HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)"); return false
+            }
+            let zip = tmp.appendingPathComponent("addon.zip")
+            try fm.moveItem(at: file, to: zip)
+            let unz = tmp.appendingPathComponent("x")
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            p.arguments = ["-xk", zip.path, unz.path]
+            try p.run(); p.waitUntilExit()
+            guard p.terminationStatus == 0 else { log("==> unzip failed"); return false }
+            let src = unz.appendingPathComponent(e.unzippedDir)
+            guard fm.fileExists(atPath: src.appendingPathComponent("\(e.name).lua").path) else {
+                log("==> archive layout unexpected — no \(e.name).lua"); return false
+            }
+            let dst = i.gameDir.appendingPathComponent("addons/\(e.name)")
+            if fm.fileExists(atPath: dst.path) { try fm.removeItem(at: dst) }
+            try fm.copyItem(at: src, to: dst)
+            _ = LuaJITGuard.patch(dst.appendingPathComponent("\(e.name).lua"))
+            log("==> installed addons/\(e.name)")
+            return true
+        } catch {
+            log("==> \(e.title) install failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+}

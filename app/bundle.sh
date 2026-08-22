@@ -34,6 +34,7 @@ cp "$REPO/scripts/fix-wine-rpath.sh" "$APP/Contents/Resources/fix-wine-rpath.sh"
 cp "$REPO/scripts/lsb-server.sh"     "$APP/Contents/Resources/lsb-server.sh"
 cp "$REPO/scripts/update-client.sh"  "$APP/Contents/Resources/update-client.sh"
 cp "$REPO/scripts/catseye-launcher.sh" "$APP/Contents/Resources/catseye-launcher.sh"
+cp "$REPO/scripts/retail-client.sh"    "$APP/Contents/Resources/retail-client.sh"
 chmod +x "$APP/Contents/Resources/"*.sh
 
 # The Metal/DXVK renderer ships inside the app: Renderer.swift resolves these by name out of
@@ -45,14 +46,35 @@ done
 # x87sidecar: the fix for FFXI's x87 floating-point math running ~100x slow under Rosetta (see
 # docs/X87-WALL.md). Signed individually below with its own entitlements -- the app's deep-sign
 # strips them otherwise, and without get-task-allow/cs.debugger it cannot attach to the game.
+if [[ -f "$REPO/vendor/x87sidecar-coop" ]]; then
+  # Cooperative-mode sidecar (no entitlements, notarizable); preferred on macOS >= 26.5.2.
+  cp "$REPO/vendor/x87sidecar-coop" "$APP/Contents/Resources/x87sidecar-coop"
+  chmod +x "$APP/Contents/Resources/x87sidecar-coop"
+fi
+# attach-by-pid sidecar: BROKEN on macOS 26.5.2+ (cross-process i-cache flush), so it is no
+# longer bundled by default. Restore this block only for older macOS.
+# Bundled again 2026-08-21: cooperative mode does not survive into the client (it exits with the
+# injector and leaves the game at stock Rosetta x87, ~5 fps -- see docs/X87-WALL.md). attach-by-pid
+# is the mode that measured 11.3 -> 28.5 fps, so it is preferred again and this binary has to ship.
 if [[ -f "$REPO/vendor/x87sidecar_entitled" ]]; then
   cp "$REPO/vendor/x87sidecar_entitled" "$APP/Contents/Resources/x87sidecar_entitled"
   chmod +x "$APP/Contents/Resources/x87sidecar_entitled"
 fi
 
+# audiofollow.dylib -- inserted into wine so a running game follows the Mac's Sound Output
+# setting (see audio/audiofollow.c). Built here if it is missing so a fresh clone still gets it.
+if [[ ! -f "$REPO/app/Resources/audiofollow.dylib" ]]; then
+  "$REPO/scripts/build-audiofollow.sh" >/dev/null 2>&1 || true
+fi
+[[ -f "$REPO/app/Resources/audiofollow.dylib" ]] && \
+  cp "$REPO/app/Resources/audiofollow.dylib" "$APP/Contents/Resources/audiofollow.dylib"
+
 # Dock/Finder icon: an original crystal mark in the launcher's own Vana'diel palette (see
 # scripts/make_icon.py), not extracted from Square Enix's client -- this project's own art.
 [[ -f "$HERE/AppIcon.icns" ]] && cp "$HERE/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+# The icon a *running world* wears in the Dock. Stamped into the wine wrapper at launch by
+# DockIcon.swift, so it has to ride along in the launcher's Resources.
+[[ -f "$HERE/GameIcon.icns" ]] && cp "$HERE/GameIcon.icns" "$APP/Contents/Resources/GameIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -75,8 +97,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>NSDesktopFolderUsageDescription</key><string>To find a wrapper you keep on the Desktop.</string>
   <key>NSDocumentsFolderUsageDescription</key><string>To find a wrapper you keep in Documents.</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>2.6</string>
-  <key>CFBundleVersion</key><string>7</string>
+  <key>CFBundleShortVersionString</key><string>3.8</string>
+  <key>CFBundleVersion</key><string>19</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
@@ -99,13 +121,23 @@ PLIST
 find "$APP" -exec xattr -c {} \; 2>/dev/null || true
 
 X87SC="$APP/Contents/Resources/x87sidecar_entitled"
+X87COOP="$APP/Contents/Resources/x87sidecar-coop"
+AUDIOFOLLOW="$APP/Contents/Resources/audiofollow.dylib"
 if [[ -n "${HXI_SIGN_ID:-}" ]]; then
+  # The cooperative sidecar has no entitlements, so it can carry the hardened runtime and the
+  # secure timestamp the notary demands of nested executables. --timestamp is required here:
+  # without it notarization returns Invalid on exactly this file (measured 2026-08-20).
+  [[ -f "$X87COOP" ]] && codesign --force --options runtime --timestamp -s "$HXI_SIGN_ID" "$X87COOP"
   [[ -f "$X87SC" ]] && codesign --force --options runtime -s "$HXI_SIGN_ID" \
     --entitlements "$REPO/vendor/x87sidecar-entitlements.plist" "$X87SC"
+  # Nested dylibs need the hardened runtime and a secure timestamp too, or the notary rejects
+  # the whole bundle on this one file.
+  [[ -f "$AUDIOFOLLOW" ]] && codesign --force --options runtime --timestamp -s "$HXI_SIGN_ID" "$AUDIOFOLLOW"
   codesign --force --options runtime -s "$HXI_SIGN_ID" "$APP"
 else
   [[ -f "$X87SC" ]] && codesign --force -s - \
     --entitlements "$REPO/vendor/x87sidecar-entitlements.plist" "$X87SC" >/dev/null 2>&1 || true
+  [[ -f "$AUDIOFOLLOW" ]] && codesign --force -s - "$AUDIOFOLLOW" >/dev/null 2>&1 || true
   codesign --force -s - "$APP" >/dev/null 2>&1 || true
 fi
 

@@ -152,3 +152,128 @@ A locked screen (`frontmost=loginwindow`) still stops a run dead and always will
 
 `DXVK_DRAW_PROBE` crashes the client at 4K with the sidecar attached. `DXVK_STALL_LOG` was written
 to be cheap enough not to (two clock reads per instrumented call, no allocation) and does not.
+
+## 2026-08-20: cooperative x87 baseline, and two more dead ends
+
+With the cooperative sidecar + CX-26.3 wine (see X87-WALL.md), the honest number stands:
+**23.7 fps median in-world at 4K max** (`inworld-coop-aot`). Two more config-level levers
+measured against that baseline, same session:
+
+| configuration | fps median |
+| --- | --- |
+| cooperative baseline (maxFrameLatency=1 already in dxvk.conf) | 23.68 |
+| + `d3d9.presentInterval = 0` (vsync off) | 23.16 — no gain, reverted |
+| + `MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0` | 20.90 — worse, rejected |
+
+Config space is exhausted. Anything past ~24 fps at these settings requires engine-level
+work on the visibility read-back (dedicated-queue submission for the 16×16 surface's draw
+set, or convincing the client not to serialise on it) — DXVK source territory.
+
+## 2026-08-20 (later): the fence fast path — first real dent in the read-back wall
+
+Root cause finally isolated with a retirement-thread probe (`DXVK_QUEUE_LOG`): the 26 ms
+stall was never GPU execution. ~15 submissions/frame retire through DXVK's finish thread
+ONE AT A TIME, each `vkWaitForFences` costing ~0.85 ms on MoltenVK (~275 ms of serialized
+fence-waiting per second at 10% GPU busy). The visibility lock waits behind that serial
+queue.
+
+`D3D9_RT_READBACK_FENCE=<max edge px>` (patches/dxvk-1.10.3-horizonxi-fencewait.patch,
+now in the vendored dll, enabled by the launcher at 32): the lock flushes, does a FULL CS
+sync (required — capturing the last submission before the flush's own submission is
+enqueued would wait an older fence and reproduce the NOWAIT stale-read bug), then waits
+directly on that submission's fence, bounded, with fallback to the exact slow path.
+**Exact by construction**: the fence signaling means the staging buffer holds this
+frame's bytes.
+
+Measured: in-world map_wait 28.8 -> ~9 ms/frame; best run 25.07 vs 23.68 baseline; blink
+probe over a live populated dock scene showed no NOWAIT-style entity dropout (spikes an
+order of magnitude below the broken signature, consistent with other players moving).
+Honesty note: single runs each — the planned 3x3 A/B was cancelled (no unattended
+launch loops, standing rule); scene-density spread between runs is larger than the
+effect, so treat +1.4 fps as indicative, not proven.
+
+`D3D9_RT_UNBIND_FLUSH` (flush when the small RT is unbound) is also in the patch but
+showed no additional gain (24.23 with both, n=1) — left off by default.
+
+Remaining wall: with waits at ~9 ms, the frame is now bounded by the client's own main
+thread (~78% of a core, x87 + draw submission). Next fronts: sidecar JIT quality, or
+cutting the residual 9 ms (per-texture early fence capture at RT-unbind so the lock
+waits a long-signaled fence).
+
+## 2026-08-20 (evening): per-frame dedup of the visibility test — REFUTED before implementation
+
+`D3D9_RT_IDENT_PROBE` (in the fencewait patch) logged every small-RT bind/unbind/lock with
+texture identity. 53,941 events on a live in-world run:
+
+- **One single 16x16 texture** serves every visibility test (15k+ locks, one pointer).
+- The event stream is a strict `lock, bind, unbind` cycle (`LBULBULBU...`, 17,976 clean
+  `BU` pairs between locks, one anomaly). **Every lock is preceded by its own fresh render
+  pass into the surface.** Each read is a distinct test of a distinct light/frame state.
+
+Serving a cached per-frame result would therefore hand test N the result of test N-1 —
+the NOWAIT corruption class again. Do not re-attempt dedup/caching of this surface.
+
+What the probe DOES establish for the next attempt: the test pass is self-contained
+(own tiny RT, re-rendered occluder geometry) and strictly interleaved with main-scene
+work. The sound path to killing the residual ~9 ms is submitting the `bind..unbind`
+command range on a SECOND VkQueue (own MTLCommandQueue in MoltenVK) so its fence does not
+queue behind the frame's main submissions — real DXVK surgery: split command recording at
+the bind/unbind boundaries and fence only the side queue at lock time. Read-only shared
+resources (geometry, textures) need cross-queue hazard care; the 16x16 + its depth are
+exclusively the side queue's.
+
+LSB-local status, corrected after live debugging with Daniel: the pathway WORKS. The
+"post-connect close" was simply a missing local account (the DB only had the harness's
+lsbtest fixtures; Daniel's login was refused). Account `danielalanbates` now exists in
+the local DB (bcrypt row, id 3), and the launcher's Local-server world verified
+end-to-end to the title screen. First render on this path is slow (cold DXVK pipeline
+cache) — do not judge it by early screenshots. Two real residuals: the cooperative
+CX-26.3 wine still page-faults during LSB boot (7B31EF5E — live world unaffected), and
+the harness's blind key-driving needs its wait-for-pixels guard (added to inworld.py).
+
+## 2026-08-20 (night): plan-1/3 session — flags, record run, early-fence refuted
+
+- `X87_FAST_ROUND=2` breaks the client at the POL handoff. Rejected; never retry.
+- **Project record, measured in-world: 43.5 fps median at 4K max** (fence path +
+  cooperative x87, light ~920-draw scene). Crowded scenes still land in the 20s.
+- Fence-depth probe (22,668 locks): median pending depth 2, median wait 2.0 ms/lock —
+  the residual is per-submission completion latency (~1 ms each on MoltenVK), not GPU
+  execution.
+- `D3D9_RT_EARLY_FENCE` (copy + flush at RT-unbind, wait that submission at lock):
+  REFUTED. fps wash (43.9 vs 43.5), waits worse (5.9 ms median — the unbind flush drags
+  the whole frame chunk along), CS/queue threads red-lined from per-test full syncs.
+  Root cause is structural: the interleave probe shows the lock follows the unbind
+  IMMEDIATELY — no gap for the copy to execute in. Code stays env-gated OFF.
+- Surviving architecture for the residual ~2 ms/lock: the SIDE QUEUE, refined estimate
+  ~1.3 ms x 3.5 locks ≈ 4.5 ms/frame (43 -> ~52 fps light scenes). Beyond that the wall
+  is the client main thread (~90% of a core at 44 fps).
+- Harness: hidden-wine-app window enumeration bug fixed (bench.py unhide_wine) — this
+  was the "no wine windows" flakiness all along.
+
+## 2026-08-21: side-queue session — the queue does not exist, and two more dead ends
+
+- **MoltenVK exposes exactly one VkQueue (family 0, count 1) — verified against both the
+  wrapper's library and upstream v1.4.2 with a direct probe.** The side-queue design as
+  "second VkQueue" is impossible without a patched MoltenVK, and this machine has no
+  Xcode to build one (a CI build via GitHub Actions is the pathway if ever needed).
+- `D3D9_PERIODIC_FLUSH=<draws>` (submit every N draws so GPU work overlaps the CPU
+  frame): built, measured at 200 — 40.5 fps vs 43.5/43.9 comparable-scene runs, waits
+  1.68 vs 2.0 ms, depth still 2. No win; extra submissions eat the saving. Env-gated
+  OFF. (With early-fence also refuted, submission-boundary tuning is exhausted.)
+- Suspicious observation for the NEXT investigation: at 44 fps the main thread shows
+  ~90-95% CPU-busy while supposedly *blocked* ~7 ms/frame in fence waits — MoltenVK's
+  vkWaitForFences may spin rather than sleep. If so, the residual wait is stealing CPU
+  from the x87-bound main thread, and a sleeping wait (or MoltenVK fence fix) frees
+  real frame time. Verify with a profiler sample of the wait site before believing it.
+
+## 2026-08-21 (later): fence-spin hypothesis REFUTED by profiler sample
+
+/usr/bin/sample of the live client (8 s in-world): the fence wait resolves to
+`vkWaitForFences -> _pthread_cond_wait` — a sleeping wait, 366/1079 samples (~34% of the
+main thread's wall time). No spin; MoltenVK is efficient here. The waits are genuine
+GPU/completion latency, and with NOWAIT (breaks entities), side-queue (no second queue
+exists), early-fence and periodic-flush (both measured, no gain) all closed, the
+read-back wall is now optimized to its floor on this stack. Remaining upside lives
+elsewhere: Metal completion-handler latency inside MoltenVK (needs a CI-built patched
+MoltenVK) or making the client's x87 math faster (sidecar upstream). Sample saved
+paths + probe tooling: /tmp/game-sample.txt (transient), mvkprobe.c in session notes.

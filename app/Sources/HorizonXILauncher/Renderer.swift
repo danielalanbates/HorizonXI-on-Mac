@@ -140,7 +140,8 @@ enum RendererSetup {
     private static func dllDirs(_ i: Install) -> [URL] {
         [i.driveC.appendingPathComponent("windows/syswow64"),
          i.gameDir,
-         i.gameDir.appendingPathComponent("bootloader"),
+         // v3 clients (Eden, ValhallaXI, FFEra) call it ffxi-bootmod, not bootloader.
+         i.bootLoaderDir,
          i.squareEnix.appendingPathComponent("PlayOnlineViewer"),
          i.squareEnix.appendingPathComponent("FINAL FANTASY XI")]
     }
@@ -185,8 +186,17 @@ enum RendererSetup {
                 }
             }
         }
-        regDelete(i, key: #"HKCU\Software\Wine\DllOverrides"#, name: "*d3d8")
-        regDelete(i, key: #"HKCU\Software\Wine\DllOverrides"#, name: "*d3d9")
+        // Both spellings. This launcher writes `*d3d8`, but a prefix set up by an older build
+        // (or by hand, or by install.sh) carries a plain `d3d8` = native, and *that* is the one
+        // that was left behind: switching to Classic then leaves d3d8 forced native with no
+        // native d3d8.dll anywhere the loader looks. Measured 2026-08-21 on Gaia XI, whose
+        // client folder ships no d3d8.dll:
+        //   err:module:import_dll Library d3d8.dll (which is needed by …\Ashita.dll) not found
+        //   [E] Injection failed!
+        // Deleting only the asterisked name is why that survived a renderer switch.
+        for name in ["*d3d8", "*d3d9", "d3d8", "d3d9"] {
+            regDelete(i, key: #"HKCU\Software\Wine\DllOverrides"#, name: name)
+        }
         linkMoltenVK(i, toCX: false)
     }
 
@@ -211,10 +221,42 @@ enum RendererSetup {
         let link = i.sharedSupport.appendingPathComponent("wine/lib/libMoltenVK.dylib")
         let cx = i.wrapper.appendingPathComponent("Contents/Frameworks/moltenvkcx/libMoltenVK.dylib")
         let stock = i.wrapper.appendingPathComponent("Contents/Frameworks/libMoltenVK.dylib")
-        let target = toCX ? cx : stock
+        let target = toCX && fm.fileExists(atPath: cx.path) ? cx : stock
         guard fm.fileExists(atPath: target.path) else { return }
         try? fm.removeItem(at: link)
         try? fm.createSymbolicLink(at: link, withDestinationURL: target)
+    }
+
+    /// Every dylib in `wine/lib` is a symlink into the wrapper's own `Contents/Frameworks`.
+    /// Copying or moving a wrapper with `cp -R`/`rsync` preserves those symlinks *verbatim*, so
+    /// all 94 of them keep pointing at the **old** location. While the old copy is still on a
+    /// mounted disk nothing looks wrong -- and then the day it is unplugged or deleted, wine
+    /// stops loading. Worse, `libMoltenVK.dylib` silently keeps resolving to the previous
+    /// wrapper's MoltenVK rather than this one's, which is a renderer difference, not a
+    /// missing file.
+    ///
+    /// Re-point anything that escapes this wrapper at the matching file inside it.
+    /// Returns the number of links repaired.
+    @discardableResult
+    static func relinkStrayDylibs(_ i: Install, log: (String) -> Void = { _ in }) -> Int {
+        let fm = FileManager.default
+        let libDir = i.sharedSupport.appendingPathComponent("wine/lib")
+        let frameworks = i.wrapper.appendingPathComponent("Contents/Frameworks")
+        guard let kids = try? fm.contentsOfDirectory(atPath: libDir.path) else { return 0 }
+        var fixed = 0
+        for name in kids where name.hasSuffix(".dylib") {
+            let link = libDir.appendingPathComponent(name)
+            guard let dest = try? fm.destinationOfSymbolicLink(atPath: link.path) else { continue }
+            // Already inside this wrapper: leave it alone.
+            guard !dest.hasPrefix(i.wrapper.path) else { continue }
+            let local = frameworks.appendingPathComponent(name)
+            guard fm.fileExists(atPath: local.path) else { continue }
+            try? fm.removeItem(at: link)
+            guard (try? fm.createSymbolicLink(at: link, withDestinationURL: local)) != nil else { continue }
+            fixed += 1
+        }
+        if fixed > 0 { log("wrapper: re-pointed \(fixed) dylib links that still referenced the previous copy") }
+        return fixed
     }
 
     // MARK: - The DXT fix
@@ -302,7 +344,20 @@ enum RendererSetup {
         p.environment = ["WINEPREFIX": i.prefix.path]
         try? p.run()
         p.waitUntilExit()
-        Thread.sleep(forTimeInterval: 1.5)
+        // `-k` only *sends* the kill; the server then flushes the registry and exits on its own
+        // time. A fixed 1.5 s covered that on the SSD, but after the wrapper moved to the x10
+        // (spinning disk) the flush can outlive it — and a game spawned while the old server is
+        // still dying gets torn down with it about a second after login ("Closing…", every
+        // world, 2026-08-19). `wineserver -w` blocks until the server has actually terminated.
+        let w = Process()
+        w.executableURL = i.wineserver
+        w.arguments = ["-w"]
+        w.environment = ["WINEPREFIX": i.prefix.path]
+        try? w.run()
+        // Bounded, so a wedged server cannot hang the launcher forever.
+        let deadline = Date().addingTimeInterval(30)
+        while w.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
+        if w.isRunning { w.terminate() }
     }
 
     private static func reg(_ i: Install, add key: String, name: String, type: String, data: String) {

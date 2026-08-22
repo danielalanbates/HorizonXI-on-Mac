@@ -1,0 +1,28 @@
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Local settings (generated at runtime)
+settings.json
+*.local.lua
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+

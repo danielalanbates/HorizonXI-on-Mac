@@ -31,6 +31,14 @@ Machine: MacBook Pro **M1, 8GB RAM**, macOS 26.5.2. Internal disk ~14GB free (94
 
 Murn has **not** been logged in. Everything up to display init works.
 
+> **SOLVED 2026-08-16 — see [SILENT-EXIT-SOLVED.md](SILENT-EXIT-SOLVED.md).** The cause is
+> Ashita Sandbox's `use_interface_bypass`, set to `0` in this install's
+> `config/sandbox/sandbox.ini` (Ashita's default is `1`). It patches FFXI's `patch.ver`
+> interface-id check, which a private-server client can never pass on its own. The trace below
+> is accurate and its `patch.ver` finding was the right thread; what was missing was that
+> Sandbox is what makes that check succeed. Everything in §3–§6 that treats this as a graphics,
+> COM, registry, engine or data problem is a dead end, confirmed by direct test.
+
 ## 2. The failure signature, precisely
 
 ```
