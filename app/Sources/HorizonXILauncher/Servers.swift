@@ -200,7 +200,14 @@ struct Server: Codable, Identifiable, Hashable {
         all.filter { !$0.retired && $0.codebase == .landSandBoat }
     }
 
-    static var retiredWorlds: [Server] { all.filter(\.retired) }
+    /// Everything the picker withholds — non-LandSandBoat *or* stopped. Both axes, because a
+    /// saved servers.json written before either cut still lists them, and dropping only the
+    /// stopped ones (which is what this did until 2026-08-21) left Eden, FFEra and ValhallaXI
+    /// alive in `--check` and in an existing install's picker while a fresh one showed six.
+    static var retiredWorlds: [Server] {
+        let offered = Set(builtins.map(\.name))
+        return all.filter { !offered.contains($0.name) }
+    }
 
     static let all: [Server] = [
         Server(name: "HorizonXI", host: "play.horizonxi.com", bootProfile: "horizonxi.ini",
