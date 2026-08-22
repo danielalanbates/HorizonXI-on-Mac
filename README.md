@@ -5,7 +5,7 @@ no Terminal.
 
 <div align="center">
 
-### [⬇️ Download FFXI on Mac 3.7 (.dmg)](https://github.com/danielalanbates/HorizonXI-on-Mac/releases/latest)
+### [⬇️ Download FFXI on Mac (.dmg)](https://github.com/danielalanbates/HorizonXI-on-Mac/releases/latest)
 
 [![Download](https://img.shields.io/badge/Download-FFXI%20on%20Mac-2ea44f?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/danielalanbates/HorizonXI-on-Mac/releases/latest)
 
