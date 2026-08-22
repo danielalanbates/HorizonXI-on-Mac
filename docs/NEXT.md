@@ -5,6 +5,32 @@ orientation document; this is the short list of live leads, ranked, with the rea
 produced the ranking. Read [`MAX4K.md`](MAX4K.md) first: it has the measurements everything below
 depends on.
 
+## Added 2026-08-22
+
+**3.8 is the public release.** First one that has the per-world `Download…` flow; 2.6 (the
+previous public build) had no such button at all, while the README described one — a mismatch a
+new user would hit within a minute. Check that again before every release: install the *published
+DMG* on a clean path and read the README next to it.
+
+**Sound output now follows the Mac** — see [`AUDIO.md`](AUDIO.md). Verified on the host side,
+**not yet heard moving inside a live game.** That ten-minute test is the top of this list.
+
+**Two things found and not fixed:**
+
+1. **The account password is passed to the game on the command line.** `ps` shows it in clear
+   text to every process on the Mac:
+   `horizon-loader.exe --server play.horizonxi.com --user <name> --pass <password>`. The launcher
+   is careful to keep it in the Keychain and out of files, and then hands it to `argv` anyway,
+   which is world-readable. Ashita's boot profile (`.ini`) or stdin would both be better; the
+   `.ini` route is already gitignored for exactly this reason. Worth fixing before this gets much
+   wider use.
+2. **The retail pathway can fill the internal disk.** Every bring-your-own-retail world used to
+   download its own copy of the identical 7.7 GB Square Enix client; the shared cache at
+   `~/Games/FFXI/_shared-retail` fixed the duplication, but the default location is still the
+   startup disk. The *Game data* card lets the user pick a drive — it should probably refuse a
+   destination that would leave the boot volume under ~15 GB, the way the local-server build
+   already refuses below 9 GB.
+
 ## The state in one paragraph
 
 Final Fantasy XI runs natively on Apple Silicon under Wine, correctly, at **~24 fps in the world
