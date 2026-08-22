@@ -42,8 +42,10 @@ function A.draw(bearing, distance, label, sub)
         local dl = imgui.GetForegroundDrawList()
         local cx, cy = A.pos_x or (A.screen.w / 2), A.pos_y or (A.screen.h * 0.28)
 
-        -- Screen angle: 0 bearing must draw straight up, and the screen's y grows downward.
-        local a = (bearing or 0) * A.calibration + A.offset
+        -- Screen angle.  Zero bearing draws straight up.  The screen's y grows *downward*,
+        -- so a positive (leftward) bearing has to become a negative screen rotation or the
+        -- arrow comes out mirrored — verified by tools/render_arrow.lua.
+        local a = -(bearing or 0) * A.calibration + A.offset
         local colour = colour_for(distance)
 
         local tipx, tipy = rotate(cx, cy, 0, -34, a)
