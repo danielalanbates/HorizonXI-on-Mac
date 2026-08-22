@@ -37,6 +37,18 @@ enum X87Sidecar {
         return FileManager.default.isExecutableFile(atPath: u.path) ? u : nil
     }
 
+    /// The cooperative sidecar binary alone, for `ROSETTA_X87_PATH`.
+    ///
+    /// This — not wrapping the command — is how the patched wine wants to be told about the
+    /// sidecar. See `Settings.environment`.
+    static func coopBinary() -> URL? {
+        if let u = Bundle.main.url(forResource: "x87sidecar-coop", withExtension: nil) { return u }
+        let dev = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("vendor/x87sidecar-coop")
+        return FileManager.default.isExecutableFile(atPath: dev.path) ? dev : nil
+    }
+
     /// Cooperative-mode pieces: the unentitled sidecar (bundled, or vendor/ under `swift run`)
     /// plus the handshake-patched CX wine from athei/wine-build. Both must exist; the wine is
     /// a per-machine install because it is 700 MB unpacked. See docs/X87-WALL.md.

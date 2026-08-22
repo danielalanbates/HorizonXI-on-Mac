@@ -10,7 +10,6 @@ final class Runner: ObservableObject {
     @Published var busy = false
 
     private var proc: Process?
-    private var x87Proc: Process?
     /// Executable Ashita boots the game in for the current launch (the boot profile's
     /// `[ashita.boot] file`): horizon-loader.exe on HorizonXI, pol.exe on CatsEyeXI, xiloader.exe
     /// elsewhere. Both the exit watcher and the x87 sidecar look for this, by name.
@@ -504,7 +503,7 @@ final class Runner: ObservableObject {
         appendLine("==> launching \(install.bootProfileName(profile)) (Ashita \(install.ashitaGeneration.rawValue))")
         // Make the Dock tile say which world is running, under this project's own icon.
         DockIcon.apply(to: install, world: world.isEmpty ? "Vana'diel" : world) { [weak self] in self?.appendLine($0) }
-        var env = perf.environment(for: install)
+        var env = perf.environment(for: install, x87: useX87)
         // x87 acceleration, two generations:
         //  * Cooperative (preferred): x87sidecar --cooperative launching the patched CX wine
         //    (athei/wine-build at COOP_WINE). Every wine process — including horizon-loader,
@@ -518,32 +517,14 @@ final class Runner: ObservableObject {
         // it forces Rosetta's slow path and costs ~half the stock frame rate (measured
         // 2026-08-19: ~5 fps vs ~11 stock). Set it only when acceleration will engage.
         // A world may have to run without x87 acceleration (see Server.x87).
-        // x87 acceleration is OFF by default as of 2026-08-21, because measuring it on this
-        // macOS (26.5.2) says every version of it is now a large net loss:
-        //
-        //   no sidecar, Rosetta AOT enabled ............ median 58.0 fps
-        //   cooperative sidecar + ROSETTA_DISABLE_AOT ... median  3.0 fps
-        //   attach-by-pid + ROSETTA_DISABLE_AOT ......... client dies ~5s after launch
-        //
-        // (Same 382-draw screen, same settings, 60 samples each, DXVK_FPS_LOG.) The mechanism is
-        // not subtle: ROSETTA_DISABLE_AOT is what makes the sidecar's hook reachable, and it
-        // forces Rosetta's slow path on everything. That is a fine trade when the JIT engages --
-        // it was worth 2.5x in-world when attach-by-pid worked -- and a catastrophic one when it
-        // does not. It does not: the cooperative handshake now fails outright
-        // ("[rosettax87] cooperative handshake receive failed ... (ipc/rcv) timed out"), so the
-        // client pays the AOT penalty and gets nothing back.
-        //
-        // Set FFXI_ON_MAC_X87=1 to opt back in while working on it. See docs/X87-WALL.md.
-        let x87Wanted = useX87 && ProcessInfo.processInfo.environment["FFXI_ON_MAC_X87"] == "1"
-        let coop = x87Wanted ? X87Sidecar.cooperative() : nil
+        // x87 acceleration rides on ROSETTA_X87_PATH now (set in PerfSettings.environment), so
+        // there is nothing to wrap here: wine re-execs every i386 process through the sidecar
+        // itself, including the client Ashita spawns. See Settings.swift for the measurements.
         if !useX87 {
             appendLine("i  x87 acceleration is off for this world — its client exits at boot with it on.")
-        } else if !x87Wanted {
-            appendLine("i  x87 sidecar disabled: it costs ~19x on this macOS (docs/X87-WALL.md). "
-                       + "FFXI_ON_MAC_X87=1 re-enables it.")
-        }
-        if x87Wanted, coop != nil {
-            for (k, v) in X87Sidecar.requiredEnvironment { env[k] = v }
+        } else if X87Sidecar.coopBinary() == nil {
+            appendLine("!! x87sidecar-coop missing from the bundle — the client will run at "
+                       + "Rosetta's stock x87 speed (single-digit fps in-world).")
         }
         // Spawned through a shell with a *file* redirect, not Foundation.Process pipes.
         // 2026-08-19: after the wrapper moved to the x10, every game launched the old way died
@@ -559,27 +540,13 @@ final class Runner: ObservableObject {
         // `injector.exe <profile>.xml`. Same shape, different names — see Install.AshitaGeneration.
         let injector = install.gameDirWine + "\\" + install.ashitaCLI.lastPathComponent
         let bootFile = install.bootProfileName(profile)
-        if let coop {
-            // The sidecar lives exactly as long as the process it launched. Launching the
-            // injector directly means it lives ~2 seconds: Ashita-cli.exe injects and exits,
-            // the sidecar follows it out, and the client Ashita just spawned is left running
-            // with nothing to handshake with -- the 5 fps. Give the sidecar a child that
-            // outlives the injector instead: run the injector, then idle until the client
-            // process is gone. Every wine process the patched CX wine starts in between
-            // re-execs through this same sidecar and does its own handshake.
-            let cmd = shellQuote(coop.wine.path) + " " + shellQuote(injector) + " "
-                + shellQuote(bootFile)
-                + "; while /usr/bin/pgrep -qf " + shellQuote(Self.currentGameExe)
-                + "; do /bin/sleep 5; done"
-            exe = coop.sidecar
-            args = ["--cooperative", "/bin/sh", "-c", cmd]
-            appendLine("==> x87 cooperative: \(coop.wine.path) (sidecar held open for the client)")
-        } else if let wine = X87Sidecar.patchedWine() {
+        if let wine = X87Sidecar.patchedWine() {
             // Not about x87: the wrapper's own wine exits one second after login. See
             // X87Sidecar.patchedWine.
             exe = wine
             args = [injector, bootFile]
-            appendLine("==> wine: \(wine.path)")
+            appendLine("==> wine: \(wine.path)"
+                       + (useX87 && X87Sidecar.coopBinary() != nil ? " + x87 sidecar" : ""))
         } else {
             exe = install.wine
             args = [injector, bootFile]
@@ -598,25 +565,10 @@ final class Runner: ObservableObject {
             self?.appendLine("==> injector exited \(code)")
             self?.watchGameProcess()
         }
-        // The game runs in a child process (horizon-loader.exe) that does not exist yet at this
-        // point -- Ashita-cli.exe has to inject into it first. Attach as soon as it is safe
-        // (X87Sidecar waits for the pid plus a short injection grace): Rosetta caches its
-        // translations, so any code translated before the sidecar attaches keeps the slow x87
-        // path for the life of the process. A late attach "works" but leaves most of the game
-        // at stock speed. (The 2026-08-19 attach crashes were a stale sidecar binary built for
-        // pre-26.5.2 Rosetta, not the timing — rebuild the sidecar after every macOS update.)
-        // Cooperative mode needs no attach at all: the patched wine handshakes on its own.
-        if x87Wanted, coop == nil, X87Sidecar.binary() != nil {
-            Task { [weak self] in
-                let p = await X87Sidecar.attachWhenReady { [weak self] in self?.appendLine($0) }
-                self?.x87Proc = p
-            }
-        }
     }
 
-    /// Poll for the client itself, and only tear the sidecar down once it is really gone.
-    /// x87sidecar holds a live patch inside the target's Rosetta translation; terminating it
-    /// while the game is running takes the game with it.
+    /// Poll for the client itself. Ashita-cli.exe exits seconds after a successful injection
+    /// while the game carries on in horizon-loader.exe, so the injector's exit is not the game's.
     private func watchGameProcess() {
         Task { [weak self] in
             // Give the injector's child a moment to appear before deciding it never did.
@@ -632,8 +584,6 @@ final class Runner: ObservableObject {
                 guard let self else { return }
                 self.running = false
                 self.appendLine("==> game exited")
-                self.x87Proc?.terminate()
-                self.x87Proc = nil
             }
         }
     }
@@ -674,8 +624,6 @@ final class Runner: ObservableObject {
     }
 
     func stop(_ install: Install) {
-        x87Proc?.terminate()
-        x87Proc = nil
         proc?.terminate()
         let k = Process()
         k.executableURL = install.wineserver

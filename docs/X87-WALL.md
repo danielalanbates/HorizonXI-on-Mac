@@ -1,3 +1,9 @@
+> **2026-08-21 — read [X87-SIDECAR.md](X87-SIDECAR.md) first.** Everything below about the
+> sidecar "not working on 26.5.2" was a misdiagnosis: the launcher was wrapping the command
+> (`x87sidecar-coop --cooperative wine …`) instead of setting `ROSETTA_X87_PATH`, so only Ashita's
+> injector was ever accelerated and the game — a grandchild process — never was. The numbers
+> recorded here are real; the conclusions drawn from them about the sidecar are not.
+
 # The x87 wall — found, and broken
 
 Written 2026-08-12. This supersedes `docs/INWORLD-STALL.md`.

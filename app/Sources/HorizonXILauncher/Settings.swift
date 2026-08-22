@@ -93,7 +93,8 @@ struct PerfSettings: Codable {
     }
 
     /// Environment applied to the wine process.
-    func environment(for install: Install) -> [String: String] {
+    /// - Parameter x87: whether this world may use x87 acceleration (`Server.x87`).
+    func environment(for install: Install, x87: Bool = true) -> [String: String] {
         var env: [String: String] = [:]
         env["WINEPREFIX"] = install.prefix.path
         env["D3DMETAL_FRAMEWORK_PATH"] = install.d3dMetal.path
@@ -126,6 +127,25 @@ struct PerfSettings: Codable {
         // 32 px bounds it to the small visibility-test surfaces; anything the game reads back at
         // a size it could actually display still waits.
         if flareReadbackNoWait { env["D3D9_RT_READBACK_NOWAIT"] = "32" }
+        // x87 acceleration, the way athei's patched wine actually wants to be told about it.
+        //
+        // `ROSETTA_X87_PATH` is read by wine's own loader (athei/wine commit 3804c30b, "ntdll:
+        // HACK: Recognize ROSETTA_X87_PATH and attach x87sidecar cooperatively"): **every** i386
+        // wine process re-execs itself through the named sidecar and does the task-port handshake
+        // in __wine_main. That is the whole point — the client this project cares about is a
+        // *grandchild* (Ashita-cli.exe injects into horizon-loader.exe and exits), and only this
+        // pathway reaches it.
+        //
+        // Wrapping the command instead — `x87sidecar-coop --cooperative wine Ashita-cli.exe` —
+        // accelerates exactly one process: the injector, which exits within seconds, taking the
+        // sidecar with it and leaving the game unaccelerated. Measured 2026-08-21: one handshake
+        // with the wrapper, two with this variable, and the difference in-world is the whole 2.5x.
+        // That misuse is what made x87 look broken for a day, and it cost the frame rate twice —
+        // once by not accelerating, and once more because ROSETTA_DISABLE_AOT was being set by
+        // hand on top of it. The sidecar disables AOT itself when it attaches; do not set it here.
+        if x87, let sidecar = X87Sidecar.coopBinary() {
+            env["ROSETTA_X87_PATH"] = sidecar.path
+        }
         // Frame-rate log, on demand: FFXI_ON_MAC_FPSLOG=1 in the launcher's own environment
         // makes the vendored DXVK write one CSV row per second (fps, draws, passes, barriers,
         // submits) next to the client. This is how a launch on the *shipped* path gets measured
