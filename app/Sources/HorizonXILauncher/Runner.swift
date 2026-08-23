@@ -37,6 +37,26 @@ final class Runner: ObservableObject {
     /// version the benchmark harness actually validated (25.6 fps in-world, up from an 11.3 fps
     /// pre-x87sidecar baseline). 0001/0002 are screen width/height; the rest are background and
     /// texture resolution, sound channels and mip mapping -- see max4k.json's own comment.
+    /// What the local test world runs at: as small as FFXI allows.
+    ///
+    /// This profile used to be pinned to 4K with everything maxed, because it was the benchmark
+    /// harness's world and the point was to measure the ceiling. It is not that any more -- it is
+    /// where addons and quests get tested, often with the launcher, a narrator and a second
+    /// client alive on an 8 GB machine, and a 3840x2160 framebuffer costs real memory, bandwidth
+    /// and battery for a window nobody is admiring.
+    ///
+    /// Only the resolutions are turned down. docs/SETTINGS-SWEEP.md measured the quality knobs on
+    /// this Mac and they do not help -- "all low" was the *slowest* variant of the lot (9.71 fps
+    /// against a 12.85 baseline) because the client is CPU-bound and mip mapping off makes the
+    /// GPU sample full-size textures for distant geometry. So: fewer pixels, same quality per
+    /// pixel. Expect this to cost less power and memory, not to raise the frame rate.
+    ///   0001/0002 window, 0037/0038 menu, 0003/0004 background and map textures.
+    private static let lowSpecRegistry: [String: String] = [
+        "0001": "640", "0002": "480",
+        "0037": "640", "0038": "480",
+        "0003": "1024", "0004": "1024",
+    ]
+
     private static let max4KRegistry: [String: String] = [
         "0000": "6", "0001": "3840", "0002": "2160", "0003": "4096", "0004": "4096",
         "0011": "2", "0018": "2", "0019": "1", "0021": "1", "0029": "20",
@@ -512,7 +532,7 @@ final class Runner: ObservableObject {
         // setting maxed. Never applied to a live server profile: that would silently change
         // someone's real account's display settings out from under them.
         if profile == "lsb.ini" {
-            Credentials.applyIniOverrides(Self.max4KRegistry, to: install, profile: profile)
+            Credentials.applyIniOverrides(Self.lowSpecRegistry, to: install, profile: profile)
         }
         // Every launch: make sure no addon can take the LuaJIT trace-patch fault that Ashita 4.3
         // hits on this Mac (see LuaJITGuard). Idempotent, so this is cheap after the first run.
