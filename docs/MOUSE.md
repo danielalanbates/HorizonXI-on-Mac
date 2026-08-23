@@ -98,3 +98,42 @@ process-level:
 ## Security
 The HorizonXI password is plaintext in `config/boot/horizonxi.ini` and appears in `ps`
 output. Worth changing how it's passed.
+
+## 2026-08-22: the cursor went missing again, and why
+
+Daniel pressed Update and Restart and came back with no cursor at all. Nothing regressed in
+the code — **the launcher's own Apply removed the fix.**
+
+The chain: the cursor fix lives in `mousediag`; Apply rewrites everything between
+`# --HORIZON_ADDONS_START/STOP--` in `scripts/default.txt` from the addon screen's checkboxes;
+that screen filters by the server's published allowlist; `mousediag` is on no server's list
+because it is ours. So Apply wrote a managed block without it, and the ShowCursor loop stopped
+running.
+
+Two changes, so it cannot happen again:
+
+* **`addons/winecursor/`** — the cursor fix on its own, with none of `mousediag`'s
+  diagnostics, injection or `cmd.txt` channel. That separation matters for the allowlist
+  argument: this addon only makes the pointer visible.
+* **`AddonPolicy.infrastructure`** now contains `winecursor`, next to `winefix`, so an
+  allowlist can never filter it out, and the load line goes **outside** the managed markers in
+  `default.txt` so an Apply cannot rewrite it away.
+
+## The click experiment that is now in the tree, unproven
+
+`/winecursor clicks on` injects **button messages only** — `WM_LBUTTONDOWN/UP`,
+`WM_RBUTTONDOWN/UP` — and only while `io.WantCaptureMouse` says the pointer is over an ImGui
+window.
+
+The reasoning against the 2026-08-21 failure: that attempt synthesised the *whole* stream,
+moves included, and a synthetic `WM_MOUSEMOVE` posted on focus hands FFXI's mouse-look a delta
+the size of the screen, which is the camera spin. Moves are also the part that is not needed —
+Ashita already gets `io.MousePos` by polling `GetCursorPos`, which was measured working while
+the message stream was dead. So: no moves, no spin, and buttons only where the game is not
+looking.
+
+**Nobody has run it.** If clicking works and the camera stays put, this is the fix and the
+default should change. If ImGui still reports `WantCaptureMouse == false` because it only
+updates hover state while processing messages, the injection will do nothing, and the next
+place to look is Ashita 4.3's own mouse hook or a DirectInput interposer — as the section
+above already said.

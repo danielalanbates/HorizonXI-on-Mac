@@ -79,6 +79,10 @@ struct PerfSettings: Codable {
         metalHUD = b(.metalHUD, false)
         disableAppNap = b(.disableAppNap, true)
         fpsDivisorOne = b(.fpsDivisorOne, true)
+        // Missing from this list until 2026-08-22, which made the toggle a lie: the value was
+        // encoded on save and ignored on load, so it read back as `true` every launch and
+        // audiofollow could not be switched off by anyone who suspected it.
+        followSoundOutput = b(.followSoundOutput, true)
         flareReadbackNoWait = b(.flareReadbackNoWait, false)
         largeAddressAware = b(.largeAddressAware, true)
         extraEnv = ((try? c.decodeIfPresent(String.self, forKey: .extraEnv)) ?? nil) ?? ""
