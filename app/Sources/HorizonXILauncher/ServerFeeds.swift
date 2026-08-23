@@ -114,6 +114,14 @@ final class ServerFeeds: ObservableObject {
             // compiled-in snapshot is the safer thing to keep using.
             let expected = AddonPolicies.horizonPlugins.count + AddonPolicies.horizonAddons.count
             guard names.count >= expected / 2, names.count <= expected * 2 else { continue }
+            // Counting is not enough, and trusting a count nearly cost Daniel his account's
+            // addons. On 2026-08-22 the page returned 189 *slash commands and HTML entities*
+            // -- "&lt;call&gt;", "/macromaster", "/map" -- which sailed through the band above
+            // and became an allowlist that permitted nothing installed. The addon screen went
+            // blank and Apply wrote an empty managed block, which is what removed the cursor
+            // fix from scripts/default.txt. So: the parse must also *look* like the thing it
+            // claims to be.
+            guard Self.resembles(AddonPolicies.horizonAddons, names) else { continue }
             lists[server.name] = AddonPolicy.allowlist(
                 published: names,
                 source: "\(url.host ?? "the server's site"), fetched \(Self.today())")
@@ -209,6 +217,21 @@ final class ServerFeeds: ObservableObject {
         }
     }
 
+    /// Does a fetched list actually look like a list of addons?
+    ///
+    /// The test is overlap with what this launcher already knows the server publishes: a page
+    /// that still lists addons will name most of the same ones, and a page that now lists
+    /// something else entirely will name almost none. Half is a generous floor -- the real
+    /// page overlapped completely -- and it is the direction that fails safe, because the
+    /// consequence of accepting a wrong list is an allowlist that hides every addon the player
+    /// has installed and an Apply that writes that emptiness to disk.
+    nonisolated static func resembles(_ known: [String], _ fetched: [String]) -> Bool {
+        guard !known.isEmpty else { return true }
+        let have = Set(fetched.map { AddonPolicy.normalize($0) })
+        let hits = known.filter { have.contains(AddonPolicy.normalize($0)) }.count
+        return hits * 2 >= known.count
+    }
+
     private func saveCache(_ lists: [String: [String]]) {
         guard let d = try? JSONEncoder().encode(lists) else { return }
         try? d.write(to: Self.cacheURL)
@@ -218,7 +241,7 @@ final class ServerFeeds: ObservableObject {
         guard let d = try? Data(contentsOf: Self.cacheURL),
               let lists = try? JSONDecoder().decode([String: [String]].self, from: d)
         else { return }
-        for (name, names) in lists where names.count > 10 {
+        for (name, names) in lists where names.count > 10 && Self.resembles(AddonPolicies.horizonAddons, names) {
             fetchedAddonLists[name] = AddonPolicy.allowlist(
                 published: names, source: "cached from that server's published list")
         }
