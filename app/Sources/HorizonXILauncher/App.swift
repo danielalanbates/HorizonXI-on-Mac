@@ -101,7 +101,7 @@ struct ContentView: View {
     @State private var remember = Credentials.remember
     @State private var showDetails = false
     @State private var showGraphics = false
-    @State private var graphics = GraphicsSettings.load()
+    @State private var graphics = GraphicsSettings.load(world: nil)
     @State private var showAddons = false
     @State private var addonItems: [AddonSuite.Item] = []
     @State private var installingExtra = ""
@@ -659,12 +659,13 @@ struct ContentView: View {
             }
 
             HStack {
+                Button("Low") { graphics = .lowSpec }
                 Button("Balanced") { graphics = .balanced }
                 Button("Max (4K)") { graphics = .max4K }
                 Spacer()
                 Button("Cancel") { showGraphics = false }
                 Button("Apply") {
-                    graphics.save()
+                    graphics.save(world: store.selected?.name)
                     if let i = selected, let s = store.selected {
                         Credentials.ensureProfile(s.bootProfile, in: i)
                         graphics.write(to: i, profile: s.bootProfile)
@@ -1617,9 +1618,13 @@ struct ContentView: View {
     /// Open the panel on whatever the profile actually says, not on this app's last write —
     /// the boot .ini is a plain text file the user may well have edited by hand.
     private func openGraphics() {
-        if let i = active, let s = store.selected,
-           let onDisk = GraphicsSettings.read(from: i, profile: s.bootProfile) {
-            graphics = onDisk
+        // Prefer what the profile actually says; fall back to this world's stored value, not
+        // to a value some other world last wrote.
+        if let s = store.selected {
+            graphics = GraphicsSettings.load(world: s.name)
+            if let i = active, let onDisk = GraphicsSettings.read(from: i, profile: s.bootProfile) {
+                graphics = onDisk
+            }
         }
         showGraphics = true
     }
