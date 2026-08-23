@@ -571,6 +571,21 @@ struct ContentView: View {
                 Spacer()
                 Button("Cancel") { showAddons = false }
                 Button("Apply") {
+                    // Refuse to write a block that would disable everything.
+                    //
+                    // On 2026-08-22 a broken fetch made the policy reject every installed addon
+                    // (see ServerFeeds.resembles). The screen went blank, Apply wrote an empty
+                    // managed block, and the cursor fix -- which lived in an addon on nobody's
+                    // published list -- vanished from scripts/default.txt with it. A player
+                    // pressing Apply is asking to save a list, never to lose one, so a policy
+                    // that permits *nothing* is treated as a broken policy rather than obeyed.
+                    let permitted = addonItems.filter { addonPolicy.allows($0.name) }
+                    if !addonItems.isEmpty && permitted.isEmpty {
+                        notice = "Not saving: this server's addon list came back empty, so every "
+                               + "addon you have would be switched off. Nothing was written."
+                        showAddons = false
+                        return
+                    }
                     // Belt and braces: a hidden row cannot be toggled on, but the list on disk
                     // may already have named something this server forbids, and pressing Apply
                     // must not write it back out.
