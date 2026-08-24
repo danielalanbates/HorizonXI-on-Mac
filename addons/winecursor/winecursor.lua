@@ -1,3 +1,7 @@
+-- HXI_MAC_JIT_GUARD: added by the FFXI-on-Mac launcher. Ashita 4.3's LuaJIT trace patcher faults inside
+-- Addons.dll under Wine/Rosetta (EXCEPTION_ACCESS_VIOLATION, lj_mcode_patch); interpreted Lua
+-- does not. Delete these lines to opt this addon out.
+if jit and jit.off then jit.off() end
 --[[
 * winecursor -- make the mouse work again under wine.
 *
@@ -8,20 +12,26 @@
 *    +1 puts the real arrow back.  This is always on; it is the reason this addon exists,
 *    and it is a compatibility shim, not a gameplay feature.
 *
-* 2. ADDON WINDOWS CANNOT BE CLICKED.  Ashita receives no mouse button messages at all in
-*    this wrapper (measured: `mouse events=0` while io.MousePos tracked perfectly).  The
-*    2026-08-21 attempt to synthesise the whole message stream fixed clicking and made the
-*    camera spin on every Cmd-Tab, because a synthetic WM_MOUSEMOVE hands FFXI's mouse-look
-*    a delta the size of the screen.
+* 2. ADDON WINDOWS CANNOT BE CLICKED.  Solved 2026-08-23, and not by posting messages at
+*    all.  Ashita's ImGui build exposes ImGui's own input event API -- io:AddMousePosEvent
+*    and io:AddMouseButtonEvent -- so the pointer can be handed straight to ImGui without
+*    the game's message queue ever being touched.  That removes the camera spin at its
+*    source: the 2026-08-21 attempt spun the camera because it posted WM_MOUSEMOVE to
+*    FFXiClass, and this posts nothing anywhere.
 *
-*    So this one injects BUTTONS ONLY -- never WM_MOUSEMOVE, which is the message that
-*    caused the spin -- and only while ImGui says the pointer is over one of its windows,
-*    so a click meant for the game is never duplicated.  Off by default:
+*    Three measurements made it work, each of which had been a dead end on its own:
 *
-*        /winecursor clicks on
+*      a. NOTHING feeds io.MousePos.  The 2026-08-17 note that it "tracked perfectly" no
+*         longer holds on this build -- it sat frozen at whatever a probe last wrote.  So
+*         position has to be fed too, not just buttons.
+*      b. ImGui's DisplaySize is 640x480 while the wine client rect is 1564x848.  Client
+*         coordinates must be SCALED into ImGui space or every hit test misses by a factor
+*         of two and a half.
+*      c. GetAsyncKeyState reports the mouse button only while FFXiClass is genuinely the
+*         foreground window.  A stray wine popup (class #32769) holding focus reads as a
+*         dead mouse, which is what "zero mouse messages" looked like from the inside.
 *
-*    If the camera still misbehaves, `/winecursor clicks off` and say so; that result is
-*    worth writing down either way.  See docs/MOUSE.md.
+*    On by default.  `/winecursor clicks off` disables it.  See docs/MOUSE.md.
 *
 * Copyright (c) 2026 Bates LLC.  All rights reserved.  https://batesai.org
 --]]
@@ -41,9 +51,11 @@ local ffi   = require 'ffi';
 
 ffi.cdef[[
 typedef struct { long x; long y; } POINT;
+typedef struct { long left; long top; long right; long bottom; } RECT;
 typedef void* HWND;
 int   GetCursorPos(POINT* p);
 int   ScreenToClient(HWND h, POINT* p);
+int   GetClientRect(HWND h, RECT* r);
 HWND  FindWindowA(const char* cls, const char* title);
 HWND  GetForegroundWindow(void);
 short GetAsyncKeyState(int vk);
@@ -58,18 +70,24 @@ long  PostMessageA(HWND h, unsigned int msg, unsigned int wp, long lp);
 -- blink that was reported before.  One step of headroom absorbs that decrement.
 local CURSOR_TARGET = 1
 
-local VK_LBUTTON, VK_RBUTTON = 0x01, 0x02
-local WM_LBUTTONDOWN, WM_LBUTTONUP = 0x201, 0x202
-local WM_RBUTTONDOWN, WM_RBUTTONUP = 0x204, 0x205
-local MK_LBUTTON, MK_RBUTTON = 0x0001, 0x0002
+local VK_LBUTTON, VK_RBUTTON, VK_MBUTTON = 0x01, 0x02, 0x04
+
+-- ImGui's "pointer is nowhere" sentinel.
+local OUTSIDE = -3.4028235e38
 
 local st = {
-    clicks = false,
+    clicks = true,
     arrow = nil,
     hwnd = nil,
-    down = { [VK_LBUTTON] = false, [VK_RBUTTON] = false },
+    down = { [VK_LBUTTON] = false, [VK_RBUTTON] = false, [VK_MBUTTON] = false },
     injected = 0,
     reported = false,
+};
+
+local BUTTONS = {
+    { vk = VK_LBUTTON, index = 0 },
+    { vk = VK_RBUTTON, index = 1 },
+    { vk = VK_MBUTTON, index = 2 },
 };
 
 local function window()
@@ -77,29 +95,21 @@ local function window()
     return st.hwnd;
 end
 
---- Cursor position in the game window's client coordinates, packed the way a mouse message
---- wants it, or nil when the pointer is not over the window.
-local function client_lparam()
+--- Cursor position in ImGui's coordinate space, or nil when it is not over the window.
+--- The scale step is the one that is easy to miss: ImGui is laid out in DisplaySize units
+--- (640x480 here) while ScreenToClient answers in wine client pixels (1564x848).
+local function imgui_position(io)
     local h = window();
     if (h == nil) then return nil; end
     local p = ffi.new('POINT');
     if (ffi.C.GetCursorPos(p) == 0) then return nil; end
     if (ffi.C.ScreenToClient(h, p) == 0) then return nil; end
-    if (p.x < 0 or p.y < 0) then return nil; end
-    -- LOWORD = x, HIWORD = y
-    return (p.y * 65536) + (p.x % 65536);
-end
 
-local function press(vk, down_msg, up_msg, flag)
-    local held = bit.band(ffi.C.GetAsyncKeyState(vk), 0x8000) ~= 0;
-    if (held == st.down[vk]) then return; end
-    st.down[vk] = held;
+    local r = ffi.new('RECT');
+    if (ffi.C.GetClientRect(h, r) == 0 or r.right == 0 or r.bottom == 0) then return nil; end
+    if (p.x < 0 or p.y < 0 or p.x > r.right or p.y > r.bottom) then return nil; end
 
-    local h = window();
-    local lp = client_lparam();
-    if (h == nil or lp == nil) then return; end
-    ffi.C.PostMessageA(h, held and down_msg or up_msg, held and flag or 0, lp);
-    st.injected = st.injected + 1;
+    return p.x * (io.DisplaySize.x / r.right), p.y * (io.DisplaySize.y / r.bottom);
 end
 
 ashita.events.register('d3d_present', 'winecursor_present', function ()
@@ -112,23 +122,25 @@ ashita.events.register('d3d_present', 'winecursor_present', function ()
     while (n > CURSOR_TARGET and guard < 16) do n = ffi.C.ShowCursor(0); guard = guard + 1; end
     while (n < CURSOR_TARGET and guard < 32) do n = ffi.C.ShowCursor(1); guard = guard + 1; end
 
-    -- 2. the clicks, only where ImGui wants them, and only the buttons
+    -- 2. the pointer, handed to ImGui through its own event queue
     if (not st.clicks) then return; end
-    if (ffi.C.GetForegroundWindow() ~= window()) then
-        -- Not focused: forget any held state rather than posting a release into a window
-        -- that never saw the press.
-        st.down[VK_LBUTTON] = false;
-        st.down[VK_RBUTTON] = false;
-        return;
-    end
     local io = imgui.GetIO();
-    if (not io.WantCaptureMouse) then
-        st.down[VK_LBUTTON] = false;
-        st.down[VK_RBUTTON] = false;
-        return;
+    local focused = (ffi.C.GetForegroundWindow() == window());
+
+    local x, y = nil, nil;
+    if (focused) then x, y = imgui_position(io); end
+    pcall(function () io:AddMousePosEvent(x or OUTSIDE, y or OUTSIDE); end);
+
+    for _, button in ipairs(BUTTONS) do
+        -- GetAsyncKeyState only answers while FFXiClass really is foreground; treat
+        -- anything else as released so a button cannot stick down across a Cmd-Tab.
+        local held = focused and (bit.band(ffi.C.GetAsyncKeyState(button.vk), 0x8000) ~= 0);
+        if (held ~= st.down[button.vk]) then
+            st.down[button.vk] = held;
+            pcall(function () io:AddMouseButtonEvent(button.index, held); end);
+            st.injected = st.injected + 1;
+        end
     end
-    press(VK_LBUTTON, WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON);
-    press(VK_RBUTTON, WM_RBUTTONDOWN, WM_RBUTTONUP, MK_RBUTTON);
 end);
 
 ashita.events.register('command', 'winecursor_command', function (e)
@@ -144,19 +156,28 @@ ashita.events.register('command', 'winecursor_command', function (e)
             :append(chat.success(st.clicks and 'on' or 'off')));
         if (st.clicks) then
             print(chat.header(addon.name):append(chat.message(
-                'buttons only, never mouse moves. If the camera spins on Cmd-Tab, turn it off and say so.')));
+                'fed straight to ImGui; nothing is posted to the game, so the camera is not touched.')));
         end
         return;
     end
 
-    print(chat.header(addon.name):append(chat.message(('cursor on, clicks %s, %d messages injected')
-        :format(st.clicks and 'on' or 'off', st.injected))));
+    -- Report what ImGui thinks, not just what we did: the open question is whether ImGui
+    -- ever reports the pointer as over one of its windows when it receives no messages.
+    local io_ok, want, hovered = pcall(function ()
+        local io = imgui.GetIO();
+        return io.WantCaptureMouse, imgui.IsAnyItemHovered ~= nil and imgui.IsAnyItemHovered() or false;
+    end);
+    local p = ffi.new('POINT'); ffi.C.GetCursorPos(p);
+    print(chat.header(addon.name):append(chat.message(
+        ('cursor on, clicks %s, %d injected, WantCaptureMouse=%s, anyItemHovered=%s, cursor=%d,%d')
+        :format(st.clicks and 'on' or 'off', st.injected,
+                tostring(io_ok and want), tostring(io_ok and hovered), p.x, p.y))));
     print(chat.header(addon.name):append(chat.message('/winecursor clicks on|off')));
 end);
 
 ashita.events.register('load', 'winecursor_load', function ()
     print(chat.header(addon.name):append(chat.message(
-        'cursor restored. /winecursor clicks on  to try clicking addon windows.')));
+        'cursor restored, addon windows clickable. /winecursor clicks off to disable.')));
 end);
 
 ashita.events.register('unload', 'winecursor_unload', function ()
