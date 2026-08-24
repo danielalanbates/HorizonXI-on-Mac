@@ -8,6 +8,7 @@
 
 local compat  = require('modules.compat');
 local engine  = require('modules.engine');
+local rules   = require('modules.rules');
 local gear    = require('modules.gear');
 local profile = require('modules.profile');
 local slots   = require('modules.slots');
@@ -101,9 +102,20 @@ local function drawSetList(gui, session)
     if #names == 0 then
         gui.TextDisabled('none yet');
     end
+    local active = engine.tokens();
     for _, name in ipairs(names) do
         if gui.Selectable(name, name == M.selected) then
             M.selected = name;
+        end
+        -- Show at a glance whether a conditional set could fire right now.
+        local _, tokens = rules.parse(name);
+        if #tokens > 0 then
+            local live = true;
+            for _, token in ipairs(tokens) do
+                if not active[token] then live = false; break; end
+            end
+            gui.SameLine();
+            if live then gui.TextColored(GREEN, '*'); else gui.TextDisabled('*'); end
         end
     end
     gui.EndChild();
@@ -272,7 +284,7 @@ end
 
 local function drawSwitches(gui, session)
     local doc = session.doc;
-    local order = { 'auto', 'precast', 'equipset', 'debug' };
+    local order = { 'auto', 'precast', 'equipset', 'conditions', 'debug' };
     for index, key in ipairs(order) do
         if index > 1 then gui.SameLine(); end
         local box = { doc.settings[key] };
@@ -295,6 +307,19 @@ local function drawSwitches(gui, session)
             end
         end
     end
+end
+
+local function drawConditions(gui)
+    local active = engine.tokens();
+    local names = {};
+    for token in pairs(active) do names[#names + 1] = token; end
+    table.sort(names);
+    if #names == 0 then
+        gui.TextDisabled('nothing is true right now');
+    else
+        gui.Text(table.concat(names, ', '));
+    end
+    gui.TextDisabled('name a set "<set>:<token>" to make it conditional');
 end
 
 local function drawWhy(gui)
@@ -325,6 +350,7 @@ local function body(gui, session)
 
     gui.Separator();
     if gui.CollapsingHeader('Modes##vgmodes') then drawModes(gui, session); end
+    if gui.CollapsingHeader('Conditions##vgconds') then drawConditions(gui); end
     if gui.CollapsingHeader('Switches##vgswitches') then drawSwitches(gui, session); end
     if gui.CollapsingHeader('Why##vgwhy') then drawWhy(gui); end
 

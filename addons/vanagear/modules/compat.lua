@@ -85,9 +85,12 @@ local JOBS = {
 };
 M.JOBS = JOBS;
 
+-- 'jobs.names_abbr' is the spelling that actually answers; the others were
+-- tried in game and returned nil.
 function M.jobName(id)
     local name = try(function()
-        local text = M.resources():GetString('jobs_abbr', id);
+        local text = M.resources():GetString('jobs.names_abbr', id)
+            or M.resources():GetString('jobs_abbr', id);
         if type(text) == 'string' then
             text = text:gsub('%z.*$', '');
             if #text > 0 then return text; end
@@ -167,6 +170,53 @@ end
 
 function M.equippedItem(slotId)
     return try(function() return M.inventory():GetEquippedItem(slotId); end, nil);
+end
+
+-- ----------------------------------------------------------- live conditions
+--
+-- Everything below feeds condition tokens. Each is wrapped so that a build
+-- which does not answer simply produces no token, rather than an error.
+
+function M.hpPercent()
+    return try(function() return M.memory():GetParty():GetMemberHPPercent(0); end, nil);
+end
+
+function M.mpPercent()
+    return try(function() return M.memory():GetParty():GetMemberMPPercent(0); end, nil);
+end
+
+function M.tp()
+    return try(function() return M.memory():GetParty():GetMemberTP(0); end, nil);
+end
+
+local lastX, lastY, movingUntil = nil, nil, 0;
+
+-- Position is only sampled when asked, so "moving" means "moved since the last
+-- time this was called", held briefly so it does not flicker between frames.
+function M.isMoving()
+    local ok = pcall(function()
+        local party  = M.memory():GetParty();
+        local entity = M.memory():GetEntity();
+        local index  = party:GetMemberTargetIndex(0);
+        local x, y = entity:GetLocalPositionX(index), entity:GetLocalPositionY(index);
+        if lastX ~= nil and (x ~= lastX or y ~= lastY) then
+            movingUntil = os.clock() + 0.75;
+        end
+        lastX, lastY = x, y;
+    end);
+    if not ok then return false; end
+    return os.clock() < movingUntil;
+end
+
+-- Vana'diel day and weather need a memory signature scan, which this project
+-- has not done. They are the one condition family that is unavailable; see
+-- docs/PATHWAYS.md.
+function M.dayElement()
+    return nil;
+end
+
+function M.weatherElement()
+    return nil;
 end
 
 function M.sendPacket(id, data)

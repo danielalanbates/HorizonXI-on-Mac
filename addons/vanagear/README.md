@@ -58,6 +58,8 @@ Vanagear watches your outgoing actions and picks sets **generic first,
 specific last**, merging as it goes — so a specific set only has to name the
 slots it actually changes.
 
+Any of these names can carry a `:token` suffix — see **Conditions** below.
+
 | you do | sets applied, in order |
 | --- | --- |
 | standing around | `idle` |
@@ -98,6 +100,34 @@ still own, and fixing one slot without retyping its name.
 The window remembers whether it was open. Everything it does is also a macro
 command, so you never have to open it.
 
+## Conditions
+
+A set name can carry any number of `:token` suffixes, and it only applies while
+every one of those tokens is true. That is the same mechanism modes use, so
+there is nothing new to learn:
+
+```
+/vgear save tp:hp25            what to wear once you drop below 25% HP
+/vgear save idle:moving        movement gear, worn only while you are moving
+/vgear save ws:tp3000          the weaponskill set for a full TP bar
+/vgear save tp:sub-nin         a WAR/NIN set, ignored on WAR/WAR
+/vgear save midcast.stone:acc  one spell, one mode
+/vgear save ws.rampage:acc:tp3000
+```
+
+`/vgear tokens` lists what is true this second — that is the discoverability
+story, and the panel has the same list under **Conditions**, with a `*` beside
+every conditional set showing whether it could fire right now.
+
+Tokens available: any mode value you create, plus `hp25 hp50 hp75`,
+`mp25 mp50 mp75` (at or below), `tp1000 tp2000 tp3000` (at or above), `moving`,
+and `sub-<job>`. Turn the automatic ones off with `/vgear conditions off`.
+
+When several conditional sets match, the one that demanded the most wins the
+slots it names, and the shallower ones still contribute theirs. Resolution walks
+the sets you actually saved rather than enumerating combinations, so having
+forty conditions live at once costs nothing.
+
 ## Modes
 
 Modes are how one job carries an accuracy build, a defensive build and a normal
@@ -125,8 +155,9 @@ manage    /vgear list [filter]   /vgear show <set>   /vgear copy <a> <b>
 use       /vgear equip <set>     /vgear refresh      /vgear why
 modes     /vgear mode <group> <value>   /vgear cycle <group>   /vgear modes
 locks     /vgear lock <slot>     /vgear unlock <slot>          /vgear locks
+conds     /vgear tokens       (what is true right now)
 panel     /vgear hud [on|off]    (aliases: /vgear gui, /vgear panel)
-switches  /vgear auto|precast|equipset|debug [on|off]       /vgear status
+switches  /vgear auto|precast|equipset|conditions|debug [on|off]   /vgear status
 ```
 
 Slot names: `main sub range ammo head body hands legs feet neck waist ear1 ear2
@@ -152,6 +183,7 @@ Useful details:
 | `auto` | on | stops all automatic swapping. Only `/vgear equip` works. |
 | `precast` | on | stops Vanagear holding your action packet. Gear still swaps, but a beat late, so fast cast and weaponskill gear will not count. Slower, and the safest possible mode. |
 | `equipset` | on | sends one swap packet per slot instead of a single batched one. Slower and noisier; try it if a server dislikes the batched form. |
+| `conditions` | on | stops deriving hp/mp/tp/movement/sub-job tokens. Sets named after them stop applying; your own modes keep working. |
 | `debug` | off | prints every decision to the log. |
 
 ## How it swaps
@@ -180,8 +212,22 @@ Useful details:
 resources, packets and all — with no game and no Windows:
 
 ```
-luajit tests/run.lua      # 92 assertions
+luajit tests/run.lua      #  97 assertions against hand-built fixtures
+luajit tests/corpus.lua   #  85 assertions against the real game data
 ```
+
+`tests/corpus.lua` is the one that matters. `tools/fetch_corpus.py` pulls
+LandSandBoat's published SQL — the same tables the server runs — and generates
+a fixture of **15,522 equippable items, 928 spells, 200 weaponskills and 623 job
+abilities**. The suite then drives the engine over all of it: every spell's
+precast and midcast chain, every weaponskill, every ability, a full simulated
+play session on all 21 jobs, and 2,000 randomly generated sets checked against
+invariants (never two items in one slot, never one item in two slots, never a
+locked slot, never a malformed packet, never an item in a slot it cannot go in).
+
+It has already paid for itself: the slot mask used to be advisory, and the
+random sweep showed that meant equipping items into slots the server would just
+reject. It is a hard gate now, while job, level and race stay advisory.
 
 It covers the rule chain, set merging, item resolution (duplicates,
 fallbacks, level and job gates), packet layout for both `0x50` and `0x51`,

@@ -52,10 +52,12 @@ handlers.help = function()
     say('manage         /vgear list  /vgear show <set>  /vgear copy <a> <b>  /vgear rename <a> <b>  /vgear del <set>');
     say('use            /vgear equip <set>   /vgear refresh   /vgear why');
     say('modes          /vgear mode <group> <value>   /vgear cycle <group>   /vgear modes');
+    say('conditions     /vgear tokens        (a set named tp:hp25 applies only below 25% hp)');
     say('locks          /vgear lock <slot>   /vgear unlock <slot>   /vgear locks');
     say('switches       /vgear auto|precast|equipset|debug [on|off]   /vgear status');
     say('Set names the engine looks for: idle, resting, tp, precast[.spell], midcast[.spell],');
-    say('ws[.name], ja[.name], preshot, midshot, item[.name]. Add ":mode" for a mode variant.');
+    say('ws[.name], ja[.name], preshot, midshot, item[.name].');
+    say('Add ":<token>" to any of them - a mode you made, or hp25/mp25/tp3000/moving/sub-nin.');
 end
 
 handlers.save = function(session, args)
@@ -296,7 +298,21 @@ handlers.locks = function(session)
     say((#names > 0) and ('locked: ' .. table.concat(names, ', ')) or 'nothing locked');
 end
 
-local switches = { auto = true, precast = true, equipset = true, debug = true };
+handlers.tokens = function(session)
+    local active = engine.tokens();
+    local names = {};
+    for token in pairs(active) do names[#names + 1] = token; end
+    table.sort(names);
+    if #names == 0 then
+        say('no conditions are true right now');
+    else
+        say('true right now: ' .. table.concat(names, ', '));
+    end
+    say('name a set "<set>:<token>" and it only applies while that token holds');
+end
+handlers.conds = handlers.tokens;
+
+local switches = { auto = true, precast = true, equipset = true, debug = true, conditions = true };
 for switch in pairs(switches) do
     handlers[switch] = function(session, args)
         session.doc.settings[switch] = onOff(args[1], session.doc.settings[switch]);
@@ -316,10 +332,12 @@ handlers.panel = handlers.hud;
 
 handlers.status = function(session)
     local s = session.doc.settings;
-    say(('profile %s   auto:%s precast:%s equipset:%s debug:%s'):format(session.label,
+    say(('profile %s   auto:%s precast:%s equipset:%s conditions:%s debug:%s'):format(session.label,
         s.auto and 'on' or 'off', s.precast and 'on' or 'off',
-        s.equipset and 'on' or 'off', s.debug and 'on' or 'off'));
+        s.equipset and 'on' or 'off', s.conditions and 'on' or 'off',
+        s.debug and 'on' or 'off'));
     handlers.modes(session);
+    handlers.tokens(session);
     handlers.locks(session);
 end
 

@@ -24,6 +24,7 @@ local function defaults()
             precast  = true,   -- hold the action packet to land precast gear
             equipset = true,   -- batch swaps into one 0x51 instead of many 0x50
             hud      = false,  -- panel open, remembered between sessions
+            conditions = true, -- derive tokens from hp/mp/tp/movement/sub-job
             debug    = false,
         },
     };

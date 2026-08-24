@@ -63,58 +63,70 @@ function M.chain(event, ctx)
     return list;
 end
 
--- Every mode subset, smallest first, so "tp:acc:dt" beats "tp:acc" beats "tp".
-local function modeSuffixes(active, order)
-    local values = {};
-    local names = {};
-    if type(order) == 'table' and #order > 0 then
-        for _, name in ipairs(order) do names[#names + 1] = name; end
-    else
-        for name in pairs(active or {}) do names[#names + 1] = name; end
-        table.sort(names);
+-- ------------------------------------------------------------ condition tokens
+--
+-- A set name may carry any number of ":token" suffixes, and the set only
+-- applies when every one of its tokens is currently true. "tp:acc" is a mode,
+-- "midcast.stone:earthsday" is a day, "idle:moving" is movement gear, and
+-- "ws.rampage:acc:tp3000" is all three -- one mechanism instead of a special
+-- case per condition.
+--
+-- The naive way to do this is to enumerate every subset of the active tokens
+-- and look each one up, which is 2^n lookups and puts a hard ceiling on how
+-- many conditions can exist. This walks the saved names instead: the cost is
+-- the number of sets the player has actually saved, and the number of possible
+-- tokens stops mattering.
+
+-- "ws.rampage:acc:tp3000" -> "ws.rampage", { "acc", "tp3000" }
+function M.parse(name)
+    local base = name:match('^([^:]*)');
+    local tokens = {};
+    for token in name:gmatch(':([^:]+)') do tokens[#tokens + 1] = token; end
+    return base, tokens;
+end
+
+-- Which saved sets apply, generic first, least specific first. Sets whose
+-- tokens are not all currently active are simply not returned.
+function M.select(setNames, chain, active)
+    active = active or {};
+    local position = {};
+    for index, base in ipairs(chain) do
+        if position[base] == nil then position[base] = index; end
     end
-    for _, name in ipairs(names) do
-        local value = (active or {})[name];
-        if type(value) == 'string' and #value > 0 and value ~= 'normal' then
-            values[#values + 1] = value:lower();
+
+    local matches = {};
+    for name in pairs(setNames) do
+        local base, tokens = M.parse(name);
+        local rank = position[base];
+        if rank ~= nil then
+            local ok = true;
+            for _, token in ipairs(tokens) do
+                if not active[token] then ok = false; break; end
+            end
+            if ok then
+                matches[#matches + 1] = { name = name, rank = rank, depth = #tokens };
+            end
         end
     end
 
-    local subsets = { {} };
-    for _, value in ipairs(values) do
-        local grown = {};
-        for _, subset in ipairs(subsets) do
-            local copy = { table.unpack and table.unpack(subset) or unpack(subset) };
-            copy[#copy + 1] = value;
-            grown[#grown + 1] = copy;
-        end
-        for _, subset in ipairs(grown) do subsets[#subsets + 1] = subset; end
-    end
-
-    table.sort(subsets, function(a, b)
-        if #a ~= #b then return #a < #b; end
-        return table.concat(a, ':') < table.concat(b, ':');
+    -- Chain order first, then how many conditions the set demanded: a set that
+    -- asked for more and got it is the more specific answer.
+    table.sort(matches, function(a, b)
+        if a.rank ~= b.rank then return a.rank < b.rank; end
+        if a.depth ~= b.depth then return a.depth < b.depth; end
+        return a.name < b.name;
     end);
 
     local out = {};
-    for _, subset in ipairs(subsets) do
-        out[#out + 1] = (#subset == 0) and '' or (':' .. table.concat(subset, ':'));
-    end
+    for _, match in ipairs(matches) do out[#out + 1] = match.name; end
     return out;
 end
-M.modeSuffixes = modeSuffixes;
 
--- The chain with mode variants folded in. This is what the engine walks.
-function M.expand(event, ctx)
+-- The names the engine will merge, in order. ctx.tokens is the set of
+-- conditions that are true right now.
+function M.resolve(setNames, event, ctx)
     ctx = ctx or {};
-    local suffixes = modeSuffixes(ctx.active, ctx.modeOrder);
-    local out = {};
-    for _, name in ipairs(M.chain(event, ctx)) do
-        for _, suffix in ipairs(suffixes) do
-            out[#out + 1] = name .. suffix;
-        end
-    end
-    return out;
+    return M.select(setNames, M.chain(event, ctx), ctx.tokens);
 end
 
 return M;

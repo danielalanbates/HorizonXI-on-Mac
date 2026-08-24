@@ -73,15 +73,26 @@ local function bit_test(value, index)
     return math.floor(value / mask) % 2 == 1;
 end
 
+-- Hard gate. The slot mask is not a convention this project had to guess at:
+-- it was checked against all 15,522 equippable items in the game (tests/corpus)
+-- and every one of them lands inside the sixteen known slots. The server would
+-- reject the equip anyway, so a last-resort fallback into the wrong slot is not
+-- a safety net, it is a wasted packet.
+function M.fits(entry, slotName)
+    local res = entry.Resource;
+    if res == nil then return true; end
+    if res.Slots == nil or res.Slots == 0 then return true; end
+    return bit_test(res.Slots, slots.id[slotName]);
+end
+
 -- Advisory: a candidate that fails these is skipped in favour of the next one,
--- but if every candidate fails we equip the first one that physically exists.
--- A wrong bitmask must never be able to leave the player naked.
+-- but if every candidate fails we equip the first one that fits the slot. The
+-- job, level and race conventions were read off other addons rather than
+-- proven, and a wrong bitmask must never leave the player naked.
 function M.usable(entry, slotName, ctx)
     local res = entry.Resource;
     if res == nil then return true; end
-    if res.Slots ~= nil and res.Slots ~= 0 then
-        if not bit_test(res.Slots, slots.id[slotName]) then return false; end
-    end
+    if not M.fits(entry, slotName) then return false; end
     if ctx == nil then return true; end
     if ctx.job and ctx.job > 0 and res.Jobs ~= nil and res.Jobs ~= 0 then
         if not bit_test(res.Jobs, ctx.job) then return false; end
@@ -113,7 +124,7 @@ function M.pick(declaration, slotName, bags, ctx, used)
         if EMPTY[key] then return 'remove'; end
         for _, entry in ipairs(bags[key] or {}) do
             local token = entry.Container .. ':' .. entry.Index;
-            if not (used and used[token]) then
+            if not (used and used[token]) and M.fits(entry, slotName) then
                 if M.usable(entry, slotName, ctx) then
                     if used then used[token] = true; end
                     return entry;

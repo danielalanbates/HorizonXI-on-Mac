@@ -17,17 +17,59 @@ local function now()
     return os.clock();
 end
 
-local function activeCtx()
+-- Everything that is true right now, as a set of tokens. A set may name any of
+-- these after a colon and it will only apply when they hold.
+function M.tokens()
     local doc = M.doc;
+    local active = {};
+
+    -- The player's own modes.
+    for _, value in pairs(doc.active or {}) do
+        if type(value) == 'string' and value ~= 'normal' then active[value:lower()] = true; end
+    end
+
+    if not doc.settings.conditions then return active; end
+
+    local sub = compat.subJob();
+    if sub ~= nil and sub > 0 then active['sub-' .. compat.jobName(sub):lower()] = true; end
+
+    -- Thresholds, coarse on purpose: a set called "hp25" should fire at 25% and
+    -- below, and a player should not have to think about the boundary.
+    local hp = compat.hpPercent();
+    if hp ~= nil then
+        for _, step in ipairs({ 25, 50, 75 }) do
+            if hp <= step then active['hp' .. step] = true; end
+        end
+    end
+    local mp = compat.mpPercent();
+    if mp ~= nil then
+        for _, step in ipairs({ 25, 50, 75 }) do
+            if mp <= step then active['mp' .. step] = true; end
+        end
+    end
+    local tp = compat.tp();
+    if tp ~= nil then
+        for _, step in ipairs({ 1000, 2000, 3000 }) do
+            if tp >= step then active['tp' .. step] = true; end
+        end
+    end
+
+    if compat.isMoving() then active['moving'] = true; end
+
+    local day = compat.dayElement();
+    if day ~= nil then active[day:lower() .. 'sday'] = true; end
+    local weather = compat.weatherElement();
+    if weather ~= nil then active['weather-' .. weather:lower()] = true; end
+
+    return active;
+end
+
+local function activeCtx()
     local status = compat.status();
-    local order = {};
-    for name in pairs(doc.modes) do order[#order + 1] = name; end
-    table.sort(order);
     return {
-        engaged   = (status == 1 or status == 3),
-        resting   = (status == 33),
-        active    = doc.active,
-        modeOrder = order,
+        engaged = (status == 1 or status == 3),
+        resting = (status == 33),
+        tokens  = M.tokens(),
     };
 end
 M.activeCtx = activeCtx;
@@ -41,7 +83,7 @@ function M.equipEvent(event, reason)
     local doc = M.doc;
     if doc == nil then return; end
     local ctx = activeCtx();
-    local names = rules.expand(event, ctx);
+    local names = rules.resolve(doc.sets, event, ctx);
     local setMap, matched = gear.merge(doc, names);
     M.lastChain = { event = event, considered = names, matched = matched };
     if next(setMap) == nil then
@@ -70,10 +112,9 @@ end
 function M.equipNamed(name)
     local doc = M.doc;
     local ctx = activeCtx();
-    local names = {};
-    for _, suffix in ipairs(rules.modeSuffixes(ctx.active, ctx.modeOrder)) do
-        names[#names + 1] = name .. suffix;
-    end
+    -- A named equip still honours conditions: "/vgear equip tp" picks up
+    -- "tp:acc" when acc is on, exactly as the automatic path would.
+    local names = rules.select(doc.sets, { name }, ctx.tokens);
     local setMap, matched = gear.merge(doc, names);
     if next(setMap) == nil then return nil; end
     -- A hand-driven equip holds off the base tick for a few seconds. Longer
