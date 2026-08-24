@@ -46,3 +46,30 @@ install. This is the difference between being allowed past 30 fps and not.
 plus `DXVK_SKIP_DRAWS` and the older `DXVK_BATCH_PROBE` / `DXVK_FF_INSTANCING`.
 
 Only the two upstream fixes and `DXVK_KEEP_DEPTH` affect a normal run.
+
+---
+
+# LandSandBoat linkshell zone-gap patch
+
+`lsb-linkshell-zone-backlog.patch` is a server-side patch, not a client one. It applies to a
+[LandSandBoat](https://github.com/LandSandBoat/server) checkout — written against `627e5671` —
+and makes a character's linkshell replay the chat it missed while crossing a zone line.
+
+```sh
+cd ~/Games/lsb/server            # or wherever lsb-server.sh put it
+git apply /path/to/lsb-linkshell-zone-backlog.patch
+cmake --build build --target xi_map -j 4
+```
+
+It touches five files, all under `src/map/`: `linkshell.h`, `linkshell.cpp`, `ipc_client.cpp`,
+`utils/charutils.cpp` and `packets/c2s/0x00a_login.cpp`. Nothing outside `xi_map` is affected and
+there is no schema change, so `git checkout` on those five files and a rebuild puts stock
+behaviour back.
+
+**Licence:** LandSandBoat is GPLv3 and this patch is a derivative of it, so this patch is GPLv3
+too — unlike the rest of this repository. Do not relabel it.
+
+**Read `docs/LINKSHELL-ZONING.md` before using it.** It has the measurements, the reason the
+obvious one-line version silently does nothing, and the two limits that matter: it only helps a
+server running a single `xi_map` process, and one message can still be lost to a race with the
+client's own connection teardown.
