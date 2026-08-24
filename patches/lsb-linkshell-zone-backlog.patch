@@ -14,7 +14,7 @@ index 8d64f851..c5023845 100644
          PLinkshell->PushPacket(message.senderId, std::make_unique<GP_SERV_COMMAND_CHAT_STD>(message.senderName, message.zoneId, MESSAGE_LINKSHELL, message.message, message.gmLevel));
      }
 diff --git a/src/map/linkshell.cpp b/src/map/linkshell.cpp
-index 289d3b1d..300fa93a 100644
+index 289d3b1d..2b4fd6f7 100644
 --- a/src/map/linkshell.cpp
 +++ b/src/map/linkshell.cpp
 @@ -29,6 +29,9 @@
@@ -68,7 +68,7 @@ index 289d3b1d..300fa93a 100644
  void CLinkshell::PushLinkshellMessage(CCharEntity* PChar, LinkshellSlot slot)
  {
      const auto rset = db::preparedStmt("SELECT poster, message, messagetime FROM linkshells WHERE linkshellid = ?", m_id);
-@@ -397,6 +434,46 @@ namespace linkshell
+@@ -397,6 +434,58 @@ namespace linkshell
  
  std::map<uint32, std::unique_ptr<CLinkshell>> LinkshellList;
  
@@ -87,7 +87,19 @@ index 289d3b1d..300fa93a 100644
 +
 +void NoteZoneDeparture(uint32 charId)
 +{
-+    DepartureTimes[charId] = timer::now();
++    const auto now = timer::now();
++
++    // A character that zones without a linkshell equipped never reaches the AddOnlineMember that
++    // would erase its entry, so this map would otherwise grow by one per such zone and never
++    // shrink. Anything older than the replay window is already useless; drop it. The sweep is
++    // gated on size so the common case stays O(1).
++    if (DepartureTimes.size() > 256)
++    {
++        std::erase_if(DepartureTimes, [&](const auto& entry)
++                      { return now - entry.second > LINKSHELL_BACKLOG_MAX_AGE; });
++    }
++
++    DepartureTimes[charId] = now;
 +}
 +
 +void FlushPendingReplay(CCharEntity* PChar)
@@ -115,7 +127,7 @@ index 289d3b1d..300fa93a 100644
  auto LoadLinkshell(uint32 id) -> CLinkshell*
  {
      const auto rset = db::preparedStmt("SELECT linkshellid, color, name, postrights FROM linkshells WHERE linkshellid = ? LIMIT 1", id);
-@@ -454,6 +531,20 @@ bool AddOnlineMember(CCharEntity* PChar, CItemLinkshell* PItemLinkshell, uint8 l
+@@ -454,6 +543,20 @@ bool AddOnlineMember(CCharEntity* PChar, CItemLinkshell* PItemLinkshell, uint8 l
          if (PLinkshell)
          {
              PLinkshell->AddMember(PChar, PItemLinkshell->GetLSType(), lsNum);
