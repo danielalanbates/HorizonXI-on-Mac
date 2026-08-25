@@ -94,6 +94,9 @@ int   ShowCursor(int b);
 void* LoadCursorA(void* hi, const char* name);
 void* SetCursor(void* c);
 long  PostMessageA(HWND h, unsigned int msg, unsigned int wp, long lp);
+long  SendMessageA(HWND h, unsigned int msg, unsigned int wp, long lp);
+unsigned long GetWindowThreadProcessId(HWND h, unsigned long* pid);
+unsigned long GetCurrentThreadId(void);
 ]]
 
 -- The show-count is a counter, not a flag: the cursor draws while it is >= 0.  FFXI's own
@@ -141,6 +144,7 @@ local st = {
     wndproc = true,     -- (3) synthesise the WNDPROC message stream
     block   = 'event',  -- how the game is kept from seeing (3): event | input | both | none
     space   = 'game',   -- coordinate space posted with (3): game | imgui | client
+    send    = false,    -- SendMessageA delivery. DEADLOCKS THIS BUILD -- see post(). Leave off.
 
     -- State.
     arrow    = nil,
@@ -150,6 +154,9 @@ local st = {
     last_x   = nil,
     last_y   = nil,
     blocking = false,   -- whether SetBlockInput is currently held on
+    selftest_base = nil,-- counter snapshot taken by /winecursor selftest
+    same_thread = nil,  -- whether this thread owns the game window (decided once, in window())
+    hwnd_from   = nil,  -- where the handle came from: 'ashita' (authoritative) or 'FindWindowA'
     frames   = 0,       -- present count, for the command-file poll
 
     -- Counters, so `/winecursor` can answer "is anything actually happening".
@@ -157,10 +164,40 @@ local st = {
     posted    = 0,      -- WM_ messages posted
     seen      = 0,      -- 'mouse' events Ashita raised back to us
     keys_seen = 0,      -- real (non-shift) 'key' events -- proof the key stream is alive
+    synth_seen = 0,     -- synthetic 'key' events that came back -- proof the KEY path works
 };
 
 local function window()
-    if (st.hwnd == nil) then st.hwnd = ffi.C.FindWindowA('FFXiClass', nil); end
+    if (st.hwnd == nil) then
+        -- Ask Ashita, not the window manager.
+        --
+        -- FindWindowA('FFXiClass') returns the FIRST window of that class in the whole
+        -- session, which is not necessarily this client's: two clients are a normal thing on
+        -- this project (tools/twoclient.py), and the loader creates more than one window of
+        -- its own besides. Posting to the wrong one is invisible -- the messages go somewhere
+        -- and simply never come back -- which is exactly what `WM posted 14, mouse events
+        -- seen 0` was saying on 2026-08-25.
+        --
+        -- Ashita hooks a specific handle and raises the 'mouse' and 'key' events from that
+        -- one. Any synthetic message has to go to the same handle or it is dispatched to a
+        -- window nobody is listening to.
+        local ok, h = pcall(function ()
+            return AshitaCore:GetProperties():GetFinalFantasyHwnd();
+        end);
+        if (ok and h ~= nil and h ~= 0) then
+            st.hwnd = ffi.cast('HWND', h);
+            st.hwnd_from = 'ashita';
+        else
+            st.hwnd = ffi.C.FindWindowA('FFXiClass', nil);
+            st.hwnd_from = 'FindWindowA';
+        end
+        -- SendMessageA is only safe to the window's own thread; anywhere else it blocks until
+        -- that thread pumps, which is the deadlock this addon must not cause.
+        if (st.hwnd ~= nil) then
+            local owner = ffi.C.GetWindowThreadProcessId(st.hwnd, nil);
+            st.same_thread = (owner == ffi.C.GetCurrentThreadId());
+        end
+    end
     return st.hwnd;
 end
 
@@ -282,10 +319,34 @@ local function make_wparam()
     return w;
 end
 
+--- Deliver one window message to FFXiClass.
+---
+--- `PostMessageA` puts the message on the owning thread's queue, where it waits for that
+--- thread to pump. Measured on this build 2026-08-25: it never arrives. `/winecursor` reported
+--- `WM posted 14, mouse events seen 0, real key events 0` -- fourteen messages posted and not
+--- one came back through Ashita's window hook, which is why panel shift-dragging has never
+--- worked here and why synthetic keys go nowhere. Nothing downstream of this can be debugged
+--- until a message actually lands.
+---
+--- `SendMessageA` looked like the answer -- it skips the queue and calls the window procedure
+--- directly, and `GetWindowThreadProcessId` agreed that this thread owns the window, which in
+--- plain Win32 makes it an ordinary function call that cannot deadlock.
+---
+--- **It hangs the client.** Measured 2026-08-25: one WM_MOUSEMOVE sent this way froze the
+--- render thread outright -- no crash, no log line, the game simply stopped drawing and the
+--- addon pump never ran again. Re-entering a hooked window procedure from inside the frame
+--- under wine is not the same thing as calling it on Windows. The switch is kept only so the
+--- finding is reproducible; **do not turn it on**.
+---
+--- The real bug was never the delivery call. It was the handle -- see window().
 local function post(msg, wparam, lparam)
     local h = window();
     if (h == nil) then return; end
-    ffi.C.PostMessageA(h, msg, wparam, lparam);
+    if (st.send and st.same_thread) then
+        ffi.C.SendMessageA(h, msg, wparam, lparam);
+    else
+        ffi.C.PostMessageA(h, msg, wparam, lparam);
+    end
     st.posted = st.posted + 1;
 end
 
@@ -457,7 +518,7 @@ ashita.events.register('key', 'winecursor_key', function (e)
     if (e.wparam == VK_SHIFT) then return; end
     -- A key this addon posted proves nothing about wine's keyboard stream, and counting it
     -- would switch the synthetic shift off for good. See `synthetic_keys` above.
-    if (was_synthetic(e.wparam)) then return; end
+    if (was_synthetic(e.wparam)) then st.synth_seen = st.synth_seen + 1; return; end
     st.keys_seen = st.keys_seen + 1;
 end);
 
@@ -520,6 +581,85 @@ ashita.events.register('command', 'winecursor_command', function (e)
     -- synthesises that event from GetAsyncKeyState -- so if GetAsyncKeyState cannot see the
     -- real shift key under wine, no amount of fixing the rest of the chain will help, and this
     -- says which of those two worlds we are in. Hold shift while running it.
+    -- /winecursor send on|off -- direct WNDPROC dispatch vs a queued post. See post().
+    if (sub == 'send' and val ~= nil) then
+        st.send = val == 'on';
+        say(st.send and 'SendMessageA delivery ON -- this DEADLOCKS the client, see post()'
+                     or 'PostMessageA delivery (the safe one)');
+        return;
+    end
+
+    -- /winecursor selftest -- does a synthetic message actually reach Ashita's hook?
+    --
+    -- Everything this addon does rests on that one question, and until now there was no way
+    -- to ask it directly: the synthetic stream only runs while the window is foreground and
+    -- the cursor is over it, so "nothing happened" could always be the gate rather than the
+    -- mechanism. This bypasses the gate, sends one harmless WM_MOUSEMOVE, and reports whether
+    -- the 'mouse' event came back.
+    if (sub == 'selftest') then
+        local before, kbefore = st.seen, st.synth_seen;
+        local h = window();
+        if (h == nil) then say('selftest: no window'); return; end
+        local lp = bit.tobit(bit.bor(bit.lshift(4, 16), 4));   -- client (4,4): harmless
+        ffi.C.PostMessageA(h, WM_MOUSEMOVE, 0, lp);
+        st.posted = st.posted + 1;
+        -- The key half of the same question. Panels gate their drag on gShiftDown, which comes
+        -- from a 'key' event carrying VK_SHIFT, so the mouse round-trip alone proves only half
+        -- the chain. This is deliberately a shift pair: harmless, and exactly what dragging
+        -- needs. It is counted as synthetic, so it cannot disarm the real stream.
+        note_synthetic(VK_SHIFT); note_synthetic(VK_SHIFT);
+        ffi.C.PostMessageA(h, WM_KEYDOWN, VK_SHIFT, SHIFT_LPARAM_DOWN);
+        ffi.C.PostMessageA(h, WM_KEYUP,   VK_SHIFT, SHIFT_LPARAM_UP);
+        st.posted = st.posted + 2;
+        local after = st.seen;
+        st.selftest_base = { mouse = before, key = kbefore };
+        say(('selftest: posted to the %s handle -- mouse events %d -> %d (%s so far)')
+            :format(tostring(st.hwnd_from), before, after,
+                    after > before and 'ARRIVED' or 'not yet'));
+        say('posted messages are queued and arrive on a later frame -- '
+            .. 'run /winecursor selfcheck next to read the result');
+        return;
+    end
+
+    -- /winecursor selfcheck -- read the result of the last selftest, a frame or more later.
+    if (sub == 'selfcheck') then
+        local b = st.selftest_base;
+        if (b == nil) then say('run /winecursor selftest first'); return; end
+        say(('mouse path: %s (%d -> %d)')
+            :format(st.seen > b.mouse and 'WORKS' or 'DEAD', b.mouse, st.seen));
+        say(('key path:   %s (%d -> %d)  -- this is what shift-dragging needs')
+            :format(st.synth_seen > b.key and 'WORKS' or 'DEAD', b.key, st.synth_seen));
+        return;
+    end
+
+    -- /winecursor probe -- what can Ashita's own input manager actually do?
+    --
+    -- Posting window messages is dead on this build (see post()), so the question is whether
+    -- Ashita exposes an injection path of its own. This lists what the keyboard and mouse
+    -- objects answer to, rather than guessing from documentation written for Windows.
+    if (sub == 'probe') then
+        local function names(obj, label)
+            if (obj == nil) then say(label .. ': nil'); return; end
+            local mt = getmetatable(obj);
+            local t  = (mt ~= nil and mt.__index) or obj;
+            if (type(t) ~= 'table') then say(label .. ': no method table'); return; end
+            local out = {};
+            for k, v in pairs(t) do
+                if (type(v) == 'function') then out[#out + 1] = k; end
+            end
+            table.sort(out);
+            say(label .. ': ' .. (#out > 0 and table.concat(out, ' ') or '(none)'));
+        end
+        local ok, im = pcall(function () return AshitaCore:GetInputManager(); end);
+        if (not ok or im == nil) then say('no input manager'); return; end
+        names(im, 'InputManager');
+        local kok, kb = pcall(function () return im:GetKeyboard(); end);
+        names(kok and kb or nil, 'Keyboard');
+        local mok, ms = pcall(function () return im:GetMouse(); end);
+        names(mok and ms or nil, 'Mouse');
+        return;
+    end
+
     if (sub == 'shift') then
         local h        = window();
         local focused  = (ffi.C.GetForegroundWindow() == h);
@@ -529,6 +669,9 @@ ashita.events.register('command', 'winecursor_command', function (e)
                     tostring(focused), async and 'DOWN' or 'up'));
         say(('synthetic shift is %s (real key events seen: %d -- any non-zero disables it)')
             :format(st.keys_seen == 0 and 'armed' or 'DISABLED', st.keys_seen));
+        say(('delivery: %s, handle from %s, this thread owns the window: %s')
+            :format(st.send and 'SendMessageA' or 'PostMessageA',
+                    tostring(st.hwnd_from), tostring(st.same_thread)));
         return;
     end
 
