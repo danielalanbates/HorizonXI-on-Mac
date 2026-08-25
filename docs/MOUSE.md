@@ -91,19 +91,18 @@ Inventoried across the whole addon tree, not just the ones loaded:
 - **Order.** A move must land *before* a button-down: `timers.lua:288-290` and
   `thotbar/display.lua:219-221` latch the drag origin from the down message, and
   `crosshair.lua:93-95` caches position from moves only.
-- **The button-up is not optional.** `thotbar/callbacks.lua:102-118`,
-  `tCrossBar/callbacks.lua:136-154` and `tTimers/timergroup.lua:96-99` all latch a
-  `mouseDown`/`MouseBlocked` flag on a blocked 513 that **only a 514 clears** — drop the
-  release and every later left-up in the session is force-blocked, and a moved tTimers panel
-  never calls `settings.save()` and silently reverts. `winecursor` therefore always delivers
-  the up, even off-window and even on focus loss.
+- **The button-up is not optional.** `thotbar/callbacks.lua:102-119`,
+  `tCrossBar/callbacks.lua:136-155` and `tTimers/timergroup.lua:96-99` latch a
+  `mouseDown`/`MouseBlocked` flag on a blocked 513 that only a 514 clears, and
+  `tTimers/timergroup.lua:60-63` ends its drag — and calls `settings.save()` — only on a 514,
+  so a panel moved without one silently reverts on reload. `winecursor` therefore always
+  delivers the up, even off-window and even on focus loss.
 - **Two different sources of shift.** `timers` and `equipmon` take it from the `key` event's
-  lparam bit 31 (`timers.lua:226-233`). `tTimers`, `thotbar` and `tCrossBar` instead poll
-  `GetKeyState` through FFI at the moment the 513 arrives
-  (`tTimers/timergroup.lua:26-33`) — and a `PostMessage`d `WM_KEYDOWN` does **not** update
-  `GetKeyState`. Those three depend on Wine's own key state tracking the physical key; if
-  they turn out not to move, that is the reason, and the fix is `SendInput`, not a bigger
-  message stream.
+  lparam bit 31 (`timers.lua:226-233`). `tTimers` instead polls `GetKeyState` through FFI at
+  the moment the 513 arrives (`tTimers/timergroup.lua:26-33`, shift and ctrl) — and a
+  `PostMessage`d `WM_KEYDOWN` does **not** update `GetKeyState`, so that one depends on Wine's
+  own key-state tracking the physical key. `thotbar` polls `GetKeyState` for ctrl only
+  (`thotbar/display.lua:6-10`) and `tCrossBar` does not poll it at all.
 - **Event fields are `wparam`/`lparam`/`delta`/`blocked`** — confirmed from the shipped
   binary (`strings plugins/Addons.dll`: `eventargs_inputmanager_handlemouse_t` … `delta`,
   `eventargs_inputmanager_handlekeyboard_t` … `wparam`, `lparam`). There is no `e.key` or
