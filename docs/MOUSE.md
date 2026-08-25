@@ -71,13 +71,24 @@ Two blocking mechanisms are implemented because they are evaluated at different 
   core-level flag behind `mouse.blockinput` in the boot `.ini`.
 - `block both` — belt and braces.
 
+Both are safe, which was the open question and is now measured rather than assumed:
+
+- **`e.blocked` does not stop dispatch.** Ashita's three nested dispatch loops have no early
+  exit; every remaining addon and plugin still receives the event, and the flag is a
+  monotonic OR (a later addon cannot un-block it). So `winecursor` blocking every message
+  cannot starve `timers`, which registers after it.
+- **`SetBlockInput` is checked after the callbacks**, in the hook proc, immediately before
+  the message would be handed on — it is literally the byte `mouse.blockinput` writes.
+- **Returning `true` from a Lua callback does nothing.** The return value is only checked for
+  errors; `e.blocked` is the whole mechanism (a documented v3 → v4 change).
+
 ### Commands
 
     /winecursor                         status: switches, counters, both coordinate spaces
     /winecursor clicks   on|off         the ImGui stream
     /winecursor wndproc  on|off         the synthetic WNDPROC stream
     /winecursor block    none|event|input|both
-    /winecursor space    game|imgui|client   coordinate space the WNDPROC stream posts in
+    /winecursor space    client|game|imgui   coordinate space the WNDPROC stream posts in
 
 ### What the consumers actually require
 
@@ -109,24 +120,28 @@ Inventoried across the whole addon tree, not just the ones loaded:
   `e.down` on the `key` event; the retired `mousediag` logged those and printed `nil` for
   every real keypress, which is worth knowing before trusting any old measurement from it.
 
-### Coordinates
+### Coordinates — measured, and not ours to choose
 
-Ashita passes lparam through undecorated — `mousecallback_f` is
-`BOOL(uint32_t, WPARAM, LPARAM, bool)` (`plugins/sdk/Ashita.h:435`) and nothing in the SDK
-rescales — so `e.x/e.y` are exactly a `LOWORD/HIWORD` decode of whatever is posted. That
-makes the packed space the whole ballgame, and three spaces are in play:
+Read out of `Ashita.dll` itself on 2026-08-24, which settled a question two earlier sessions
+had guessed at. Ashita takes the mouse through a **WH_MOUSE hook**, not the window procedure,
+and it builds the event's coordinates itself: `MOUSEHOOKSTRUCT.pt` (screen) →
+`ScreenToClient(gameHwnd)` → `MAKELPARAM`, then sign-extended in `Addons.dll`. So:
 
-- **Wine client pixels** — what `ScreenToClient` answers in (e.g. 1564x848).
-- **The d3d8 back buffer** — what primitives are positioned in, so what `timers`, `equipmon`
-  and `balloon` hit-test against.
-- **ImGui `DisplaySize`** — what `crosshair` draws in, and 640x480 at the title screen.
+- **`e.x/e.y` are true wine client pixels of the real cursor.** Whatever lparam a synthetic
+  message carries is ignored for them. Scaling the injected coordinates, which is where an
+  afternoon went, changes nothing.
+- **`e.wparam` is `MOUSEHOOKSTRUCTEX::mouseData`**, not the WM_ wParam — so the `MK_LBUTTON`
+  and `MK_SHIFT` bits a real mouse message would carry are simply absent. That is *why* the
+  panel addons read shift from the separate `key` event instead.
+- **`e.delta` is non-zero only for `0x20A`**, and is the signed HIWORD of `mouseData`.
 
-The last two are the same surface, so one packing serves both. `winecursor` scales client
-pixels into back-buffer space, reading it from `d3d8.get_device():GetViewport()` — the same
-call `crosshair.lua:71` uses — and falling back to `io.DisplaySize` when the device does not
-answer. On Windows the client rect and the back buffer are the same size, which is why
-nothing upstream ever converts. `/winecursor space imgui` forces the DisplaySize path and
-`space client` posts raw client pixels, if a panel ever turns out to hit-test elsewhere.
+`winecursor` packs client pixels regardless, because that is what the message means if
+anything ever does read it, and `/winecursor space game|imgui` remains for the day it does.
+
+The consumers still hit-test against primitive positions, which live in the back buffer. On
+Windows the client rect and the back buffer are the same size, so client pixels land where
+the panels are. Under wine they need not be — if a panel proves un-hittable even with the
+stream flowing, that mismatch is the thing to measure, and `/winecursor` prints both sizes.
 
 ### Not synthesised
 

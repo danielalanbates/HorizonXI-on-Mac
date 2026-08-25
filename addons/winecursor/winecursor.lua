@@ -46,20 +46,30 @@ if jit and jit.off then jit.off() end
 *    posted to FFXiClass, plus a VK_SHIFT WM_KEYDOWN/WM_KEYUP pair when -- and only when --
 *    the real key stream looks dead too.
 *
-*    The coordinates are the other half of it.  Ashita passes lparam through undecorated, so
-*    e.x/e.y are exactly what is packed here, and the consumers hit-test against primitive
-*    positions -- which live in the back buffer the game draws into, not in the wine client
-*    rect.  On Windows those two are the same size and the question never comes up; under
-*    wine/DXVK they are not, so client pixels are scaled into back-buffer space (the d3d8
-*    viewport, falling back to ImGui's DisplaySize) before packing.
+*    The coordinates turn out not to be ours to choose, which is worth knowing before anyone
+*    spends an afternoon on them.  Ashita does not read the lparam of the message at all: it
+*    takes the mouse through a WH_MOUSE hook, and builds e.x/e.y itself from
+*    MOUSEHOOKSTRUCT.pt -- the real cursor position -- through its own ScreenToClient.  So the
+*    consumers see true wine client pixels no matter what is packed below, and e.wparam is
+*    MOUSEHOOKSTRUCTEX::mouseData rather than the MK_ bits a real WM_MOUSEMOVE would carry.
+*    Client pixels are packed anyway, because that is what the message means, and `space` is
+*    left switchable for the day that changes.  (Measured from Ashita.dll's own code, 2026-08-24.)
 *
 *    The 2026-08-21 camera spin is handled, and this is the part to understand before
-*    changing anything here.  Ashita's window hook raises the addon event FIRST and only
-*    then hands the message to the game's own WNDPROC, unless something marks it blocked.
-*    So every synthetic message is blocked on arrival: addons see it, FFXI never does, and
-*    the mouse-look delta that spun the camera is never computed.  Blocking is what makes
-*    this safe, and `/winecursor block none` is the one setting that can bring the spin
-*    back -- it exists for diagnosis, not for use.
+*    changing anything here.  Ashita's hook raises the addon event FIRST and only then decides
+*    whether to pass the message on, so every synthetic message is blocked on arrival: addons
+*    see it, FFXI never does, and the mouse-look delta that spun the camera is never computed.
+*    Two things make that safe rather than hopeful, both read out of Ashita.dll:
+*
+*      - `e.blocked` does NOT stop dispatch.  Every remaining addon still receives the same
+*        event; the flag is a monotonic OR across all of them, and only the game is skipped.
+*        So blocking here cannot starve timers or anything else registered after this addon.
+*      - `SetBlockInput` is checked AFTER the callbacks, in the same place -- it is literally
+*        the byte behind `mouse.blockinput` in the boot ini -- so `block input` is a second
+*        route to the same outcome rather than a heavier one.
+*
+*    `/winecursor block none` is the one setting that can bring the spin back; it exists for
+*    diagnosis, not for use.
 *
 *    `/winecursor wndproc off` disables the whole synthetic stream.
 *
@@ -134,7 +144,7 @@ local st = {
     clicks  = true,     -- (2) feed ImGui's own event queue
     wndproc = true,     -- (3) synthesise the WNDPROC message stream
     block   = 'event',  -- how the game is kept from seeing (3): event | input | both | none
-    space   = 'game',   -- coordinate space posted with (3): game | imgui | client
+    space   = 'client', -- coordinate space posted with (3): client | game | imgui
 
     -- State.
     arrow    = nil,

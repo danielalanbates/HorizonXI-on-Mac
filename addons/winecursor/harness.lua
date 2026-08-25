@@ -183,7 +183,7 @@ local mm = last(0x200);
 check('WM_MOUSEMOVE posted', mm ~= nil);
 if (mm) then
     local x, y = bit.band(mm.lparam, 0xFFFF), bit.band(bit.rshift(mm.lparam, 16), 0xFFFF);
-    check('scaled into back-buffer space (960,540)', x == 960 and y == 540, ('got %d,%d'):format(x, y));
+    check('posted in wine client pixels (782,424)', x == 782 and y == 424, ('got %d,%d'):format(x, y));
     check('wparam has no buttons', mm.wparam == 0, ('got %d'):format(mm.wparam));
 end
 -- ImGui is fed in its own space in the same frame, and the two must not be confused.
@@ -230,7 +230,7 @@ check('move posted while held', dm ~= nil);
 if (dm) then
     check('wparam still carries the held button', bit.band(dm.wparam, 0x0001) ~= 0);
     local x, y = bit.band(dm.lparam, 0xFFFF), bit.band(bit.rshift(dm.lparam, 16), 0xFFFF);
-    check('new position scaled+rounded (1083,667)', x == 1083 and y == 667, ('got %d,%d'):format(x, y));
+    check('new position in client pixels (882,524)', x == 882 and y == 524, ('got %d,%d'):format(x, y));
 end
 
 print('scenario 6: release');
@@ -262,18 +262,28 @@ SIM.keys[0x10] = true; present();
 check('no VK_SHIFT posted once the real stream is proven', last(0x100) == nil);
 SIM.keys[0x10] = false; present();
 
-print('scenario 9b: no viewport -> falls back to ImGui DisplaySize');
+print('scenario 9b: space game scales into the back buffer, and falls back when the device is silent');
+fire('command', { command = '/winecursor space game', blocked = false });
+reset_posted();
+SIM.cursor = { x = 783, y = 425 };
+present();
+local gb = last(0x200);
+if (gb) then
+    local x, y = bit.band(gb.lparam, 0xFFFF), bit.band(bit.rshift(gb.lparam, 16), 0xFFFF);
+    check('scaled into the 1920x1080 back buffer', x == 961 and y == 541, ('got %d,%d'):format(x, y));
+end
 SIM.viewport = nil;
 reset_posted();
 SIM.cursor = { x = 782, y = 424 };
 present();
 local fb = last(0x200);
-check('move still posted', fb ~= nil);
+check('move still posted with no viewport', fb ~= nil);
 if (fb) then
     local x, y = bit.band(fb.lparam, 0xFFFF), bit.band(bit.rshift(fb.lparam, 16), 0xFFFF);
-    check('fell back to 640x480 space (320,240)', x == 320 and y == 240, ('got %d,%d'):format(x, y));
+    check('fell back to the 640x480 ImGui space', x == 320 and y == 240, ('got %d,%d'):format(x, y));
 end
 SIM.viewport = { w = 1920, h = 1080 };
+fire('command', { command = '/winecursor space client', blocked = false });
 
 print('scenario 10: commands');
 OUTPUT = { };
