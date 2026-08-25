@@ -97,7 +97,13 @@ local ashita_stub = {
     },
 };
 
+local QUEUED = { };
+
 local AshitaCore_stub = {
+    GetInstallPath = function () return os.getenv('HARNESS_INSTALL') or '.'; end,
+    GetChatManager = function ()
+        return { QueueCommand = function (_, mode, line) table.insert(QUEUED, line); end };
+    end,
     GetInputManager = function ()
         return {
             GetMouse = function ()
@@ -290,6 +296,24 @@ check('wndproc off posts nothing', #POSTED == 0, ('posted %d'):format(#POSTED));
 
 fire('command', { command = '/winecursor wndproc on', blocked = false });
 fire('command', { command = '/winecursor block event', blocked = false });
+
+print('scenario 10b: shell -> game command channel');
+do
+    local base = (os.getenv('HARNESS_INSTALL') or '.') .. '\\addons\\winecursor\\';
+    local f = io.open(base .. 'cmd.txt', 'w');
+    f:write('/addon reload winecursor\nLUA return 6*7\n');
+    f:close();
+    for _ = 1, 30 do present(); end            -- the poll runs every 30th frame
+    check('command queued', QUEUED[1] == '/addon reload winecursor', tostring(QUEUED[1]));
+    local o = io.open(base .. 'cmd.out', 'r');
+    local body = o and o:read('*a') or '';
+    if (o) then o:close(); end
+    check('LUA result written to cmd.out', body:find('ok 42') ~= nil, body:gsub('\n', ' | '));
+    local again = io.open(base .. 'cmd.txt', 'r');
+    local left = again and again:read('*a') or 'MISSING';
+    if (again) then again:close(); end
+    check('cmd.txt emptied', left == '', ('left %q'):format(left));
+end
 
 print('scenario 11: unload restores the cursor count and the block');
 SIM.showcount = 1;

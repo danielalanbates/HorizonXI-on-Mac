@@ -144,6 +144,7 @@ local st = {
     last_x   = nil,
     last_y   = nil,
     blocking = false,   -- whether SetBlockInput is currently held on
+    frames   = 0,       -- present count, for the command-file poll
 
     -- Counters, so `/winecursor` can answer "is anything actually happening".
     injected  = 0,      -- ImGui events fed
@@ -155,6 +156,64 @@ local st = {
 local function window()
     if (st.hwnd == nil) then st.hwnd = ffi.C.FindWindowA('FFXiClass', nil); end
     return st.hwnd;
+end
+
+--[[
+* Shell -> game command channel.  There is no other way into a running client: Ashita has no
+* IPC, and the keyboard path is the one this addon exists to work around.  Retired with
+* mousediag, restored here, because without it every change to this file needs someone sitting
+* at the keyboard to type `/addon reload winecursor`.
+*
+* Each line of addons/winecursor/cmd.txt is queued as a game command and the file is emptied.
+* A line beginning `LUA ` is compiled and run instead, and its result appended to cmd.out --
+* which is how anything can be measured from outside the client.
+--]]
+local CMD_POLL_FRAMES = 30;
+local cmd = nil;
+
+local function cmd_paths()
+    if (cmd == nil) then
+        local base = AshitaCore:GetInstallPath() .. '\\addons\\winecursor\\';
+        cmd = { inp = base .. 'cmd.txt', out = base .. 'cmd.out' };
+    end
+    return cmd;
+end
+
+local function cmd_write(line)
+    local f = io.open(cmd_paths().out, 'a');
+    if (f == nil) then return; end
+    f:write(tostring(line) .. '\n');
+    f:close();
+end
+
+local function pump_commands()
+    local paths = cmd_paths();
+    local f = io.open(paths.inp, 'r');
+    if (f == nil) then return; end
+    local body = f:read('*a');
+    f:close();
+    if (body == nil or body == '') then return; end
+
+    -- Emptied before anything runs, so a command that errors cannot loop forever.
+    local w = io.open(paths.inp, 'w');
+    if (w ~= nil) then w:close(); end
+
+    for line in body:gmatch('[^\r\n]+') do
+        if (line ~= '') then
+            if (line:sub(1, 4) == 'LUA ') then
+                local chunk, err = loadstring(line:sub(5));
+                if (chunk == nil) then
+                    cmd_write('compile error: ' .. tostring(err));
+                else
+                    local ok, res = pcall(chunk);
+                    cmd_write(('%s %s'):format(ok and 'ok' or 'error', tostring(res)));
+                end
+            else
+                AshitaCore:GetChatManager():QueueCommand(-1, line);
+                cmd_write('queued: ' .. line);
+            end
+        end
+    end
 end
 
 --- Cursor position in client pixels plus the client size, or nil when it is off the window.
@@ -243,6 +302,9 @@ ashita.events.register('d3d_present', 'winecursor_present', function ()
     local n, guard = ffi.C.ShowCursor(1), 0;
     while (n > CURSOR_TARGET and guard < 16) do n = ffi.C.ShowCursor(0); guard = guard + 1; end
     while (n < CURSOR_TARGET and guard < 32) do n = ffi.C.ShowCursor(1); guard = guard + 1; end
+
+    st.frames = st.frames + 1;
+    if (st.frames % CMD_POLL_FRAMES == 0) then pcall(pump_commands); end
 
     if (not st.clicks and not st.wndproc) then
         set_block_input(false);

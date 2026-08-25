@@ -170,9 +170,22 @@ suspect, and `/winecursor block input` is the switch that tests it.
 
 ## Shell -> game command channel
 
-There is no live command channel into a running client any more: `mousediag`'s `cmd.txt`
-poller was retired with the addon (`archive/2026-08-24/mousediag`). Changing `winecursor`
-therefore needs `/addon reload winecursor` typed in-game to take effect.
+Restored in `winecursor` 1.1, having been retired with `mousediag`. There is no other way
+into a running client — Ashita has no IPC, and the keyboard path is the one this addon exists
+to work around. Every 30th frame it drains `addons/winecursor/cmd.txt`, queues each line as a
+game command, and empties the file:
+
+    P="/Volumes/x10/Video Games/Mac/FFXI/siku.app/Contents/SharedSupport/prefix10/drive_c/HorizonXI"
+    printf '/winecursor\n' > "$P/addons/winecursor/cmd.txt"
+
+A line beginning `LUA ` is compiled and run instead, with its result appended to `cmd.out` —
+which is how state gets measured from outside:
+
+    printf 'LUA return tostring(imgui.GetIO().DisplaySize.x)\n' > "$P/addons/winecursor/cmd.txt"
+    cat "$P/addons/winecursor/cmd.out"
+
+The one thing it cannot do is load itself: a change to `winecursor.lua` still needs
+`/addon reload winecursor`, and until 1.1 is loaded once there is no channel to ask through.
 
 ## Unclosable Wine windows
 
