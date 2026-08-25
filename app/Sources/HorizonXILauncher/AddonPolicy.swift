@@ -39,8 +39,14 @@ enum AddonPolicy: Hashable {
     /// addon anybody chooses — it is what makes addons work at all. `Addons` is the Lua host:
     /// filtering it out and switching it off, which an allowlist would otherwise do, silently
     /// disables every Lua addon in the game. These are never hidden and never force-disabled.
+    ///
+    /// `winecursor` is here for the same reason as `winefix`: it is this project's own wine
+    /// compatibility shim, not an addon anybody chose, and it is what puts the mouse cursor back
+    /// and makes addon windows clickable at all. No server's published list mentions it, because
+    /// no server runs on wine. Hiding it is not hypothetical -- on 2026-08-22 an Apply wrote a
+    /// managed block without it and took the cursor fix off the screen with it.
     static let infrastructure: Set<String> = [
-        "addons", "thirdparty", "screenshot", "winefix", "libs",
+        "addons", "thirdparty", "screenshot", "winefix", "winecursor", "libs",
     ]
 
     func allows(_ installedName: String) -> Bool {
