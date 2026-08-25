@@ -101,7 +101,7 @@ struct ContentView: View {
     @State private var remember = Credentials.remember
     @State private var showDetails = false
     @State private var showGraphics = false
-    @State private var graphics = GraphicsSettings.load()
+    @State private var graphics = GraphicsSettings.load(world: nil)
     @State private var showAddons = false
     @State private var addonItems: [AddonSuite.Item] = []
     @State private var installingExtra = ""
@@ -331,6 +331,23 @@ struct ContentView: View {
     private var addonPolicy: AddonPolicy {
         guard let s = store.selected else { return .unknown }
         return AddonPolicies.policy(for: s, fetched: feeds.fetchedAddonLists)
+    }
+
+    /// Why the narration toggle is on, off, or greyed out. The addon-rules case is the one
+    /// that matters: VanaVoice is on nobody's published allowlist, and on a server that runs
+    /// one -- HorizonXI, CatsEyeXI -- loading it risks the account, so the launcher will not
+    /// offer it there at all.
+    private var narrationHelp: String {
+        if !Narration.isAvailable {
+            return "Install VanaVoice.app to use this: github.com/danielalanbates/vanavoice"
+        }
+        if !Narration.allowed(by: addonPolicy) {
+            return "\(store.selected?.name ?? "This server") allows only the addons on its "
+                 + "published list, and VanaVoice is not on it. Running it there risks your "
+                 + "account, so the launcher will not install it."
+        }
+        return "Installs VanaVoice's addon into this world and starts the narrator, which "
+             + "reads NPC and cutscene dialogue aloud in a neural voice."
     }
 
     /// A rotating strip of what the launcher knows about the selected world.
@@ -571,6 +588,21 @@ struct ContentView: View {
                 Spacer()
                 Button("Cancel") { showAddons = false }
                 Button("Apply") {
+                    // Refuse to write a block that would disable everything.
+                    //
+                    // On 2026-08-22 a broken fetch made the policy reject every installed addon
+                    // (see ServerFeeds.resembles). The screen went blank, Apply wrote an empty
+                    // managed block, and the cursor fix -- which lived in an addon on nobody's
+                    // published list -- vanished from scripts/default.txt with it. A player
+                    // pressing Apply is asking to save a list, never to lose one, so a policy
+                    // that permits *nothing* is treated as a broken policy rather than obeyed.
+                    let permitted = addonItems.filter { addonPolicy.allows($0.name) }
+                    if !addonItems.isEmpty && permitted.isEmpty {
+                        notice = "Not saving: this server's addon list came back empty, so every "
+                               + "addon you have would be switched off. Nothing was written."
+                        showAddons = false
+                        return
+                    }
                     // Belt and braces: a hidden row cannot be toggled on, but the list on disk
                     // may already have named something this server forbids, and pressing Apply
                     // must not write it back out.
@@ -642,12 +674,13 @@ struct ContentView: View {
             }
 
             HStack {
+                Button("Low") { graphics = .lowSpec }
                 Button("Balanced") { graphics = .balanced }
                 Button("Max (4K)") { graphics = .max4K }
                 Spacer()
                 Button("Cancel") { showGraphics = false }
                 Button("Apply") {
-                    graphics.save()
+                    graphics.save(world: store.selected?.name)
                     if let i = selected, let s = store.selected {
                         Credentials.ensureProfile(s.bootProfile, in: i)
                         graphics.write(to: i, profile: s.bootProfile)
@@ -1084,6 +1117,9 @@ struct ContentView: View {
                         .help("Switch headphones, speakers or a Bluetooth device while the game "
                               + "is running and the sound moves with it. Without this, wine keeps "
                               + "playing to whichever device was default when the game started.")
+                    Toggle("Read cutscenes aloud (VanaVoice)", isOn: $perf.narrateCutscenes)
+                        .disabled(!Narration.isAvailable || !Narration.allowed(by: addonPolicy))
+                        .help(narrationHelp)
                     Toggle("Large address aware", isOn: $perf.largeAddressAware)
                     Toggle("Fast lens flares (skip occlusion wait) — glitches", isOn: $perf.flareReadbackNoWait)
                         .help("Roughly doubles the frame rate: FFXI stops the whole frame four "
@@ -1157,6 +1193,7 @@ struct ContentView: View {
                 .onChange(of: perf.disableAppNap) { _ in perf.save() }
                 .onChange(of: perf.followSoundOutput) { _ in perf.save() }
                 .onChange(of: perf.largeAddressAware) { _ in perf.save() }
+                .onChange(of: perf.narrateCutscenes) { _ in perf.save() }
                 .onChange(of: perf.metalHUD) { _ in perf.save() }
             } label: {
                 Text("SETUP & DIAGNOSTICS").font(.caption).tracking(2.5)
@@ -1534,7 +1571,7 @@ struct ContentView: View {
                               + "Clear it in the server's settings to override.")
         }
         runner.launch(i, perf: effective, profile: server.bootProfile, useX87: server.x87,
-                      world: server.name)
+                      world: server.name, addonPolicy: addonPolicy)
     }
 
     private func refresh() { Task { await refreshAsync() } }
@@ -1596,9 +1633,13 @@ struct ContentView: View {
     /// Open the panel on whatever the profile actually says, not on this app's last write —
     /// the boot .ini is a plain text file the user may well have edited by hand.
     private func openGraphics() {
-        if let i = active, let s = store.selected,
-           let onDisk = GraphicsSettings.read(from: i, profile: s.bootProfile) {
-            graphics = onDisk
+        // Prefer what the profile actually says; fall back to this world's stored value, not
+        // to a value some other world last wrote.
+        if let s = store.selected {
+            graphics = GraphicsSettings.load(world: s.name)
+            if let i = active, let onDisk = GraphicsSettings.read(from: i, profile: s.bootProfile) {
+                graphics = onDisk
+            }
         }
         showGraphics = true
     }

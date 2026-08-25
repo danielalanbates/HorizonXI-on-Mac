@@ -107,6 +107,26 @@ struct GraphicsSettings: Codable, Equatable {
                          bumpMapping: true, environmentAnimation: true, soundChannels: 20)
     }
 
+    /// As small as FFXI goes, for the local test world.
+    ///
+    /// **This is for the local LandSandBoat world only.** Daniel's standing rule for this
+    /// project is max settings — every benchmark, every release note and every fps figure in
+    /// docs/ is measured at maximum, and `scripts/profiles/max.json` exists because the stock
+    /// config is *not* max. Low settings must never reach `horizonxi.ini` or anything a release
+    /// measures, or the next person reads the numbers and concludes the port got faster.
+    ///
+    /// Note also that turning *quality* down does not help on this Mac: docs/SETTINGS-SWEEP.md
+    /// measured it and "all low" was the slowest variant of the lot (9.71 fps against a 12.85
+    /// baseline), because the client is CPU-bound and mip mapping off makes the GPU sample
+    /// full-size textures at distance. So this preset drops resolution and leaves quality alone
+    /// — fewer pixels, same work per pixel. It is here to save memory and battery on a machine
+    /// running a server, a launcher, a narrator and a client at once, not to gain frames.
+    static var lowSpec: GraphicsSettings {
+        GraphicsSettings(width: 640, height: 480, uiFollowsResolution: true,
+                         textureResolution: 1024, mipMapping: 2, textureCompression: 2,
+                         bumpMapping: true, environmentAnimation: true, soundChannels: 12)
+    }
+
     static var balanced: GraphicsSettings {
         GraphicsSettings(width: 1920, height: 1080, uiFollowsResolution: true,
                          textureResolution: 2048, mipMapping: 2, textureCompression: 2,
@@ -136,14 +156,36 @@ struct GraphicsSettings: Codable, Equatable {
         return out
     }
 
-    static func load() -> GraphicsSettings {
-        guard let d = UserDefaults.standard.data(forKey: key),
-              let s = try? JSONDecoder().decode(GraphicsSettings.self, from: d) else { return .init() }
+    /// Stored per world, not globally.
+    ///
+    /// One stored value shared by every world means the local test world and HorizonXI fight
+    /// over the same keys: set one to 640x480 for testing and the next Apply on the other
+    /// writes 1920x1080 over it, or the reverse — and whichever was written last wins, which
+    /// from the user's chair looks like the launcher forgetting settings at random.
+    static func key(for world: String) -> String {
+        let slug = world.lowercased().filter { $0.isLetter || $0.isNumber }
+        return slug.isEmpty ? key : "\(key).\(slug)"
+    }
+
+    /// - Parameter world: the world's name; nil falls back to the old shared value.
+    static func load(world: String? = nil) -> GraphicsSettings {
+        let d = UserDefaults.standard
+        if let world, let data = d.data(forKey: key(for: world)),
+           let s = try? JSONDecoder().decode(GraphicsSettings.self, from: data) {
+            return s
+        }
+        // No per-world value yet. The local world starts small (see lowSpec); everything else
+        // inherits whatever was stored before this became per-world, so nobody's settings
+        // vanish on upgrade.
+        if let world, world.lowercased().contains("local") { return .lowSpec }
+        guard let data = d.data(forKey: key),
+              let s = try? JSONDecoder().decode(GraphicsSettings.self, from: data) else { return .init() }
         return s
     }
 
-    func save() {
-        if let d = try? JSONEncoder().encode(self) { UserDefaults.standard.set(d, forKey: Self.key) }
+    func save(world: String? = nil) {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        UserDefaults.standard.set(data, forKey: world.map { Self.key(for: $0) } ?? Self.key)
     }
 
     /// Read what is actually in the profile, so the panel opens showing the real state rather

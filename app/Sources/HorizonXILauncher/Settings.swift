@@ -55,6 +55,10 @@ struct PerfSettings: Codable {
     /// random. A correct version reads a *completed* copy from an earlier frame rather than an
     /// in-flight one; see docs/MAX4K.md.
     var flareReadbackNoWait = false
+    /// Read FFXI's cutscene and NPC dialogue aloud through VanaVoice (see Narration.swift).
+    /// Off by default: it installs an addon into the game folder and starts a second app, and
+    /// neither should happen to somebody who never asked for a narrator.
+    var narrateCutscenes = false
     /// Large address aware heap hint for the 32-bit client.
     var largeAddressAware = true
     /// Extra environment, one KEY=VALUE per line, for experiments.
@@ -70,6 +74,12 @@ struct PerfSettings: Codable {
     /// Decoded field by field rather than by the synthesised initialiser, which treats every key
     /// as required: adding a knob would then fail to decode the settings already on disk, and
     /// `load()`'s `try?` would quietly reset everything the user had chosen.
+    ///
+    /// **Every field added above must be listed below.** A field left out of this initialiser is
+    /// not merely undecoded -- it silently reverts to its declared default on *every* load, so
+    /// the toggle appears to work and then forgets. That is not hypothetical: `followSoundOutput`
+    /// was missing here, which is why Daniel's menu sound could not be switched back on after
+    /// 3.8 (see docs/AUDIO.md and docs/MOUSE.md).
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         func b(_ k: CodingKeys, _ d: Bool) -> Bool { (try? c.decodeIfPresent(Bool.self, forKey: k)) .flatMap { $0 } ?? d }
@@ -79,8 +89,10 @@ struct PerfSettings: Codable {
         metalHUD = b(.metalHUD, false)
         disableAppNap = b(.disableAppNap, true)
         fpsDivisorOne = b(.fpsDivisorOne, true)
+        followSoundOutput = b(.followSoundOutput, true)
         flareReadbackNoWait = b(.flareReadbackNoWait, false)
         largeAddressAware = b(.largeAddressAware, true)
+        narrateCutscenes = b(.narrateCutscenes, false)
         extraEnv = ((try? c.decodeIfPresent(String.self, forKey: .extraEnv)) ?? nil) ?? ""
         renderer = ((try? c.decodeIfPresent(Renderer.self, forKey: .renderer)) ?? nil) ?? .metal
     }
