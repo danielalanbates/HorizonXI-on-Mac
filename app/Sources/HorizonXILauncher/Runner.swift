@@ -37,6 +37,29 @@ final class Runner: ObservableObject {
     /// version the benchmark harness actually validated (25.6 fps in-world, up from an 11.3 fps
     /// pre-x87sidecar baseline). 0001/0002 are screen width/height; the rest are background and
     /// texture resolution, sound channels and mip mapping -- see max4k.json's own comment.
+    /// Superseded by `GraphicsSettings.lowSpec`, which the local world is seeded with once
+    /// rather than force-fed on every launch. Kept as the record of what this used to do.
+    ///
+    /// What the local test world runs at: as small as FFXI allows.
+    ///
+    /// This profile used to be pinned to 4K with everything maxed, because it was the benchmark
+    /// harness's world and the point was to measure the ceiling. It is not that any more -- it is
+    /// where addons and quests get tested, often with the launcher, a narrator and a second
+    /// client alive on an 8 GB machine, and a 3840x2160 framebuffer costs real memory, bandwidth
+    /// and battery for a window nobody is admiring.
+    ///
+    /// Only the resolutions are turned down. docs/SETTINGS-SWEEP.md measured the quality knobs on
+    /// this Mac and they do not help -- "all low" was the *slowest* variant of the lot (9.71 fps
+    /// against a 12.85 baseline) because the client is CPU-bound and mip mapping off makes the
+    /// GPU sample full-size textures for distant geometry. So: fewer pixels, same quality per
+    /// pixel. Expect this to cost less power and memory, not to raise the frame rate.
+    ///   0001/0002 window, 0037/0038 menu, 0003/0004 background and map textures.
+    private static let lowSpecRegistry: [String: String] = [
+        "0001": "640", "0002": "480",
+        "0037": "640", "0038": "480",
+        "0003": "1024", "0004": "1024",
+    ]
+
     private static let max4KRegistry: [String: String] = [
         "0000": "6", "0001": "3840", "0002": "2160", "0003": "4096", "0004": "4096",
         "0011": "2", "0018": "2", "0019": "1", "0021": "1", "0029": "20",
@@ -483,7 +506,7 @@ final class Runner: ObservableObject {
     }
 
     func launch(_ install: Install, perf: PerfSettings, profile: String = "horizonxi.ini",
-                useX87: Bool = true, world: String = "") {
+                useX87: Bool = true, world: String = "", addonPolicy: AddonPolicy = .unknown) {
         guard !running else { return }
         running = true
         loginFailure = ""
@@ -511,16 +534,31 @@ final class Runner: ObservableObject {
         // docs/X87-WALL.md and scripts/max4k.json, which this mirrors) -- 4K, every graphics
         // setting maxed. Never applied to a live server profile: that would silently change
         // someone's real account's display settings out from under them.
-        if profile == "lsb.ini" {
-            Credentials.applyIniOverrides(Self.max4KRegistry, to: install, profile: profile)
+        // The local world starts small -- but only if nobody has said otherwise. Forcing it on
+        // every launch (which is what the old max-4K line did) means the graphics panel silently
+        // does nothing on this world: you set it, press Play, and the launcher writes over you.
+        if profile == "lsb.ini", GraphicsSettings.read(from: install, profile: profile) == nil {
+            GraphicsSettings.lowSpec.write(to: install, profile: profile)
+            appendLine("==> local world: no graphics settings yet, seeding 640x480 "
+                       + "(change them in Graphics; they will be kept)")
         }
         // Every launch: make sure no addon can take the LuaJIT trace-patch fault that Ashita 4.3
         // hits on this Mac (see LuaJITGuard). Idempotent, so this is cheap after the first run.
         LuaJITGuard.apply(install) { [weak self] in self?.appendLine($0) }
+        // Cutscene narration, if the user asked for it: install VanaVoice's addon and start the
+        // narrator. Never fatal -- a failure here leaves the game exactly as silent as before.
+        Narration.prepare(install, enabled: perf.narrateCutscenes, policy: addonPolicy,
+                          profile: profile) { [weak self] in self?.appendLine($0) }
         appendLine("==> launching \(install.bootProfileName(profile)) (Ashita \(install.ashitaGeneration.rawValue))")
         // Make the Dock tile say which world is running, under this project's own icon.
         DockIcon.apply(to: install, world: world.isEmpty ? "Vana'diel" : world) { [weak self] in self?.appendLine($0) }
         var env = perf.environment(for: install, x87: useX87)
+        // The tile the *wine process* wears: CrossOver wine's CX_ROOT icon fallback, since the
+        // loader has no icon resource of its own. See DockIcon.cxRoot.
+        if env["CX_ROOT"] == nil, let cx = DockIcon.cxRoot(for: world.isEmpty ? "Vana'diel" : world,
+                                                          log: { [weak self] in self?.appendLine($0) }) {
+            env["CX_ROOT"] = cx.path
+        }
         // x87 acceleration, two generations:
         //  * Cooperative (preferred): x87sidecar --cooperative launching the patched CX wine
         //    (athei/wine-build at COOP_WINE). Every wine process — including horizon-loader,
@@ -641,6 +679,7 @@ final class Runner: ObservableObject {
     }
 
     func stop(_ install: Install) {
+        if let pid = gamePID, Detach.isAlive(pid) { kill(pid, SIGTERM) }
         proc?.terminate()
         let k = Process()
         k.executableURL = install.wineserver
@@ -667,13 +706,8 @@ final class Runner: ObservableObject {
         FileManager.default.createFile(atPath: out.path, contents: nil)
         let quoted = ([exe.path] + args).map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
             .joined(separator: " ")
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", "exec \(quoted) >> '\(out.path)' 2>&1"]
-        p.currentDirectoryURL = cwd
         var e = ProcessInfo.processInfo.environment
         for (k, v) in env { e[k] = v }
-        p.environment = e
         // Record exactly what was spawned. Diffing this against a hand-run that works is how
         // the launch-death and Gaia XI exits were bisected; it costs one small file per launch.
         let spawnLog = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -681,8 +715,18 @@ final class Runner: ObservableObject {
         let dump = "exe: \(exe.path)\nargs: \(args)\ncwd: \(cwd.path)\n"
             + e.keys.sorted().map { "\($0)=\(e[$0] ?? "")" }.joined(separator: "\n") + "\n"
         try? dump.write(to: spawnLog, atomically: true, encoding: .utf8)
-        p.terminationHandler = { pr in
-            Task { @MainActor in done(pr.terminationStatus) }
+        // Detached, in its own session, so quitting the launcher does not take the game with
+        // it. That means no Process object and no terminationHandler -- the child is not ours
+        // any more -- so the injector's exit is noticed by polling instead. See Detach.
+        guard let pid = Detach.spawn(exe, args: args, env: e, cwd: cwd, stdoutPath: out.path) else {
+            appendLine("!! could not start the game (posix_spawn failed)")
+            Task { @MainActor in done(-1) }
+            return
+        }
+        appendLine("==> started detached, pid \(pid)")
+        Task.detached {
+            while Detach.isAlive(pid) { try? await Task.sleep(nanoseconds: 500_000_000) }
+            await MainActor.run { done(0) }
         }
         // Tail the file: poll is plenty (the pane is human-read), and unlike a pipe it cannot
         // block the writer.
@@ -697,15 +741,13 @@ final class Runner: ObservableObject {
         timer.resume()
         tailTimer?.cancel()
         tailTimer = timer
-        do {
-            try p.run()
-            proc = p
-        } catch {
-            appendLine("!! failed to start \(exe.path): \(error.localizedDescription)")
-            timer.cancel()
-            done(-1)
-        }
+        // The game was already started above, detached. Nothing to run here any more; the
+        // detached pid is remembered so `stop` can still end the session on request.
+        gamePID = pid
     }
+
+    /// The detached game's pid, for `stop`. Not a Process: it is not our child any more.
+    private var gamePID: pid_t?
 
     private var tailTimer: DispatchSourceTimer?
 

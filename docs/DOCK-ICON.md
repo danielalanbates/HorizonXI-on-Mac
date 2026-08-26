@@ -111,3 +111,28 @@ Not from the wrapper. Three things were measured on 2026-08-21:
    that `spawnViaShell` is understood.
 3. **Accept a per-world tile name only.** Even without the icon, giving the spawned shell a name
    ("HorizonXI" rather than `exec`) makes the Dock legible. Cheap, and independent of 1 and 2.
+
+## 2026-08-26: SOLVED — CX_ROOT icon fallback, no wine rebuild needed
+
+The winemac.drv patch route (above) turned out to be unnecessary. Reading
+`set_app_icon()` in the CX wine source (athei/wine `cx-26-patched`,
+`dlls/winemac.drv/window.c:832`) shows CrossOver Hack 13440 already provides an
+env-driven fallback:
+
+* when the exe has **no** RT_GROUP_ICON resource, `create_app_icon_images()`
+  returns NULL, and wine loads `$CX_ROOT/../../Resources/exeIcon.icns` instead.
+* `horizon-loader.exe` has no icon resource, so it always takes this path.
+
+So the fix is just to point `CX_ROOT` at a bundle-shaped folder that holds our
+icon at `Contents/Resources/exeIcon.icns` (two levels up from CX_ROOT). No wine
+build, no touching the server's binary.
+
+**Verified 2026-08-26.** An icon-less test exe run under `wine-coop` with
+`CX_ROOT` set showed the gold crystal tile in the Dock (running dot beneath it),
+and a live `horizon-loader.exe` launch through the launcher showed the same gold
+crystal. See `DockIcon.cxRoot()` (builds the folder under Application Support and
+returns the CX_ROOT path) and `Runner.launchClient` (sets `env["CX_ROOT"]`).
+
+CX_ROOT is otherwise read only by `localspl` (ps2pdf, printing) and the
+round-rect icon mask PNG — which this project deliberately does not ship, so the
+crystal is drawn as-is.

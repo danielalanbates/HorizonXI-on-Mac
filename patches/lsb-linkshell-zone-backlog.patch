@@ -1,0 +1,273 @@
+diff --git a/src/map/ipc_client.cpp b/src/map/ipc_client.cpp
+index 8d64f851..c5023845 100644
+--- a/src/map/ipc_client.cpp
++++ b/src/map/ipc_client.cpp
+@@ -344,6 +344,10 @@ void IPCClient::handleMessage_ChatMessageLinkshell(const IPP& ipp, const ipc::Ch
+ 
+     if (CLinkshell* PLinkshell = linkshell::GetLinkshell(message.linkshellId))
+     {
++        // Buffered before it is pushed: a member that is mid-zone right now is not in the online
++        // list and would otherwise never see this line. See CLinkshell::ReplayMissedMessages.
++        PLinkshell->BufferMessage(message.senderId, message.senderName, message.zoneId, message.message, message.gmLevel);
++
+         // TODO: Linkshell 1 vs 2?
+         PLinkshell->PushPacket(message.senderId, std::make_unique<GP_SERV_COMMAND_CHAT_STD>(message.senderName, message.zoneId, MESSAGE_LINKSHELL, message.message, message.gmLevel));
+     }
+diff --git a/src/map/linkshell.cpp b/src/map/linkshell.cpp
+index 289d3b1d..2b4fd6f7 100644
+--- a/src/map/linkshell.cpp
++++ b/src/map/linkshell.cpp
+@@ -29,6 +29,9 @@
+ #include "packets/s2c/0x01f_item_list.h"
+ #include "packets/s2c/0x020_item_attr.h"
+ #include "packets/s2c/0x0e0_group_comlink.h"
++#include "packets/s2c/0x017_chat_std.h"
++
++#include "enums/chat_message_type.h"
+ 
+ #include "ipc_client.h"
+ #include "item_container.h"
+@@ -376,6 +379,40 @@ void CLinkshell::PushPacket(uint32 senderID, const std::unique_ptr<CBasicPacket>
+     }
+ }
+ 
++void CLinkshell::BufferMessage(uint32 senderId, const std::string& senderName, xi::ZoneId zoneId, const std::string& message, uint8 gmLevel)
++{
++    m_recent.push_back(BufferedMessage{ senderId, senderName, zoneId, message, gmLevel, timer::now() });
++
++    const auto cutoff = timer::now() - linkshell::LINKSHELL_BACKLOG_MAX_AGE;
++    while (!m_recent.empty() && (m_recent.size() > linkshell::LINKSHELL_BACKLOG_SIZE || m_recent.front().when < cutoff))
++    {
++        m_recent.pop_front();
++    }
++}
++
++void CLinkshell::ReplayMissedMessages(CCharEntity* PChar, timer::time_point since)
++{
++    if (PChar == nullptr)
++    {
++        return;
++    }
++
++    for (const auto& buffered : m_recent)
++    {
++        if (buffered.when <= since || buffered.senderId == PChar->id)
++        {
++            continue;
++        }
++
++        auto packet = std::make_unique<GP_SERV_COMMAND_CHAT_STD>(buffered.senderName, buffered.zoneId, MESSAGE_LINKSHELL, buffered.message, buffered.gmLevel);
++        if (PChar->PLinkshell2 == this)
++        {
++            packet->ref<uint8>(0x04) = MESSAGE_LINKSHELL2;
++        }
++        PChar->pushPacket(std::move(packet));
++    }
++}
++
+ void CLinkshell::PushLinkshellMessage(CCharEntity* PChar, LinkshellSlot slot)
+ {
+     const auto rset = db::preparedStmt("SELECT poster, message, messagetime FROM linkshells WHERE linkshellid = ?", m_id);
+@@ -397,6 +434,58 @@ namespace linkshell
+ 
+ std::map<uint32, std::unique_ptr<CLinkshell>> LinkshellList;
+ 
++// charid -> when that character started zoning. Written by SendToZone, read and erased by the
++// AddOnlineMember that follows, so it holds at most one entry per zoning character.
++std::unordered_map<uint32, timer::time_point> DepartureTimes;
++
++// charid -> what AddOnlineMember decided this character is owed, waiting for the 0x00A handler
++// to be reached so the packets survive clearPacketList().
++struct PendingReplay
++{
++    uint32            linkshellId;
++    timer::time_point since;
++};
++std::unordered_map<uint32, PendingReplay> PendingReplays;
++
++void NoteZoneDeparture(uint32 charId)
++{
++    const auto now = timer::now();
++
++    // A character that zones without a linkshell equipped never reaches the AddOnlineMember that
++    // would erase its entry, so this map would otherwise grow by one per such zone and never
++    // shrink. Anything older than the replay window is already useless; drop it. The sweep is
++    // gated on size so the common case stays O(1).
++    if (DepartureTimes.size() > 256)
++    {
++        std::erase_if(DepartureTimes, [&](const auto& entry)
++                      { return now - entry.second > LINKSHELL_BACKLOG_MAX_AGE; });
++    }
++
++    DepartureTimes[charId] = now;
++}
++
++void FlushPendingReplay(CCharEntity* PChar)
++{
++    if (PChar == nullptr)
++    {
++        return;
++    }
++
++    const auto it = PendingReplays.find(PChar->id);
++    if (it == PendingReplays.end())
++    {
++        return;
++    }
++
++    const auto pending = it->second;
++    PendingReplays.erase(it);
++
++    if (CLinkshell* PLinkshell = GetLinkshell(pending.linkshellId))
++    {
++        PLinkshell->ReplayMissedMessages(PChar, pending.since);
++    }
++}
++
+ auto LoadLinkshell(uint32 id) -> CLinkshell*
+ {
+     const auto rset = db::preparedStmt("SELECT linkshellid, color, name, postrights FROM linkshells WHERE linkshellid = ? LIMIT 1", id);
+@@ -454,6 +543,20 @@ bool AddOnlineMember(CCharEntity* PChar, CItemLinkshell* PItemLinkshell, uint8 l
+         if (PLinkshell)
+         {
+             PLinkshell->AddMember(PChar, PItemLinkshell->GetLSType(), lsNum);
++
++            // If this character was on this linkshell moments ago it did not leave, it zoned:
++            // charutils::SendToZone drops the map connection and charutils::LoadInventory brings
++            // it back here. Hand over whatever was said in between so the zone line stops eating
++            // linkshell chat. A genuine login is older than the window and replays nothing.
++            if (const auto it = DepartureTimes.find(PChar->id); it != DepartureTimes.end())
++            {
++                const auto departedAt = it->second;
++                DepartureTimes.erase(it);
++                if (timer::now() - departedAt <= LINKSHELL_BACKLOG_MAX_AGE)
++                {
++                    PendingReplays[PChar->id] = PendingReplay{ PLinkshell->getID(), departedAt };
++                }
++            }
+         }
+     }
+     return false;
+diff --git a/src/map/linkshell.h b/src/map/linkshell.h
+index 7e01f8a4..437dccc1 100644
+--- a/src/map/linkshell.h
++++ b/src/map/linkshell.h
+@@ -23,6 +23,14 @@
+ #define _CLINKSHELL_H
+ 
+ #include "common/cbasetypes.h"
++#include "common/timer.h"
++
++#include "data/enums/zone.h"
++
++#include <deque>
++#include <string>
++#include <unordered_map>
++#include <vector>
+ 
+ enum class GP_CLI_COMMAND_SET_LSMSG_WRITELEVEL : uint8_t;
+ class CBasicPacket;
+@@ -61,6 +69,26 @@ public:
+     void PushPacket(uint32 senderID, const std::unique_ptr<CBasicPacket>& packet);
+     void PushLinkshellMessage(CCharEntity* PChar, LinkshellSlot slot);
+ 
++    // --- Zone-gap chat backlog -------------------------------------------------------------
++    // Zoning tears the character's map connection down and builds a new one (see
++    // charutils::SendToZone), so the CCharEntity leaves the online-member list for the ~2s the
++    // handover takes and any linkshell chat sent in that window is delivered to nobody. Keeping
++    // a short ring of recent messages lets AddOnlineMember replay what the character missed the
++    // moment it comes back, which is the whole of the "zoning drops you off the linkshell"
++    // complaint. Buffer, not history: it is capped by both count and age.
++    struct BufferedMessage
++    {
++        uint32             senderId;
++        std::string        senderName;
++        xi::ZoneId         zoneId;
++        std::string        message;
++        uint8              gmLevel;
++        timer::time_point  when;
++    };
++
++    void BufferMessage(uint32 senderId, const std::string& senderName, xi::ZoneId zoneId, const std::string& message, uint8 gmLevel);
++    void ReplayMissedMessages(CCharEntity* PChar, timer::time_point since);
++
+     std::vector<CCharEntity*>           members;
+     GP_CLI_COMMAND_SET_LSMSG_WRITELEVEL m_postRights;
+ 
+@@ -68,6 +96,8 @@ private:
+     uint32 m_id;
+     uint16 m_color;
+ 
++    std::deque<BufferedMessage> m_recent;
++
+     std::string m_name;
+ };
+ 
+@@ -83,6 +113,27 @@ bool DelOnlineMember(CCharEntity* PChar, CItemLinkshell* PItemLinkshell);
+ uint32      RegisterNewLinkshell(const std::string& name, uint16 color);
+ CLinkshell* GetLinkshell(uint32 id);
+ 
++// How many messages a linkshell keeps for replay, and how stale a departure may be before a
++// rejoin counts as a fresh login rather than a zone. A zone handover measured on this server is
++// about two seconds; the window is deliberately far wider so a slow zone still gets its backlog,
++// and deliberately far short of the gap that would make a real relog replay old chat.
++inline constexpr size_t LINKSHELL_BACKLOG_SIZE    = 50;
++inline constexpr auto   LINKSHELL_BACKLOG_MAX_AGE = std::chrono::seconds(60);
++
++// Zone-gap replay, in two halves, because neither end of a zone is a good moment to deliver chat.
++//
++// NoteZoneDeparture is called from charutils::SendToZone -- the one place that is unambiguously
++// *before* the handover starts. Doing it from CLinkshell::DelMember instead would be simpler but
++// is not reliable: the old CCharEntity is not guaranteed to be destroyed before the new one has
++// already re-registered, and it also fires for logouts and kicks, which must not replay anything.
++//
++// FlushPendingReplay is called from the 0x00A handler, once the client is out of the loading
++// screen. AddOnlineMember cannot push the backlog itself: it runs inside LoadChar, and the 0x00A
++// handler calls clearPacketList() afterwards, so anything queued that early is silently dropped.
++// That is exactly the bug the first version of this patch shipped with.
++void NoteZoneDeparture(uint32 charId);
++void FlushPendingReplay(CCharEntity* PChar);
++
+ }; // namespace linkshell
+ 
+ #endif
+diff --git a/src/map/packets/c2s/0x00a_login.cpp b/src/map/packets/c2s/0x00a_login.cpp
+index 59f0157c..fb64b8e3 100644
+--- a/src/map/packets/c2s/0x00a_login.cpp
++++ b/src/map/packets/c2s/0x00a_login.cpp
+@@ -29,6 +29,7 @@
+ #include "packets/s2c/0x04f_equip_clear.h"
+ #include "packets/s2c/0x050_equip_list.h"
+ #include "packets/s2c/0x051_grap_list.h"
++#include "linkshell.h"
+ #include "utils/charutils.h"
+ #include "utils/gardenutils.h"
+ #include "utils/zoneutils.h"
+@@ -139,6 +140,11 @@ void GP_CLI_COMMAND_LOGIN::process(MapSession* PSession, CCharEntity* PChar) con
+             }
+         }
+         PChar->status = xi::Status::Normal;
++
++        // Safe to deliver the zone-gap linkshell backlog only now: every clearPacketList() in this
++        // handler is behind us and the client is off the loading screen. See linkshell.h.
++        linkshell::FlushPendingReplay(PChar);
++
+         PChar->PAI->QueueAction(queueAction_t(4000ms, false, zoneutils::AfterZoneIn));
+     }
+ }
+diff --git a/src/map/utils/charutils.cpp b/src/map/utils/charutils.cpp
+index 43356265..3ec69d6d 100644
+--- a/src/map/utils/charutils.cpp
++++ b/src/map/utils/charutils.cpp
+@@ -7080,6 +7080,11 @@ auto SendToZone(CCharEntity* PChar, const xi::ZoneId zoneId) -> bool
+     PChar->requestedZoneChange = true;
+     PChar->requestedWarp       = WarpRequest::None; // a previous warp can get us here, which could infinitely loop. So un-request warp.
+ 
++    // The character is about to leave every online-member list it is on and come back as a new
++    // CCharEntity. Mark when, so the linkshell can hand over the chat spoken in between rather
++    // than letting the zone line eat it.
++    linkshell::NoteZoneDeparture(PChar->id);
++
+     PChar->PSession->zone_ipp = {};
+     PChar->pushPacket<GP_SERV_COMMAND_LOGOUT>(GP_GAME_LOGOUT_STATE::ZONECHANGE, IPP(ipp));
+ 

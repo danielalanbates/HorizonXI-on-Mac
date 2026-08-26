@@ -101,7 +101,7 @@ struct ContentView: View {
     @State private var remember = Credentials.remember
     @State private var showDetails = false
     @State private var showGraphics = false
-    @State private var graphics = GraphicsSettings.load()
+    @State private var graphics = GraphicsSettings.load(world: nil)
     @State private var showAddons = false
     @State private var addonItems: [AddonSuite.Item] = []
     @State private var installingExtra = ""
@@ -202,6 +202,14 @@ struct ContentView: View {
                 else {
                     if remember, !user.isEmpty, pass.isEmpty { pass = Credentials.password(for: user, world: store.selected?.name ?? "") }
                     await recheckAsync()
+                    if store.selected?.local == true {
+                        // A refresh may already be in flight from onAppear; either way, wait
+                        // for a verdict (bounded) rather than refusing on a status that is nil.
+                        await local.refreshAsync()
+                        for _ in 0..<60 where local.status == nil {
+                            try? await Task.sleep(nanoseconds: 500_000_000)
+                        }
+                    }
                     runner.appendLine("==> --play: \(store.selected?.name ?? "?") as \(user.isEmpty ? "(no account)" : user)")
                     play()
                     if !notice.isEmpty { runner.appendLine("!! \(notice)") }
@@ -333,6 +341,23 @@ struct ContentView: View {
         return AddonPolicies.policy(for: s, fetched: feeds.fetchedAddonLists)
     }
 
+    /// Why the narration toggle is on, off, or greyed out. The addon-rules case is the one
+    /// that matters: VanaVoice is on nobody's published allowlist, and on a server that runs
+    /// one -- HorizonXI, CatsEyeXI -- loading it risks the account, so the launcher will not
+    /// offer it there at all.
+    private var narrationHelp: String {
+        if !Narration.isAvailable {
+            return "Install VanaVoice.app to use this: github.com/danielalanbates/vanavoice"
+        }
+        if !Narration.allowed(by: addonPolicy) {
+            return "\(store.selected?.name ?? "This server") allows only the addons on its "
+                 + "published list, and VanaVoice is not on it. Running it there risks your "
+                 + "account, so the launcher will not install it."
+        }
+        return "Installs VanaVoice's addon into this world and starts the narrator, which "
+             + "reads NPC and cutscene dialogue aloud in a neural voice."
+    }
+
     /// A rotating strip of what the launcher knows about the selected world.
     ///
     /// Every line here is something the launcher actually holds -- the server's era, its own
@@ -444,6 +469,30 @@ struct ContentView: View {
         return s + ". Source: \(source)."
     }
 
+    /// Why the addon list came back empty. Named paths, because the answer is usually a folder
+    /// that is not there.
+    private var emptyAddonReason: String {
+        let world = store.selected?.name ?? "this world"
+        guard let i = active else {
+            return "No install is selected, so there is nothing to scan."
+        }
+        let dir = i.gameDir.path
+        if !FileManager.default.fileExists(atPath: dir) {
+            return "\(world) has no client here yet: \(dir) does not exist. Download the world's "
+                 + "client, or point the launcher at the folder you already have it in."
+        }
+        return "Nothing installed under \(dir) — no plugins/*.dll and no addons/<name>/<name>.lua. "
+             + "If that folder is on a drive that is not mounted, mount it and press Addons… again."
+    }
+
+    /// Said once, above the unlisted section, rather than per row.
+    private var unlistedNote: String {
+        let world = store.selected?.name ?? "This server"
+        return "\(world) has not approved these, and on most private servers running an "
+             + "unapproved addon is a bannable offence. They are listed because they are "
+             + "installed and they are yours to manage — not because they are allowed."
+    }
+
     @ViewBuilder
     private var addonPolicyNote: some View {
         let policy = addonPolicy
@@ -539,6 +588,17 @@ struct ContentView: View {
                 }
             }
 
+            // Why the screen is empty, when it is. A blank list is the one outcome that
+            // tells the player nothing: it reads the same whether the world has no client
+            // installed, the folder is on a drive that is not mounted, or the server's list
+            // hid everything. Each of those needs a different thing done about it.
+            if addonItems.isEmpty {
+                Text(emptyAddonReason)
+                    .font(.caption).foregroundStyle(Vana.ember)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 6)
+            }
+
             List {
                 Section("Plugins") {
                     ForEach($addonItems.filter {
@@ -552,6 +612,23 @@ struct ContentView: View {
                         !$0.wrappedValue.isPlugin && addonPolicy.allows($0.wrappedValue.name)
                     }) { $item in
                         addonRow($item)
+                    }
+                }
+                // Shown, not hidden. An allowlist is the server's list of what it has approved,
+                // which is not the same as a list of everything that exists: an addon the player
+                // wrote themselves is on nobody's list and used to vanish from this screen with
+                // no way to manage it. The rules still get stated plainly, and nothing here is
+                // enabled by "Enable all" -- the choice is the player's to make knowingly.
+                if addonItems.contains(where: { !addonPolicy.allows($0.name) }) {
+                    Section("Not on \(store.selected?.name ?? "this server")'s approved list") {
+                        Text(unlistedNote)
+                            .font(.caption2).foregroundStyle(Vana.ember)
+                            .fixedSize(horizontal: false, vertical: true)
+                        ForEach($addonItems.filter {
+                            !addonPolicy.allows($0.wrappedValue.name)
+                        }) { $item in
+                            addonRow($item)
+                        }
                     }
                 }
             }
@@ -571,14 +648,33 @@ struct ContentView: View {
                 Spacer()
                 Button("Cancel") { showAddons = false }
                 Button("Apply") {
-                    // Belt and braces: a hidden row cannot be toggled on, but the list on disk
-                    // may already have named something this server forbids, and pressing Apply
-                    // must not write it back out.
-                    for i in addonItems.indices where !addonPolicy.allows(addonItems[i].name) {
-                        addonItems[i].enabled = false
+                    // Refuse to write a block that would disable everything.
+                    //
+                    // On 2026-08-22 a broken fetch made the policy reject every installed addon
+                    // (see ServerFeeds.resembles). The screen went blank, Apply wrote an empty
+                    // managed block, and the cursor fix -- which lived in an addon on nobody's
+                    // published list -- vanished from scripts/default.txt with it. A player
+                    // pressing Apply is asking to save a list, never to lose one, so a policy
+                    // that permits *nothing* is treated as a broken policy rather than obeyed.
+                    let permitted = addonItems.filter { addonPolicy.allows($0.name) }
+                    if !addonItems.isEmpty && permitted.isEmpty {
+                        notice = "Not saving: this server's addon list came back empty, so every "
+                               + "addon you have would be switched off. Nothing was written."
+                        showAddons = false
+                        return
                     }
+                    // What is enabled here is what gets written, including anything from the
+                    // unlisted section. Force-disabling those behind the player's back is what
+                    // removed the cursor fix on 2026-08-22, and now that they are visible and
+                    // individually toggled, switching them off would be overriding a choice
+                    // rather than preventing an accident. It is said out loud instead.
+                    let unapproved = addonItems.filter { $0.enabled && !addonPolicy.allows($0.name) }
                     if let i = active, !AddonSuite.write(addonItems, to: i) {
                         notice = "Could not write scripts/default.txt — its launcher markers are missing."
+                    } else if !unapproved.isEmpty, addonPolicy.isRestricting {
+                        notice = "Addon list saved, including \(unapproved.count) "
+                               + "\(store.selected?.name ?? "this server") does not approve: "
+                               + unapproved.map(\.name).joined(separator: ", ") + "."
                     } else {
                         notice = "Addon list saved. It takes effect the next time you press Play."
                     }
@@ -642,12 +738,13 @@ struct ContentView: View {
             }
 
             HStack {
+                Button("Low") { graphics = .lowSpec }
                 Button("Balanced") { graphics = .balanced }
                 Button("Max (4K)") { graphics = .max4K }
                 Spacer()
                 Button("Cancel") { showGraphics = false }
                 Button("Apply") {
-                    graphics.save()
+                    graphics.save(world: store.selected?.name)
                     if let i = selected, let s = store.selected {
                         Credentials.ensureProfile(s.bootProfile, in: i)
                         graphics.write(to: i, profile: s.bootProfile)
@@ -1084,6 +1181,9 @@ struct ContentView: View {
                         .help("Switch headphones, speakers or a Bluetooth device while the game "
                               + "is running and the sound moves with it. Without this, wine keeps "
                               + "playing to whichever device was default when the game started.")
+                    Toggle("Read cutscenes aloud (VanaVoice)", isOn: $perf.narrateCutscenes)
+                        .disabled(!Narration.isAvailable || !Narration.allowed(by: addonPolicy))
+                        .help(narrationHelp)
                     Toggle("Large address aware", isOn: $perf.largeAddressAware)
                     Toggle("Fast lens flares (skip occlusion wait) — glitches", isOn: $perf.flareReadbackNoWait)
                         .help("Roughly doubles the frame rate: FFXI stops the whole frame four "
@@ -1157,6 +1257,7 @@ struct ContentView: View {
                 .onChange(of: perf.disableAppNap) { _ in perf.save() }
                 .onChange(of: perf.followSoundOutput) { _ in perf.save() }
                 .onChange(of: perf.largeAddressAware) { _ in perf.save() }
+                .onChange(of: perf.narrateCutscenes) { _ in perf.save() }
                 .onChange(of: perf.metalHUD) { _ in perf.save() }
             } label: {
                 Text("SETUP & DIAGNOSTICS").font(.caption).tracking(2.5)
@@ -1534,7 +1635,7 @@ struct ContentView: View {
                               + "Clear it in the server's settings to override.")
         }
         runner.launch(i, perf: effective, profile: server.bootProfile, useX87: server.x87,
-                      world: server.name)
+                      world: server.name, addonPolicy: addonPolicy)
     }
 
     private func refresh() { Task { await refreshAsync() } }
@@ -1596,15 +1697,25 @@ struct ContentView: View {
     /// Open the panel on whatever the profile actually says, not on this app's last write —
     /// the boot .ini is a plain text file the user may well have edited by hand.
     private func openGraphics() {
-        if let i = active, let s = store.selected,
-           let onDisk = GraphicsSettings.read(from: i, profile: s.bootProfile) {
-            graphics = onDisk
+        // Prefer what the profile actually says; fall back to this world's stored value, not
+        // to a value some other world last wrote.
+        if let s = store.selected {
+            graphics = GraphicsSettings.load(world: s.name)
+            if let i = active, let onDisk = GraphicsSettings.read(from: i, profile: s.bootProfile) {
+                graphics = onDisk
+            }
         }
         showGraphics = true
     }
 
     private func openAddons() {
-        guard let i = active else { return }
+        guard let i = active else {
+            // Silently doing nothing is indistinguishable from a broken button, and that is
+            // exactly what it looked like: the addon screen "wouldn't open".
+            notice = "No install selected, so there is nothing to list. Press the folder icon "
+                   + "above and point the launcher at your wrapper app."
+            return
+        }
         addonItems = AddonSuite.scan(i)
         let bad = AddonSuite.mismatchedPlugins(i)
         addonWarning = bad.isEmpty ? "" :

@@ -120,3 +120,35 @@ its device list when mmdevapi re-enumerates, so a small Ashita addon or a wine s
 forces a device re-enumeration on change might get most of the way there without any injection.
 It is speculative — nobody has tested it — and it is only worth exploring if the log shows the
 dylib never loading.
+
+## 2026-08-26: verified loaded inside a live client — and the bug that hid it
+
+`audiofollow.dylib` was **not** loading in the game, silently, on every launch.
+`lsof` on the live `horizon-loader.exe` showed the dylib absent even though the
+launcher put it in `DYLD_INSERT_LIBRARIES`.
+
+Cause: the game is spawned through `/bin/sh` (Detach.spawn, for the new-session
+detach and the cwd). `/bin/sh` is a SIP-protected platform binary, and **dyld
+strips every `DYLD_*` variable from a protected process's environment before
+`main()`** — so the variable set on the shell never survived to the wine loader
+it exec'd. Same class of gotcha already noted for `arch(1)`.
+
+Fix (Detach.swift): put the `DYLD_*` assignments on the *shell command line*
+(`DYLD_INSERT_LIBRARIES=... exec wine ...`) instead of in the shell's
+environment. The shell exports them itself, and the unsigned wine loader — which
+dyld does not restrict — inherits them. Non-DYLD vars still go through the normal
+environment.
+
+**Verified 2026-08-26:** after the fix, `lsof -p <horizon-loader pid>` lists
+`/Applications/FFXI-on-Mac.app/Contents/Resources/audiofollow.dylib` mapped into
+the running client on the Local (LandSandBoat) world.
+
+## 2026-08-26: hardened-runtime signing breaks launch from the removable volume
+A Developer ID + `--options runtime` build of the launcher cannot start the game
+when wine lives on an external volume: the child faults with
+`could not load ntdll.so: ... (file system sandbox blocked open())`, and it is
+**not** fixed by answering the removable-volume prompt (the detached grandchild
+is not covered by the app's TCC grant). The ad-hoc build has no such restriction.
+So the **local `/Applications` build is ad-hoc** and plays fine; a notarized
+release still needs this solved (candidate: a removable-volume/Documents
+entitlement, or install wine to an Application Support path on the internal disk).
