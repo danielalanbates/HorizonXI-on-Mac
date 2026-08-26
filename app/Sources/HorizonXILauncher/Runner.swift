@@ -553,6 +553,12 @@ final class Runner: ObservableObject {
         // Make the Dock tile say which world is running, under this project's own icon.
         DockIcon.apply(to: install, world: world.isEmpty ? "Vana'diel" : world) { [weak self] in self?.appendLine($0) }
         var env = perf.environment(for: install, x87: useX87)
+        // The tile the *wine process* wears: CrossOver wine's CX_ROOT icon fallback, since the
+        // loader has no icon resource of its own. See DockIcon.cxRoot.
+        if env["CX_ROOT"] == nil, let cx = DockIcon.cxRoot(for: world.isEmpty ? "Vana'diel" : world,
+                                                          log: { [weak self] in self?.appendLine($0) }) {
+            env["CX_ROOT"] = cx.path
+        }
         // x87 acceleration, two generations:
         //  * Cooperative (preferred): x87sidecar --cooperative launching the patched CX wine
         //    (athei/wine-build at COOP_WINE). Every wine process — including horizon-loader,
@@ -673,6 +679,7 @@ final class Runner: ObservableObject {
     }
 
     func stop(_ install: Install) {
+        if let pid = gamePID, Detach.isAlive(pid) { kill(pid, SIGTERM) }
         proc?.terminate()
         let k = Process()
         k.executableURL = install.wineserver
@@ -699,13 +706,8 @@ final class Runner: ObservableObject {
         FileManager.default.createFile(atPath: out.path, contents: nil)
         let quoted = ([exe.path] + args).map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
             .joined(separator: " ")
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", "exec \(quoted) >> '\(out.path)' 2>&1"]
-        p.currentDirectoryURL = cwd
         var e = ProcessInfo.processInfo.environment
         for (k, v) in env { e[k] = v }
-        p.environment = e
         // Record exactly what was spawned. Diffing this against a hand-run that works is how
         // the launch-death and Gaia XI exits were bisected; it costs one small file per launch.
         let spawnLog = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -713,8 +715,18 @@ final class Runner: ObservableObject {
         let dump = "exe: \(exe.path)\nargs: \(args)\ncwd: \(cwd.path)\n"
             + e.keys.sorted().map { "\($0)=\(e[$0] ?? "")" }.joined(separator: "\n") + "\n"
         try? dump.write(to: spawnLog, atomically: true, encoding: .utf8)
-        p.terminationHandler = { pr in
-            Task { @MainActor in done(pr.terminationStatus) }
+        // Detached, in its own session, so quitting the launcher does not take the game with
+        // it. That means no Process object and no terminationHandler -- the child is not ours
+        // any more -- so the injector's exit is noticed by polling instead. See Detach.
+        guard let pid = Detach.spawn(exe, args: args, env: e, cwd: cwd, stdoutPath: out.path) else {
+            appendLine("!! could not start the game (posix_spawn failed)")
+            Task { @MainActor in done(-1) }
+            return
+        }
+        appendLine("==> started detached, pid \(pid)")
+        Task.detached {
+            while Detach.isAlive(pid) { try? await Task.sleep(nanoseconds: 500_000_000) }
+            await MainActor.run { done(0) }
         }
         // Tail the file: poll is plenty (the pane is human-read), and unlike a pipe it cannot
         // block the writer.
@@ -729,15 +741,13 @@ final class Runner: ObservableObject {
         timer.resume()
         tailTimer?.cancel()
         tailTimer = timer
-        do {
-            try p.run()
-            proc = p
-        } catch {
-            appendLine("!! failed to start \(exe.path): \(error.localizedDescription)")
-            timer.cancel()
-            done(-1)
-        }
+        // The game was already started above, detached. Nothing to run here any more; the
+        // detached pid is remembered so `stop` can still end the session on request.
+        gamePID = pid
     }
+
+    /// The detached game's pid, for `stop`. Not a Process: it is not our child any more.
+    private var gamePID: pid_t?
 
     private var tailTimer: DispatchSourceTimer?
 

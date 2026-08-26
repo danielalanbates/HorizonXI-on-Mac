@@ -18,6 +18,40 @@ import Foundation
 ///   bundle (`/Volumes/Games/FFXI/wine-coop/...`) and therefore has no tile to stamp. Running a
 ///   bare executable is exactly why that pathway shows up as plain "wine".
 enum DockIcon {
+    /// The route that actually works (2026-08-26): CrossOver's winemac.drv reads the Dock tile
+    /// from the exe's first RT_GROUP_ICON resource, and `horizon-loader.exe` has none -- so it
+    /// falls through to CrossOver Hack 13440, which loads
+    /// `$CX_ROOT/../../Resources/exeIcon.icns` (dlls/winemac.drv/window.c, set_app_icon). No
+    /// wine rebuild, no touching the server's binary: build a bundle-shaped folder holding our
+    /// icon and point CX_ROOT at it. Verified on an icon-less test exe under wine-coop; the
+    /// gold crystal came up in the Dock with the running dot under it (docs/DOCK-ICON.md).
+    ///
+    /// CX_ROOT is otherwise only read by localspl (ps2pdf for printing) and the round-rect icon
+    /// mask (a PNG we deliberately do not ship, so the icon is used as drawn).
+    static func cxRoot(for world: String, log: (String) -> Void = { _ in }) -> URL? {
+        let fm = FileManager.default
+        guard let src = source else { return nil }
+        let safe = world.isEmpty ? "world" : world.replacingOccurrences(of: "/", with: "-")
+        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("HorizonXI-on-Mac/dock/\(safe)", isDirectory: true)
+        let resources = base.appendingPathComponent("Contents/Resources", isDirectory: true)
+        let cxRoot = base.appendingPathComponent("Contents/SharedSupport/wine", isDirectory: true)
+        let icon = resources.appendingPathComponent("exeIcon.icns")
+        do {
+            try fm.createDirectory(at: resources, withIntermediateDirectories: true)
+            try fm.createDirectory(at: cxRoot, withIntermediateDirectories: true)
+            let ours = try Data(contentsOf: src)
+            if (try? Data(contentsOf: icon)) != ours {
+                try? fm.removeItem(at: icon)
+                try ours.write(to: icon)
+            }
+            return cxRoot
+        } catch {
+            log("i  Dock icon: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     /// Our icon, shipped in the launcher bundle; falls back to the repo copy under `swift run`.
     private static var source: URL? {
         if let u = Bundle.main.url(forResource: "GameIcon", withExtension: "icns") { return u }

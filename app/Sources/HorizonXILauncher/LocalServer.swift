@@ -69,15 +69,19 @@ final class LocalServer: ObservableObject {
     private var refreshing = false
 
     func refresh() {
+        Task { await refreshAsync() }
+    }
+
+    /// The same check, awaitable: `--play` on the local world needs a status *before* it decides,
+    /// or it refuses with "Still checking the local server" every time (2026-08-26).
+    func refreshAsync() async {
         // Appearing and selecting the local world both ask for a refresh, and on launch they
         // happen together — without this the app runs the status script twice over.
         guard !refreshing, let script = Self.script() else { return }
         refreshing = true
-        Task {
-            let text = await Self.capture(script: script, arg: "status")
-            self.status = Self.parse(text)
-            self.refreshing = false
-        }
+        let text = await Self.capture(script: script, arg: "status")
+        self.status = Self.parse(text)
+        self.refreshing = false
     }
 
     private static func parse(_ text: String) -> Status {

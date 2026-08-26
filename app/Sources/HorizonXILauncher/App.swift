@@ -202,6 +202,14 @@ struct ContentView: View {
                 else {
                     if remember, !user.isEmpty, pass.isEmpty { pass = Credentials.password(for: user, world: store.selected?.name ?? "") }
                     await recheckAsync()
+                    if store.selected?.local == true {
+                        // A refresh may already be in flight from onAppear; either way, wait
+                        // for a verdict (bounded) rather than refusing on a status that is nil.
+                        await local.refreshAsync()
+                        for _ in 0..<60 where local.status == nil {
+                            try? await Task.sleep(nanoseconds: 500_000_000)
+                        }
+                    }
                     runner.appendLine("==> --play: \(store.selected?.name ?? "?") as \(user.isEmpty ? "(no account)" : user)")
                     play()
                     if !notice.isEmpty { runner.appendLine("!! \(notice)") }
@@ -461,6 +469,30 @@ struct ContentView: View {
         return s + ". Source: \(source)."
     }
 
+    /// Why the addon list came back empty. Named paths, because the answer is usually a folder
+    /// that is not there.
+    private var emptyAddonReason: String {
+        let world = store.selected?.name ?? "this world"
+        guard let i = active else {
+            return "No install is selected, so there is nothing to scan."
+        }
+        let dir = i.gameDir.path
+        if !FileManager.default.fileExists(atPath: dir) {
+            return "\(world) has no client here yet: \(dir) does not exist. Download the world's "
+                 + "client, or point the launcher at the folder you already have it in."
+        }
+        return "Nothing installed under \(dir) — no plugins/*.dll and no addons/<name>/<name>.lua. "
+             + "If that folder is on a drive that is not mounted, mount it and press Addons… again."
+    }
+
+    /// Said once, above the unlisted section, rather than per row.
+    private var unlistedNote: String {
+        let world = store.selected?.name ?? "This server"
+        return "\(world) has not approved these, and on most private servers running an "
+             + "unapproved addon is a bannable offence. They are listed because they are "
+             + "installed and they are yours to manage — not because they are allowed."
+    }
+
     @ViewBuilder
     private var addonPolicyNote: some View {
         let policy = addonPolicy
@@ -556,6 +588,17 @@ struct ContentView: View {
                 }
             }
 
+            // Why the screen is empty, when it is. A blank list is the one outcome that
+            // tells the player nothing: it reads the same whether the world has no client
+            // installed, the folder is on a drive that is not mounted, or the server's list
+            // hid everything. Each of those needs a different thing done about it.
+            if addonItems.isEmpty {
+                Text(emptyAddonReason)
+                    .font(.caption).foregroundStyle(Vana.ember)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 6)
+            }
+
             List {
                 Section("Plugins") {
                     ForEach($addonItems.filter {
@@ -569,6 +612,23 @@ struct ContentView: View {
                         !$0.wrappedValue.isPlugin && addonPolicy.allows($0.wrappedValue.name)
                     }) { $item in
                         addonRow($item)
+                    }
+                }
+                // Shown, not hidden. An allowlist is the server's list of what it has approved,
+                // which is not the same as a list of everything that exists: an addon the player
+                // wrote themselves is on nobody's list and used to vanish from this screen with
+                // no way to manage it. The rules still get stated plainly, and nothing here is
+                // enabled by "Enable all" -- the choice is the player's to make knowingly.
+                if addonItems.contains(where: { !addonPolicy.allows($0.name) }) {
+                    Section("Not on \(store.selected?.name ?? "this server")'s approved list") {
+                        Text(unlistedNote)
+                            .font(.caption2).foregroundStyle(Vana.ember)
+                            .fixedSize(horizontal: false, vertical: true)
+                        ForEach($addonItems.filter {
+                            !addonPolicy.allows($0.wrappedValue.name)
+                        }) { $item in
+                            addonRow($item)
+                        }
                     }
                 }
             }
@@ -603,14 +663,18 @@ struct ContentView: View {
                         showAddons = false
                         return
                     }
-                    // Belt and braces: a hidden row cannot be toggled on, but the list on disk
-                    // may already have named something this server forbids, and pressing Apply
-                    // must not write it back out.
-                    for i in addonItems.indices where !addonPolicy.allows(addonItems[i].name) {
-                        addonItems[i].enabled = false
-                    }
+                    // What is enabled here is what gets written, including anything from the
+                    // unlisted section. Force-disabling those behind the player's back is what
+                    // removed the cursor fix on 2026-08-22, and now that they are visible and
+                    // individually toggled, switching them off would be overriding a choice
+                    // rather than preventing an accident. It is said out loud instead.
+                    let unapproved = addonItems.filter { $0.enabled && !addonPolicy.allows($0.name) }
                     if let i = active, !AddonSuite.write(addonItems, to: i) {
                         notice = "Could not write scripts/default.txt — its launcher markers are missing."
+                    } else if !unapproved.isEmpty, addonPolicy.isRestricting {
+                        notice = "Addon list saved, including \(unapproved.count) "
+                               + "\(store.selected?.name ?? "this server") does not approve: "
+                               + unapproved.map(\.name).joined(separator: ", ") + "."
                     } else {
                         notice = "Addon list saved. It takes effect the next time you press Play."
                     }
@@ -1645,7 +1709,13 @@ struct ContentView: View {
     }
 
     private func openAddons() {
-        guard let i = active else { return }
+        guard let i = active else {
+            // Silently doing nothing is indistinguishable from a broken button, and that is
+            // exactly what it looked like: the addon screen "wouldn't open".
+            notice = "No install selected, so there is nothing to list. Press the folder icon "
+                   + "above and point the launcher at your wrapper app."
+            return
+        }
         addonItems = AddonSuite.scan(i)
         let bad = AddonSuite.mismatchedPlugins(i)
         addonWarning = bad.isEmpty ? "" :
