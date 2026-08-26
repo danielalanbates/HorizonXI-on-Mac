@@ -40,6 +40,49 @@ injection, no login, no window — both when the copy is renamed (`horizon-loade
 it keeps the original name in a sibling folder (`bootloader-ffxi/horizon-loader.exe`). The exe
 itself is fine, so something in the Ashita/loader boot chain rejects a modified binary.
 
+## 2026-08-25: two of the three routes are now closed, with evidence
+
+### Why Ashita will not boot the icon-patched loader — answered
+
+`horizon-loader.exe` has **`.detourc` and `.detourd` sections**: it is a Detours-based injector.
+`UpdateResource` grows `.rsrc`, and that moves everything after it:
+
+| | original | patched |
+| --- | --- | --- |
+| `.rsrc` vsize | `0x418` | `0x12000` |
+| `.reloc` vaddr | `0xFD000` | **`0x10E000`** |
+| SizeOfImage | `0x107000` | **`0x118000`** |
+| PE checksum | `0x104B8D` | **`0x104B8D`** (not recomputed) |
+
+So the image grew and `.reloc` moved while the Detours payload still describes the old layout and
+the checksum is stale. That is the "banner, then silence". Making it work would mean rewriting
+HorizonXI's Detours payload inside their binary -- fragile, and on their server a modification of
+their own executable, which their rules prohibit. **This route is closed.**
+
+### Wrapping wine in a .app bundle — tested, does not work
+
+The idea: put the wine loader in `FFXI.app/Contents/MacOS/wine`, symlink the lib tree at
+`Contents/lib` (wine finds it as `../lib`), give the bundle an `.icns`, and let macOS hand the
+process the bundle's tile. The bundle runs the game correctly -- but the Dock tile stays generic,
+because **the process that owns the window is not the binary that was launched**: wine re-execs
+each Windows process from its own install directory. The running client's image path is
+`/Volumes/.../wine`, not the bundle. Setting `WINELOADER` into the bundle does not redirect it
+either; this wine derives its loader from the install dir.
+
+### No configuration knob exists
+
+`strings` on `lib/wine/i386-windows/winemac.drv` shows the `EnumResourceNamesW` /
+`CreateIconFromResourceEx` / `GRPICONDIR` path and **no registry key** for an app icon. There is
+nothing to set.
+
+### What is left
+
+Patch `winemac.drv` so `macdrv_app_icon()` falls back to an icon named by an environment
+variable, then set it per world. It is a small change and it is also the only route that is clean
+on the rules front -- wine is the runtime, not an Ashita addon, so it touches nothing of the
+server's. The cost is entirely the build: there is no wine source tree here, `wine-coop` is a
+prebuilt from `athei/wine-build`, so this needs a CrossOver-wine source build stood up first.
+
 **Next**, in the order worth trying:
 
 1. Find out what rejects it. Ashita's own log for those runs is the place to look — if the loader

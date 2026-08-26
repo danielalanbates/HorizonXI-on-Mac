@@ -637,6 +637,26 @@ ashita.events.register('command', 'winecursor_command', function (e)
     -- Posting window messages is dead on this build (see post()), so the question is whether
     -- Ashita exposes an injection path of its own. This lists what the keyboard and mouse
     -- objects answer to, rather than guessing from documentation written for Windows.
+    -- /winecursor events -- can an addon reach Ashita's event registry?
+    --
+    -- If the table of registered 'mouse' and 'key' callbacks is reachable from Lua, one shim
+    -- can read ImGui's io and call every panel's handler directly -- fixing timers, tparty,
+    -- thotbar, tCrossBar and equipmon in one place, without editing any of them. If it is
+    -- native and opaque, each addon has to be patched on its own.
+    if (sub == 'events') then
+        local function names(t, label)
+            if (type(t) ~= 'table') then say(label .. ': ' .. type(t)); return; end
+            local out = {};
+            for k, v in pairs(t) do out[#out + 1] = ('%s(%s)'):format(tostring(k), type(v)); end
+            table.sort(out);
+            say(label .. ': ' .. (#out > 0 and table.concat(out, ' ') or '(empty)'));
+        end
+        names(ashita.events, 'ashita.events');
+        local mt = getmetatable(ashita.events);
+        names(mt and mt.__index, 'ashita.events.__index');
+        return;
+    end
+
     if (sub == 'probe') then
         local function names(obj, label)
             if (obj == nil) then say(label .. ': nil'); return; end
