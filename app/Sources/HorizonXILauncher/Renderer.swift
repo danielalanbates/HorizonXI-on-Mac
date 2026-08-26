@@ -112,7 +112,10 @@ enum RendererSetup {
     static let maxVersionGL: UInt32 = 0x0004_0001
 
     static func apply(_ renderer: Renderer, to install: Install, log: (String) -> Void) {
-        stopWineserver(install)
+        if !stopWineserver(install) {
+            log("renderer: a game is running in this prefix, so it was left alone — "
+                + "\(renderer.title) will take effect the next time the game starts")
+        }
 
         reg(install, add: #"HKCU\Software\Wine\Direct3D"#, name: "renderer",
             type: "REG_SZ", data: renderer.wineRendererKey)
@@ -337,7 +340,33 @@ enum RendererSetup {
     /// `reg` edits do not reach a running wineserver, and a stale one silently keeps the old
     /// value — which is how an earlier pass of this project produced a "success" screenshot from
     /// the pathway it thought it had just switched away from.
-    static func stopWineserver(_ i: Install) {
+    /// Is a game already running out of this prefix?
+    ///
+    /// This matters because `wineserver -k` is not selective: it tears down every process in the
+    /// prefix. Both worlds share one prefix, so killing the server to flush a registry edit also
+    /// kills whatever the user is playing. Daniel caught exactly that -- starting one world shut
+    /// down a session on another -- and a launcher that closes somebody's game to tidy a setting
+    /// has its priorities backwards.
+    static func gameIsRunning(_ i: Install) -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        p.arguments = ["-f", "horizon-loader\\.exe|xiloader\\.exe|pol\\.exe"]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = Pipe()
+        do { try p.run() } catch { return false }
+        p.waitUntilExit()
+        return p.terminationStatus == 0
+    }
+
+    /// Stop the prefix's wineserver so registry edits are actually flushed.
+    ///
+    /// Returns false, and does nothing at all, when a game is already running in the prefix --
+    /// see `gameIsRunning`. The caller's change then simply waits for the next launch, which is
+    /// the right trade: a graphics setting is worth less than the session it would have killed.
+    @discardableResult
+    static func stopWineserver(_ i: Install) -> Bool {
+        if gameIsRunning(i) { return false }
         let p = Process()
         p.executableURL = i.wineserver
         p.arguments = ["-k"]
@@ -358,6 +387,7 @@ enum RendererSetup {
         let deadline = Date().addingTimeInterval(30)
         while w.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
         if w.isRunning { w.terminate() }
+        return true
     }
 
     private static func reg(_ i: Install, add key: String, name: String, type: String, data: String) {
