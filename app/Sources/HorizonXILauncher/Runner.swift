@@ -608,6 +608,15 @@ final class Runner: ObservableObject {
             appendLine("!! falling back to the wrapper's own wine — expect the client to exit "
                        + "about a second after login (docs/WINE-BUILD.md)")
         }
+        // Every registry edit above (renderer, SquareEnix path) went through the *wrapper's*
+        // wine, which leaves the wrapper's wineserver alive on this prefix for ~3 s after its
+        // last client. The game runs on the cooperative wine, a different protocol -- and
+        // joining that server is "wine client error: version mismatch 856/1809" followed by a
+        // refused login (2026-08-27, two launches in a row). Wait for it to be gone first;
+        // this is a no-op when a game is already running in the prefix.
+        if RendererSetup.stopWineserver(install) {
+            appendLine("==> wrapper wineserver stopped; the game starts its own")
+        }
         spawnViaShell(exe,
               args: args,
               env: env,
