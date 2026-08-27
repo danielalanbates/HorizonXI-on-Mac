@@ -87,6 +87,14 @@ enum Detach {
     /// A detached child is not ours any more, so `Process.isRunning` and `terminationHandler`
     /// are both unavailable -- this is what replaces them.
     static func isAlive(_ pid: pid_t) -> Bool {
+        // A detached child is still *this process's* child until the launcher exits (a new
+        // session does not reparent it), so when it dies it lingers as a zombie until someone
+        // waits on it -- and `kill(pid, 0)` succeeds on a zombie. Found 2026-08-27: the previous
+        // day's injector sat `<defunct>` for 12 hours, this returned true the whole time, the
+        // "injector exited" callback never fired, and the Play button stayed at RUNNING until
+        // the app was quit. Reap first; only a live process survives both checks.
+        var status: Int32 = 0
+        if waitpid(pid, &status, WNOHANG) == pid { return false }
         return kill(pid, 0) == 0 || errno == EPERM
     }
 
