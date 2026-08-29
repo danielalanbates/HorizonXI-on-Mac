@@ -11,7 +11,7 @@
 /load Thirdparty
 # --HORIZON_PLUGINS_STOP--
 # --HORIZON_ADDONS_START--
-/addon load mousediag
+/addon load winecursor
 /addon load friendlist
 /addon load allmaps
 /addon load chains
