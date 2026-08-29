@@ -481,6 +481,9 @@ struct ContentView: View {
             return "\(world) has no client here yet: \(dir) does not exist. Download the world's "
                  + "client, or point the launcher at the folder you already have it in."
         }
+        if access(dir, R_OK) != 0 {
+            return "This app cannot read \(dir). \(Narration.fullDiskAccessHint)"
+        }
         return "Nothing installed under \(dir) — no plugins/*.dll and no addons/<name>/<name>.lua. "
              + "If that folder is on a drive that is not mounted, mount it and press Addons… again."
     }
@@ -536,7 +539,9 @@ struct ContentView: View {
     private var addonsSheet: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Addons & plugins").font(.headline)
-            Text("Written to scripts/\(active.map { Narration.scriptName(in: $0, profile: store.selected?.bootProfile ?? "horizonxi.ini") } ?? "default.txt"), between the launcher-managed markers. Anything "
+            Text((active.flatMap { Narration.scriptNameIfReadable(in: $0, profile: store.selected?.bootProfile ?? "horizonxi.ini") })
+                   .map { "Written to scripts/\($0), between the launcher-managed markers. Anything " }
+                   ?? "This app cannot read the game folder, so nothing here can be saved. \(Narration.fullDiskAccessHint) Anything "
                  + "you added by hand outside those blocks is left alone.")
                 .font(.caption).foregroundStyle(Vana.muted)
 
@@ -648,6 +653,15 @@ struct ContentView: View {
                 Spacer()
                 Button("Cancel") { showAddons = false }
                 Button("Apply") {
+                    // Nothing scanned means nothing could be *read* (a Dock launch without Full
+                    // Disk Access to the volume), not that the player wants every addon off.
+                    // Writing the empty list would blank both managed blocks.
+                    if addonItems.isEmpty {
+                        notice = "Not saving: nothing could be read under the game folder, so there "
+                               + "is no list to save. \(Narration.fullDiskAccessHint)"
+                        showAddons = false
+                        return
+                    }
                     // Refuse to write a block that would disable everything.
                     //
                     // On 2026-08-22 a broken fetch made the policy reject every installed addon

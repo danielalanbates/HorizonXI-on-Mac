@@ -35,7 +35,10 @@ struct AddonSuite {
     static func metadata(ofLuaAt url: URL) -> (desc: String, author: String, version: String) {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return ("", "", "") }
         defer { try? handle.close() }
-        let head = (try? handle.read(upToCount: 4096)) ?? Data()
+        // 16 KB, not 4: this launcher's own LuaJIT guard prepends a few KB of shim to some
+        // addons (winecursor's header starts at byte 4280), and a header past the window
+        // meant no version or author for exactly the addons this project ships.
+        let head = (try? handle.read(upToCount: 16384)) ?? Data()
         guard let text = String(data: head, encoding: .utf8)
                 ?? String(data: head, encoding: .isoLatin1) else { return ("", "", "") }
 
@@ -163,8 +166,12 @@ struct AddonSuite {
             if line == start { inside = true; continue }
             if line == stop { inside = false; continue }
             guard inside != outside, line.lowercased().hasPrefix(prefix) else { continue }
-            out.append(String(line.dropFirst(prefix.count))
-                        .trimmingCharacters(in: .whitespaces).lowercased())
+            // The name is the first word after the command: `/addon load autologin 0` passes
+            // an argument to the addon, and Ashita loads `autologin`.
+            let rest = String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+            if let name = rest.split(separator: " ", omittingEmptySubsequences: true).first {
+                out.append(String(name).lowercased())
+            }
         }
         return out
     }
@@ -196,9 +203,11 @@ struct AddonSuite {
               replace(&lines, start: pluginsStart, stop: pluginsStop, with: pluginBody)
         else { return false }
 
-        let offByHand = items.filter { $0.manual && !$0.enabled }
-        if !offByHand.isEmpty {
-            let drop = Set(offByHand.map { ($0.isPlugin ? "/load " : "/addon load ") + $0.name.lowercased() })
+        // Any item switched off loses its hand-written line too, not only `manual` ones: an
+        // addon loaded both inside the block and by hand would otherwise keep loading.
+        let off = items.filter { !$0.enabled }
+        if !off.isEmpty {
+            let drop = Set(off.map { ($0.isPlugin ? "/load " : "/addon load ") + $0.name.lowercased() })
             var inside = false
             lines = lines.filter { raw in
                 let t = raw.trimmingCharacters(in: .whitespaces)

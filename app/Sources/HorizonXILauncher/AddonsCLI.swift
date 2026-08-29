@@ -51,7 +51,11 @@ enum AddonsCLI {
             return 2
         }
         let install = base.forServer(server)
-        let script = Narration.scriptName(in: install, profile: server.bootProfile)
+        guard Narration.canRead(install),
+              let script = Narration.scriptNameIfReadable(in: install, profile: server.bootProfile) else {
+            err("cannot read \(install.gameDir.path) (or its config/boot/\(install.bootProfileName(server.bootProfile))). \(Narration.fullDiskAccessHint)")
+            return 2
+        }
         let scriptURL = AddonSuite.scriptURL(install, profile: server.bootProfile)
         let policy = AddonPolicies.policy(for: server, fetched: ServerFeeds().fetchedAddonLists)
         var items = AddonSuite.scan(install, profile: server.bootProfile)
