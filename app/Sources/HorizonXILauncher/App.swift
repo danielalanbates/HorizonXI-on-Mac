@@ -718,6 +718,12 @@ struct ContentView: View {
             Toggle("Bump mapping", isOn: $graphics.bumpMapping)
             Toggle("Environmental animation", isOn: $graphics.environmentAnimation)
             Divider()
+            Toggle("Remember window size", isOn: $graphics.rememberWindowSize)
+            Text("Resize the game window however you like; the next Play opens at that size, "
+                 + "drawn at full detail. FFXI cannot redraw at a new size while running, so a "
+                 + "window enlarged mid-game is stretched until the next launch.")
+                .font(.caption2).foregroundStyle(Vana.muted)
+                .fixedSize(horizontal: false, vertical: true)
             Toggle("Match interface to render resolution", isOn: $graphics.uiFollowsResolution)
             if !graphics.uiFollowsResolution {
                 Picker("Interface resolution", selection: Binding(
