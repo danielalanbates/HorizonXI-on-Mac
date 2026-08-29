@@ -57,9 +57,16 @@ enum WindowMemory {
         return text.contains("\"RetinaMode\"=\"y\"") ? 2 : 1
     }
 
-    /// Persist `size` for `world`, if it differs from what the profile says. Returns a log line.
+    /// Persist the size for `world`, if the window changed size while it ran. Returns a log line.
+    ///
+    /// `first` is the window as it appeared right after launch and `last` as it was seen last;
+    /// both in game pixels. The client opens at exactly the profile's size, so the profile's
+    /// numbers plus the *delta* between the two samples is the new size. That sidesteps wine's
+    /// window frame (a 1-point border either side of the content, on top of the title bar):
+    /// subtracting a guessed frame drifted by a few pixels and re-wrote the profile every run.
     @discardableResult
-    static func remember(_ size: Size, install: Install, profile: String, world: String) -> String? {
+    static func remember(first: Size, last: Size, install: Install, profile: String, world: String) -> String? {
+        guard first != last else { return nil }
         // The profile is the truth for sizes; the preference itself has no ini key and lives
         // only in the stored settings.
         let stored = GraphicsSettings.load(world: world)
@@ -68,8 +75,9 @@ enum WindowMemory {
         g.rememberWindowSize = true
         // Even numbers only: the client rounds odd back buffers and the next sample would then
         // differ by a pixel forever.
-        let w = size.width & ~1, h = size.height & ~1
-        guard w != g.width || h != g.height else { return nil }
+        let w = (g.width + last.width - first.width) & ~1
+        let h = (g.height + last.height - first.height) & ~1
+        guard w >= 640, h >= 480, w != g.width || h != g.height else { return nil }
         let old = "\(g.width)x\(g.height)"
         g.width = w
         g.height = h

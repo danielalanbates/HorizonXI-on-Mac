@@ -648,6 +648,7 @@ final class Runner: ObservableObject {
                 let pids = Self.gamePIDs()
                 if pids.isEmpty { break }
                 if let s = await MainActor.run(body: { WindowMemory.currentSize(pids: pids, scale: scale) }) {
+                    if self?.firstWindowSize == nil { self?.firstWindowSize = s }
                     self?.lastWindowSize = s
                 }
             }
@@ -659,18 +660,20 @@ final class Runner: ObservableObject {
                 guard let self else { return }
                 self.running = false
                 self.appendLine("==> game exited")
-                if let s = self.lastWindowSize, let i = self.currentInstall,
-                   let line = WindowMemory.remember(s, install: i, profile: self.currentProfile,
-                                                    world: self.currentWorld) {
+                if let f = self.firstWindowSize, let s = self.lastWindowSize, let i = self.currentInstall,
+                   let line = WindowMemory.remember(first: f, last: s, install: i,
+                                                    profile: self.currentProfile, world: self.currentWorld) {
                     self.appendLine(line)
                     self.windowSizeRemembered += 1
                 }
                 self.lastWindowSize = nil
+                self.firstWindowSize = nil
             }
         }
     }
 
-    /// Last sampled client window size (game pixels) for this run; see WindowMemory.
+    /// First and last sampled client window sizes (game pixels) for this run; see WindowMemory.
+    private var firstWindowSize: WindowMemory.Size?
     private var lastWindowSize: WindowMemory.Size?
     /// Bumped whenever a size was written back, so the Graphics panel can reload.
     @Published var windowSizeRemembered = 0
