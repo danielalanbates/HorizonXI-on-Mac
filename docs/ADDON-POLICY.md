@@ -62,3 +62,10 @@ managed, and the first Apply adopts it — existing `/load` lines are replaced b
 blocks, while `/wait`, `/ambient` and anything else keep their place. `/load winefix` is left
 exactly where it is, because the UI never offers it and must not sweep it into a block it
 rewrites.
+
+## Where addons are tested (standing rule, 2026-08-28)
+
+Addon development and testing happen **only on the local LandSandBoat world**
+(`scripts/lsb-server.sh`, 127.0.0.1). Never load an addon under test against HorizonXI or any
+other hosted server — the allowlist above exists because that is a bannable offence, and an
+automated test run has no way to know which addon a server tolerates.
