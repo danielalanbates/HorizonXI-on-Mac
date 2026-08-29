@@ -10,6 +10,7 @@ import Foundation
 /// is playing, because it touches nothing.
 ///
 ///     FFXI-on-Mac.app/Contents/MacOS/FFXI-on-Mac --check [--world <name>]
+///     FFXI-on-Mac.app/Contents/MacOS/FFXI-on-Mac --addons … (see AddonsCLI)
 ///
 /// Exit status is 1 if any checked world has a blocking problem, so it is usable from a script.
 enum Headless {
@@ -18,11 +19,13 @@ enum Headless {
     /// belongs on stderr as well -- see Runner.tee).
     static var isHeadlessRun: Bool {
         let a = CommandLine.arguments
-        return a.contains("--check") || a.contains("--play")
+        return a.contains("--check") || a.contains("--play") || a.contains("--addons")
     }
 
     @MainActor static func runIfAsked() {
         let args = CommandLine.arguments
+        // `--addons …` -- list or change a world's addon script and exit (see AddonsCLI).
+        if args.contains("--addons") { exit(AddonsCLI.run(args)) }
         guard args.contains("--check") else { return }
         var only: String? = nil
         if let w = args.firstIndex(of: "--world"), w + 1 < args.count { only = args[w + 1] }

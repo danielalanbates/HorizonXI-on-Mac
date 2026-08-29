@@ -162,6 +162,9 @@ Ashita addons work — HXUI, statustimers, the usual set. The **Addons** screen 
 your server actually allows, and says where that list came from. On HorizonXI an unapproved addon
 can get you banned, so this matters more than it sounds.
 
+No window needed: `scripts/addons.sh list|enable|disable|narration [--world NAME]` does the same
+from a Terminal, names the file it wrote and reads it back — [`docs/ADDONS-CLI.md`](docs/ADDONS-CLI.md).
+
 ## Running your own server
 
 Pick **Local server** in the World menu and press **Set up server**. The launcher builds
