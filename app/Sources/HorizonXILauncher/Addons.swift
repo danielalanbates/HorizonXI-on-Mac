@@ -12,6 +12,10 @@ struct AddonSuite {
         var name: String
         var isPlugin: Bool
         var enabled: Bool
+        /// Loaded by a line somebody wrote *outside* the launcher's managed block. Counted as
+        /// enabled -- it loads -- but the block never duplicates it, and disabling it removes
+        /// that hand-written line, since that is the only way to actually switch it off.
+        var manual: Bool = false
         /// What the addon says about itself. Read out of its own Lua header rather than written
         /// here, so it cannot drift from what is installed and is never this project's guess at
         /// what somebody else's addon does.
@@ -97,6 +101,12 @@ struct AddonSuite {
                                         prefix: "/load "))
         let onAddons = Set(loadedNames(in: text, start: addonsStart, stop: addonsStop,
                                        prefix: "/addon load "))
+        // Lines outside the blocks load too. The local world's lsb.txt keeps its own addons
+        // (cmdpipe, vanaguide…) there by hand, and until 2026-08-29 they showed as "off".
+        let handPlugins = Set(loadedNames(in: text, start: pluginsStart, stop: pluginsStop,
+                                          prefix: "/load ", outside: true))
+        let handAddons = Set(loadedNames(in: text, start: addonsStart, stop: addonsStop,
+                                         prefix: "/addon load ", outside: true))
 
         var out: [Item] = []
         // Plugins are DLLs. `winefix` is this project's own compatibility shim rather than a
@@ -106,8 +116,10 @@ struct AddonSuite {
             for k in kids where k.pathExtension.lowercased() == "dll" {
                 let name = k.deletingPathExtension().lastPathComponent
                 if name.lowercased() == "winefix" { continue }
+                let hand = handPlugins.contains(name.lowercased())
                 out.append(Item(name: name, isPlugin: true,
-                                enabled: onPlugins.contains(name.lowercased()),
+                                enabled: onPlugins.contains(name.lowercased()) || hand,
+                                manual: hand && !onPlugins.contains(name.lowercased()),
                                 desc: pluginDescriptions[name.lowercased()] ?? ""))
             }
         }
@@ -122,8 +134,10 @@ struct AddonSuite {
                 guard fm.fileExists(atPath: k.appendingPathComponent("\(name).lua").path)
                 else { continue }
                 let meta = metadata(ofLuaAt: k.appendingPathComponent("\(name).lua"))
+                let hand = handAddons.contains(name.lowercased())
                 out.append(Item(name: name, isPlugin: false,
-                                enabled: onAddons.contains(name.lowercased()),
+                                enabled: onAddons.contains(name.lowercased()) || hand,
+                                manual: hand && !onAddons.contains(name.lowercased()),
                                 desc: meta.desc, author: meta.author, version: meta.version))
             }
         }
@@ -131,20 +145,24 @@ struct AddonSuite {
                           < ($1.isPlugin ? 0 : 1, $1.name.lowercased()) }
     }
 
+    /// The names a script loads with `prefix` lines inside the marked block -- or, with
+    /// `outside`, the ones it loads anywhere *else* in the file (nothing, when there are no
+    /// markers: then the whole file is the block).
     private static func loadedNames(in text: String, start: String, stop: String,
-                                    prefix: String) -> [String] {
+                                    prefix: String, outside: Bool = false) -> [String] {
         var out: [String] = []
         // A default.txt with no markers is the normal case for an install whose script was
         // written by hand or by a server other than HorizonXI. Reading only between markers
         // there found nothing, so every addon the player actually runs showed as disabled.
         // Without markers, the whole file is the managed region.
         let hasMarkers = text.contains(start) && text.contains(stop)
+        if outside && !hasMarkers { return [] }
         var inside = !hasMarkers
         for raw in TextFile.lines(of: text) {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line == start { inside = true; continue }
             if line == stop { inside = false; continue }
-            guard inside, line.lowercased().hasPrefix(prefix) else { continue }
+            guard inside != outside, line.lowercased().hasPrefix(prefix) else { continue }
             out.append(String(line.dropFirst(prefix.count))
                         .trimmingCharacters(in: .whitespaces).lowercased())
         }
@@ -163,9 +181,11 @@ struct AddonSuite {
 
         // Addons live below plugins in the file, so replacing the lower block first keeps the
         // upper block's indices valid.
-        let addonBody = items.filter { !$0.isPlugin && $0.enabled }
+        // A hand-written line outside the block already loads a `manual` item: the block does
+        // not repeat it. Switching such an item off means taking that line out, below.
+        let addonBody = items.filter { !$0.isPlugin && $0.enabled && !$0.manual }
             .map { "/addon load \($0.name)" }
-        let pluginBody = items.filter { $0.isPlugin && $0.enabled }
+        let pluginBody = items.filter { $0.isPlugin && $0.enabled && !$0.manual }
             .map { "/load \($0.name)" }
 
         if !(text.contains(pluginsStart) && text.contains(addonsStart)) {
@@ -175,6 +195,24 @@ struct AddonSuite {
         guard replace(&lines, start: addonsStart, stop: addonsStop, with: addonBody),
               replace(&lines, start: pluginsStart, stop: pluginsStop, with: pluginBody)
         else { return false }
+
+        let offByHand = items.filter { $0.manual && !$0.enabled }
+        if !offByHand.isEmpty {
+            let drop = Set(offByHand.map { ($0.isPlugin ? "/load " : "/addon load ") + $0.name.lowercased() })
+            var inside = false
+            lines = lines.filter { raw in
+                let t = raw.trimmingCharacters(in: .whitespaces)
+                if t == pluginsStart || t == addonsStart { inside = true; return true }
+                if t == pluginsStop || t == addonsStop { inside = false; return true }
+                if inside { return true }
+                // `/addon load Name 0` (autologin's argument form) counts too: compare the
+                // command and the name, not the whole line.
+                let parts = t.lowercased().split(separator: " ", omittingEmptySubsequences: true)
+                let key = parts.count >= 3 && parts[0] == "/addon" && parts[1] == "load" ? "/addon load " + parts[2]
+                        : parts.count >= 2 && parts[0] == "/load" ? "/load " + parts[1] : ""
+                return !drop.contains(key)
+            }
+        }
 
         return (try? TextFile.join(lines, terminator: eol).write(to: url, atomically: true,
                                                                  encoding: .utf8)) != nil
