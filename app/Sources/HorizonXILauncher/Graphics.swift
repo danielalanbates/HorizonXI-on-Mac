@@ -41,6 +41,10 @@ struct GraphicsSettings: Codable, Equatable {
     /// Sound channels, `0029`. Not graphics, but it lives in the same section and the max-
     /// settings profile raises it, so leaving it out would mean "max" silently was not max.
     var soundChannels: Int = 12
+    /// Launch at whatever size the window was left at last time (see WindowMemory). On by
+    /// default: a resized window that snaps back to the profile's size on the next Play reads
+    /// as the launcher forgetting.
+    var rememberWindowSize: Bool = true
 
     static let key = "graphics.settings"
 
@@ -80,6 +84,8 @@ struct GraphicsSettings: Codable, Equatable {
         environmentAnimation = try c.decodeIfPresent(Bool.self, forKey: .environmentAnimation)
             ?? d.environmentAnimation
         soundChannels = try c.decodeIfPresent(Int.self, forKey: .soundChannels) ?? d.soundChannels
+        rememberWindowSize = try c.decodeIfPresent(Bool.self, forKey: .rememberWindowSize)
+            ?? d.rememberWindowSize
     }
 
     /// Interface resolutions, smallest first — and smaller means a *bigger* on-screen interface.

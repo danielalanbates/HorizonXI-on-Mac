@@ -51,3 +51,11 @@ rare public release.
 This project has repeatedly reached a good state mid-session and then lost it to the
 next round of experiments. Cutting a release at the stable point is what makes the
 good state recoverable.
+
+## Verified 2026-08-28 — window memory (PR #14)
+
+Full drag-resize → exit → relaunch cycle on the local world: window dragged 642×390 → 902×583 pt,
+exit via the Ashita close dialog, `lsb.ini` `0001/0002` (and `0037/0038`) rewritten 1280×720 →
+1800×1106, next Play opened at exactly 902×583 with the UI rendered natively at that size
+(not stretched). Local `/Applications/FFXI-on-Mac.app` now carries this build; prior build 21
+archived in `archive/app-builds/`.

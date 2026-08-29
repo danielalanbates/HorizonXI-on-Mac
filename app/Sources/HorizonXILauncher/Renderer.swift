@@ -337,7 +337,15 @@ enum RendererSetup {
     /// `reg` edits do not reach a running wineserver, and a stale one silently keeps the old
     /// value — which is how an earlier pass of this project produced a "success" screenshot from
     /// the pathway it thought it had just switched away from.
-    static func stopWineserver(_ i: Install) {
+    /// Returns whether a wineserver was actually running when asked, so callers can say so.
+    @discardableResult
+    static func stopWineserver(_ i: Install) -> Bool {
+        let chk = Process()
+        chk.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        chk.arguments = ["-x", "wineserver"]
+        chk.standardOutput = Pipe(); chk.standardError = Pipe()
+        var wasUp = false
+        if (try? chk.run()) != nil { chk.waitUntilExit(); wasUp = chk.terminationStatus == 0 }
         let p = Process()
         p.executableURL = i.wineserver
         p.arguments = ["-k"]
@@ -358,6 +366,7 @@ enum RendererSetup {
         let deadline = Date().addingTimeInterval(30)
         while w.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
         if w.isRunning { w.terminate() }
+        return wasUp
     }
 
     private static func reg(_ i: Install, add key: String, name: String, type: String, data: String) {

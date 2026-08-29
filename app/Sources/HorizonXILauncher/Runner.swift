@@ -101,6 +101,8 @@ final class Runner: ObservableObject {
     /// so the launcher would otherwise look hung. Surfaced to the UI and the loader is stopped.
     @Published var loginFailure: String = ""
     private var currentInstall: Install?
+    private var currentProfile = "horizonxi.ini"
+    private var currentWorld = ""
 
     func appendChunk(_ s: String) {
         tee(s)
@@ -511,6 +513,8 @@ final class Runner: ObservableObject {
         running = true
         loginFailure = ""
         currentInstall = install
+        currentProfile = profile
+        currentWorld = world.isEmpty ? "Vana'diel" : world
         // The renderer lives in the prefix's registry and DLLs, not in the environment, so it has
         // to be written before the process starts — and after any wineserver holding the old copy
         // of the registry has exited.
@@ -636,9 +640,17 @@ final class Runner: ObservableObject {
     private func watchGameProcess() {
         Task { [weak self] in
             // Give the injector's child a moment to appear before deciding it never did.
+            // Sample the window on the way: the last size seen is what the next launch opens
+            // at (WindowMemory). Sampled on the main actor, since it reads the window server.
+            let scale = self?.currentInstall.map(WindowMemory.scale(for:)) ?? 1
             for _ in 0..<300 {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
-                if !Self.gameIsRunning() { break }
+                let pids = Self.gamePIDs()
+                if pids.isEmpty { break }
+                if let s = await MainActor.run(body: { WindowMemory.currentSize(pids: pids, scale: scale) }) {
+                    if self?.firstWindowSize == nil { self?.firstWindowSize = s }
+                    self?.lastWindowSize = s
+                }
             }
             // Two consecutive misses, because pgrep can miss the process for a beat while wine
             // re-execs it during start-up.
@@ -648,8 +660,36 @@ final class Runner: ObservableObject {
                 guard let self else { return }
                 self.running = false
                 self.appendLine("==> game exited")
+                if let f = self.firstWindowSize, let s = self.lastWindowSize, let i = self.currentInstall,
+                   let line = WindowMemory.remember(first: f, last: s, install: i,
+                                                    profile: self.currentProfile, world: self.currentWorld) {
+                    self.appendLine(line)
+                    self.windowSizeRemembered += 1
+                }
+                self.lastWindowSize = nil
+                self.firstWindowSize = nil
             }
         }
+    }
+
+    /// First and last sampled client window sizes (game pixels) for this run; see WindowMemory.
+    private var firstWindowSize: WindowMemory.Size?
+    private var lastWindowSize: WindowMemory.Size?
+    /// Bumped whenever a size was written back, so the Graphics panel can reload.
+    @Published var windowSizeRemembered = 0
+
+    private static func gamePIDs() -> [pid_t] {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        p.arguments = ["-f", currentGameExe]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = Pipe()
+        guard (try? p.run()) != nil else { return [] }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline)
+            .compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
     }
 
     private static func gameIsRunning() -> Bool {
