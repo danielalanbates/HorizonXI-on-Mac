@@ -80,14 +80,19 @@ struct AddonSuite {
         "sequencer":  "Plays and manages animation sequences.",
     ]
 
-    static func scriptURL(_ i: Install) -> URL {
-        i.gameDir.appendingPathComponent("scripts/default.txt")
+    /// The script the *selected world's* boot profile runs. Not always `default.txt`: the local
+    /// LandSandBoat profile names `lsb.txt`, precisely so that an addon enabled for the local
+    /// world cannot load on HorizonXI. Until 2026-08-29 this ignored the profile and always
+    /// edited `default.txt`, so enabling Vanaguide "for the local world" quietly wrote it into
+    /// HorizonXI's script -- the one place it must never appear.
+    static func scriptURL(_ i: Install, profile: String) -> URL {
+        i.gameDir.appendingPathComponent("scripts/\(Narration.scriptName(in: i, profile: profile))")
     }
 
     /// Everything installed, with the ones the script currently loads marked enabled.
-    static func scan(_ i: Install) -> [Item] {
+    static func scan(_ i: Install, profile: String) -> [Item] {
         let fm = FileManager.default
-        let text = (try? String(contentsOf: scriptURL(i), encoding: .utf8)) ?? ""
+        let text = (try? String(contentsOf: scriptURL(i, profile: profile), encoding: .utf8)) ?? ""
         let onPlugins = Set(loadedNames(in: text, start: pluginsStart, stop: pluginsStop,
                                         prefix: "/load "))
         let onAddons = Set(loadedNames(in: text, start: addonsStart, stop: addonsStop,
@@ -150,8 +155,8 @@ struct AddonSuite {
     /// case nothing is written — better to do nothing than to guess where the block belongs in a
     /// file the server's own launcher also edits.
     @discardableResult
-    static func write(_ items: [Item], to install: Install) -> Bool {
-        let url = scriptURL(install)
+    static func write(_ items: [Item], to install: Install, profile: String) -> Bool {
+        let url = scriptURL(install, profile: profile)
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return false }
         let eol = TextFile.terminator(of: text)
         var lines = TextFile.lines(of: text)

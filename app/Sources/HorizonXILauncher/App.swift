@@ -536,7 +536,7 @@ struct ContentView: View {
     private var addonsSheet: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Addons & plugins").font(.headline)
-            Text("Written to scripts/default.txt, between the launcher-managed markers. Anything "
+            Text("Written to scripts/\(active.map { Narration.scriptName(in: $0, profile: store.selected?.bootProfile ?? "horizonxi.ini") } ?? "default.txt"), between the launcher-managed markers. Anything "
                  + "you added by hand outside those blocks is left alone.")
                 .font(.caption).foregroundStyle(Vana.muted)
 
@@ -568,7 +568,7 @@ struct ContentView: View {
                                     await MainActor.run {
                                         installingExtra = ""
                                         if ok {
-                                            addonItems = AddonSuite.scan(i)
+                                            addonItems = AddonSuite.scan(i, profile: store.selected?.bootProfile ?? "horizonxi.ini")
                                             if let idx = addonItems.firstIndex(where: {
                                                 !$0.isPlugin && $0.name.lowercased() == e.name }) {
                                                 addonItems[idx].enabled = true
@@ -669,8 +669,9 @@ struct ContentView: View {
                     // individually toggled, switching them off would be overriding a choice
                     // rather than preventing an accident. It is said out loud instead.
                     let unapproved = addonItems.filter { $0.enabled && !addonPolicy.allows($0.name) }
-                    if let i = active, !AddonSuite.write(addonItems, to: i) {
-                        notice = "Could not write scripts/default.txt — its launcher markers are missing."
+                    let profile = store.selected?.bootProfile ?? "horizonxi.ini"
+                    if let i = active, !AddonSuite.write(addonItems, to: i, profile: profile) {
+                        notice = "Could not write scripts/\(Narration.scriptName(in: i, profile: profile)) — its launcher markers are missing."
                     } else if !unapproved.isEmpty, addonPolicy.isRestricting {
                         notice = "Addon list saved, including \(unapproved.count) "
                                + "\(store.selected?.name ?? "this server") does not approve: "
@@ -1722,7 +1723,7 @@ struct ContentView: View {
                    + "above and point the launcher at your wrapper app."
             return
         }
-        addonItems = AddonSuite.scan(i)
+        addonItems = AddonSuite.scan(i, profile: store.selected?.bootProfile ?? "horizonxi.ini")
         let bad = AddonSuite.mismatchedPlugins(i)
         addonWarning = bad.isEmpty ? "" :
             "Ashita refused these plugins on the last run because they are built for a different "
