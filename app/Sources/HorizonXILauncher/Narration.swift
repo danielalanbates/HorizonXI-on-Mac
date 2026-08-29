@@ -25,6 +25,37 @@ enum Narration {
     /// this project's local LandSandBoat profile does exactly that, so that an addon enabled for
     /// the local world cannot load on HorizonXI. Assuming the filename would put the load line
     /// in a file nobody reads, or worse, in the one world where it must not appear.
+    /// Like `scriptName`, but nil when the profile exists and cannot be read -- this app has no
+    /// Full Disk Access to the volume it is on, say. `scriptName` has to answer (Play needs a
+    /// file), so it falls back to Ashita's default; the addon screen and `--addons` use this
+    /// and refuse to write rather than edit a file they only guessed at. Found 2026-08-29: the
+    /// launcher opened from the Dock could not read x10 (a Time Machine volume), showed
+    /// "nothing installed", captioned the sheet `default.txt`, and an Apply would have written
+    /// an empty block.
+    static func scriptNameIfReadable(in install: Install, profile: String) -> String? {
+        let name = install.bootProfileName(profile)
+        let url = install.gameDir.appendingPathComponent("config/boot/\(name)")
+        if access(url.path, R_OK) != 0 {
+            let code = errno
+            // No profile file at all is the ordinary case for a fresh install: Ashita runs
+            // default.txt. Anything else (EACCES, EPERM, an unmounted volume) is "cannot read".
+            if code == ENOENT, access(install.gameDir.path, R_OK) == 0 { return "default.txt" }
+            return nil
+        }
+        return scriptName(in: install, profile: profile)
+    }
+
+    /// Whether this process can read the game folder at all. False from a Dock launch when the
+    /// folder is on a Time Machine volume and the app has no Full Disk Access.
+    static func canRead(_ install: Install) -> Bool {
+        access(install.gameDir.path, R_OK) == 0
+            && access(install.gameDir.appendingPathComponent("scripts").path, R_OK) == 0
+    }
+
+    static let fullDiskAccessHint = "If that folder is on a Time Machine volume, this app needs "
+        + "Full Disk Access (System Settings → Privacy & Security → Full Disk Access → FFXI-on-Mac), "
+        + "or start it from a Terminal that has it."
+
     static func scriptName(in install: Install, profile: String) -> String {
         let name = install.bootProfileName(profile)
         let url = install.gameDir.appendingPathComponent("config/boot/\(name)")

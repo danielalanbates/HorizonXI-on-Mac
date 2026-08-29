@@ -189,6 +189,16 @@ struct PerfSettings: Codable {
             let existing = env["DYLD_INSERT_LIBRARIES"]
             env["DYLD_INSERT_LIBRARIES"] = existing.map { $0 + ":" + dylib.path } ?? dylib.path
         }
+        // The mouse cursor is invisible under Wine on every server (FFXI hides it and draws its
+        // own sprite, which DXVK does not render). winecursor.dylib neutralises the native hide so
+        // the arrow stays visible. Always on: it is a compatibility shim with no gameplay effect,
+        // and unlike the `winecursor` addon it is not governed by a server's addon allowlist, so
+        // it fixes the cursor on HorizonXI without loading an unlisted addon. Same missing/
+        // wrong-arch guard as audiofollow (WineCursor.dylib() returns nil unless it is safe).
+        if let dylib = WineCursor.dylib() {
+            let existing = env["DYLD_INSERT_LIBRARIES"]
+            env["DYLD_INSERT_LIBRARIES"] = existing.map { $0 + ":" + dylib.path } ?? dylib.path
+        }
         if disableAppNap { env["LSAppNapIsDisabled"] = "1" }
         if largeAddressAware { env["WINE_LARGE_ADDRESS_AWARE"] = "1" }
         for (k, v) in renderer.environment { env[k] = v }

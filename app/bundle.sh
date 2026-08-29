@@ -69,6 +69,14 @@ fi
 [[ -f "$REPO/app/Resources/audiofollow.dylib" ]] && \
   cp "$REPO/app/Resources/audiofollow.dylib" "$APP/Contents/Resources/audiofollow.dylib"
 
+# winecursor.dylib -- inserted into wine to keep the mouse cursor visible (FFXI hides it and DXVK
+# does not render its own sprite); see cursor/winecursor.m and docs/CURSOR.md. Built if missing.
+if [[ ! -f "$REPO/app/Resources/winecursor.dylib" ]]; then
+  "$REPO/scripts/build-winecursor.sh" >/dev/null 2>&1 || true
+fi
+[[ -f "$REPO/app/Resources/winecursor.dylib" ]] && \
+  cp "$REPO/app/Resources/winecursor.dylib" "$APP/Contents/Resources/winecursor.dylib"
+
 # Dock/Finder icon: an original crystal mark in the launcher's own Vana'diel palette (see
 # scripts/make_icon.py), not extracted from Square Enix's client -- this project's own art.
 [[ -f "$HERE/AppIcon.icns" ]] && cp "$HERE/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
@@ -97,8 +105,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>NSDesktopFolderUsageDescription</key><string>To find a wrapper you keep on the Desktop.</string>
   <key>NSDocumentsFolderUsageDescription</key><string>To find a wrapper you keep in Documents.</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>3.8</string>
-  <key>CFBundleVersion</key><string>21</string>
+  <key>CFBundleShortVersionString</key><string>3.9</string>
+  <key>CFBundleVersion</key><string>22</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
@@ -123,6 +131,7 @@ find "$APP" -exec xattr -c {} \; 2>/dev/null || true
 X87SC="$APP/Contents/Resources/x87sidecar_entitled"
 X87COOP="$APP/Contents/Resources/x87sidecar-coop"
 AUDIOFOLLOW="$APP/Contents/Resources/audiofollow.dylib"
+WINECURSOR="$APP/Contents/Resources/winecursor.dylib"
 if [[ -n "${HXI_SIGN_ID:-}" ]]; then
   # The cooperative sidecar has no entitlements, so it can carry the hardened runtime and the
   # secure timestamp the notary demands of nested executables. --timestamp is required here:
@@ -133,11 +142,13 @@ if [[ -n "${HXI_SIGN_ID:-}" ]]; then
   # Nested dylibs need the hardened runtime and a secure timestamp too, or the notary rejects
   # the whole bundle on this one file.
   [[ -f "$AUDIOFOLLOW" ]] && codesign --force --options runtime --timestamp -s "$HXI_SIGN_ID" "$AUDIOFOLLOW"
+  [[ -f "$WINECURSOR" ]] && codesign --force --options runtime --timestamp -s "$HXI_SIGN_ID" "$WINECURSOR"
   codesign --force --options runtime -s "$HXI_SIGN_ID" "$APP"
 else
   [[ -f "$X87SC" ]] && codesign --force -s - \
     --entitlements "$REPO/vendor/x87sidecar-entitlements.plist" "$X87SC" >/dev/null 2>&1 || true
   [[ -f "$AUDIOFOLLOW" ]] && codesign --force -s - "$AUDIOFOLLOW" >/dev/null 2>&1 || true
+  [[ -f "$WINECURSOR" ]] && codesign --force -s - "$WINECURSOR" >/dev/null 2>&1 || true
   codesign --force -s - "$APP" >/dev/null 2>&1 || true
 fi
 
