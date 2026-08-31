@@ -99,6 +99,7 @@ struct GraphicsSettings: Codable, Equatable {
     ]
 
     static let resolutions: [(String, Int, Int)] = [
+        ("640 × 480", 640, 480),
         ("1280 × 720", 1280, 720),
         ("1920 × 1080", 1920, 1080),
         ("2560 × 1440", 2560, 1440),
