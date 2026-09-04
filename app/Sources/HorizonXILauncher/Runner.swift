@@ -561,7 +561,19 @@ final class Runner: ObservableObject {
         appendLine("==> launching \(install.bootProfileName(profile)) (Ashita \(install.ashitaGeneration.rawValue))")
         // Make the Dock tile say which world is running, under this project's own icon.
         DockIcon.apply(to: install, world: world.isEmpty ? "Vana'diel" : world) { [weak self] in self?.appendLine($0) }
-        var env = perf.environment(for: install, x87: useX87)
+        // A hidden launchctl-only switch for matched diagnostics. It must be read by the Mac
+        // launcher, not passed through Extra environment, because the setting under test is
+        // whether ROSETTA_X87_PATH exists in Wine's environment at all.
+        let x87DisabledForDiagnostics =
+            ProcessInfo.processInfo.environment["FFXI_ON_MAC_DISABLE_X87"] == "1"
+        let x87Enabled = useX87 && !x87DisabledForDiagnostics
+        var env = perf.environment(for: install, x87: x87Enabled)
+        if let capture = PerformanceDiagnostics.consume(
+            for: install.gameDir, gameDirectoryWine: install.gameDirWine) {
+            for (key, value) in capture.environment { env[key] = value }
+            appendLine("==> performance capture \(capture.session) enabled (\(capture.level))")
+            appendLine("    \(capture.directory.path)")
+        }
         // The tile the *wine process* wears: CrossOver wine's CX_ROOT icon fallback, since the
         // loader has no icon resource of its own. See DockIcon.cxRoot.
         if env["CX_ROOT"] == nil, let cx = DockIcon.cxRoot(for: world.isEmpty ? "Vana'diel" : world,
@@ -584,7 +596,9 @@ final class Runner: ObservableObject {
         // x87 acceleration rides on ROSETTA_X87_PATH now (set in PerfSettings.environment), so
         // there is nothing to wrap here: wine re-execs every i386 process through the sidecar
         // itself, including the client Ashita spawns. See Settings.swift for the measurements.
-        if !useX87 {
+        if x87DisabledForDiagnostics {
+            appendLine("i  x87 acceleration disabled for this diagnostic launch; Rosetta AOT remains enabled")
+        } else if !useX87 {
             appendLine("i  x87 acceleration is off for this world because this client is slower "
                        + "or incompatible with it.")
         } else if X87Sidecar.coopBinary() == nil {
@@ -605,7 +619,7 @@ final class Runner: ObservableObject {
         let bootFile = install.bootProfileName(profile)
         let args = [injector, bootFile]
         appendLine("==> wine: \(gameWine.path)"
-                   + (useX87 && X87Sidecar.coopBinary() != nil ? " + x87 sidecar" : ""))
+                   + (x87Enabled && X87Sidecar.coopBinary() != nil ? " + x87 sidecar" : ""))
         // Every registry edit above (renderer, SquareEnix path) went through the *wrapper's*
         // wine, which leaves the wrapper's wineserver alive on this prefix for ~3 s after its
         // last client. The game runs on the cooperative wine, a different protocol -- and
