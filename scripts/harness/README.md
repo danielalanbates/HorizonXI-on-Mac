@@ -26,9 +26,12 @@ DXVK frame log, screenshots the game window, sends one Return through the compil
 clicks the title bar and refuses to post the key unless the game is frontmost. A second Return
 is a hard error in the driver, not a configuration.
 
-Cleanup is two-phase. The game processes get `SIGTERM` first and the driver waits up to eight
-seconds for their sidecars to see the exit and append the block-profile counter section. Only
-then does the broad sweep terminate, kill, and check every related process name. The run ends
+Cleanup is two-phase. The game process this run launched gets `SIGTERM` first and the driver
+waits up to eight seconds for its sidecar to see the exit and append the block-profile counter
+section. Only then does the broad sweep terminate, kill, and check every related process name.
+If a game process the driver did not launch is alive at cleanup time, a person is at the
+keyboard and the driver skips cleanup entirely rather than end their session; it once killed a
+hand-driven character creation this way. The run ends
 with `menu-run.json` in the capture directory: phase times, the game PID, screenshots, every
 launchd variable it set and cleared, the leftover process check, and whether the block profile
 is complete.

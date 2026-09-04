@@ -63,6 +63,26 @@ class MenuRunTests(unittest.TestCase):
         self.assertEqual(runner.wine_session_path(),
                          "Z:\\Users\\me\\Games\\FFXI\\logs\\performance-captures\\s1")
 
+    def test_cleanup_leaves_a_game_it_did_not_launch_alone(self):
+        args = argparse.Namespace(game_dir=Path("/"), env=[], x87_profile=False, limit=1,
+                                  max_returns=1, characters=False, sidecar_grace=0.5)
+        runner = menu_run.MenuRun(args)
+        runner.game_pid = 999999
+        killed = []
+        original_matching = menu_run.matching
+        original_send = menu_run.send_signal
+        menu_run.matching = lambda suffixes: (
+            [(424242, "horizon-loader.exe")] if suffixes == menu_run.GAME_SUFFIXES
+            else [(424242, "horizon-loader.exe"), (424243, "wineserver")])
+        menu_run.send_signal = lambda pids, signum: killed.extend(pids)
+        try:
+            runner.cleanup()
+        finally:
+            menu_run.matching = original_matching
+            menu_run.send_signal = original_send
+        self.assertEqual(killed, [])
+        self.assertTrue(any("cleanup skipped" in e["label"] for e in runner.record["events"]))
+
     def test_guarded_variables_cover_every_documented_experiment(self):
         for name in ("X87_PROFILE", "X87_SAMPLE", "X87_ENABLE_FMA_CONTRACT",
                      "FFXI_ON_MAC_DISABLE_X87", "X87_STOCK_HASH_LIST", "X87_DISABLE_X87_IR"):

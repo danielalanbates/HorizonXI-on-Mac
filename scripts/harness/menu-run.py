@@ -407,10 +407,18 @@ class MenuRun:
     # -- cleanup -----------------------------------------------------------------------
 
     def cleanup(self) -> None:
-        # Phase 1: the profiled processes only, then a bounded wait for their sidecars.
-        targets = [pid for pid, _ in matching(GAME_SUFFIXES)]
-        if self.game_pid and process_exists(self.game_pid) and self.game_pid not in targets:
-            targets.append(self.game_pid)
+        # Phase 1: the game process this run launched, then a bounded wait for its sidecar.
+        # Only that pid. A game the driver did not start belongs to a person at the keyboard,
+        # and a bounded run once terminated one mid character creation. If another game
+        # process is alive, leave it and the rest of the Wine stack alone entirely.
+        foreign = [pid for pid, _ in matching(GAME_SUFFIXES) if pid != self.game_pid]
+        if foreign:
+            self.event("cleanup skipped: a game process this run did not launch is alive",
+                       pids=foreign)
+            self.record["leftover_processes"] = [
+                f"{pid} {command}" for pid, command in matching(RELATED_SUFFIXES)]
+            return
+        targets = [self.game_pid] if self.game_pid and process_exists(self.game_pid) else []
         if targets:
             self.event("cleanup phase 1", pids=targets)
             send_signal(targets, signal.SIGTERM)
