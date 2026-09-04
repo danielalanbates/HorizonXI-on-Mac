@@ -7,7 +7,7 @@ Measured 2026-08-21, same prefix, same boot profile, same 66-variable environmen
 | wine | result |
 | --- | --- |
 | `siku.app/Contents/SharedSupport/wine/bin/wine` (the Sikarugir wrapper's own) | "Successfully logged in" → **"Closing..." one second later**, process gone |
-| `/Volumes/Games/FFXI/wine-coop/wine/bin/wine` (athei/wine-build `wine-cx-26.3.0-1`) | logs in, reaches the world, runs indefinitely (58 fps) |
+| athei/wine-build `wine-cx-26.3.0-1` | logs in, reaches the world, runs indefinitely (58 fps) |
 
 The wrapper's wine announces `err:environ:init_peb starting L"C:\HorizonXI\Ashita-cli.exe" in
 experimental wow64 mode`, which the patched build does not; that is the likeliest culprit but has
@@ -19,14 +19,14 @@ the child's stdio, this one is about which wine binary runs. Both had to be fixe
 
 ## What the launcher does
 
-`X87Sidecar.patchedWine()` returns the wine-coop binary if it is installed, and `Runner.launch`
-prefers it **whether or not** x87 acceleration is on (it is off by default now — see
-docs/X87-WALL.md). Without it the launcher falls back to the wrapper's wine and says so in the log
-strip, because a silent one-second exit after login is the least debuggable failure this project
-has produced twice now.
+`X87Sidecar.patchedWine()` returns the installed runtime whether or not x87 acceleration is on.
+Preflight blocks Play when it is absent, and `Runner.launch` refuses direct `--play` calls too.
+The launcher never substitutes the incompatible wrapper Wine.
 
-**So wine-coop is no longer optional.** It arrived as an x87 experiment; it is now the only wine
-that plays. `/Volumes/Games/FFXI/wine-coop/` — 700 MB, per machine, not in the app bundle.
+**So the patched game Wine is no longer optional.** It arrived as an x87 experiment; it is now the
+only Wine that plays. First-run setup downloads the pinned 194 MB archive, verifies SHA-256
+`ec2a9e4d438917a26e381c01367773df79c3b0d6f0504b8183464619cad7e661`, and installs the runtime
+under Application Support. It is over 1 GB unpacked, so it is not part of the app bundle.
 
 ## `--play` works again, with one condition
 

@@ -1,0 +1,386 @@
+diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
+index adb80b5..cd9a807 100644
+--- a/src/d3d9/d3d9_device.cpp
++++ b/src/d3d9/d3d9_device.cpp
+@@ -3016,11 +3016,247 @@ namespace {
+   }
+ 
+ 
++  namespace {
++    // Stage timing for the user-pointer draw path (DXVK_UP_PROBE=<path>). Host sampling points
++    // at this function during HorizonXI's slow scene loads, but a sampled instruction cannot say
++    // whether the device lock, draw preparation, ring-buffer allocation, byte copy, or CS enqueue
++    // owns the wall time. This probe prices each stage once per second and records the size mix.
++    struct D3D9UpProbe {
++      FILE* file = nullptr;
++      std::chrono::steady_clock::time_point tick;
++      uint64_t calls[2] = { };
++      uint64_t bytes[2] = { };
++      uint64_t ns[2][6] = { };
++      uint64_t sizeBuckets[4] = { };
++      uint64_t maxNs = 0;
++
++      D3D9UpProbe() {
++        const char* path = std::getenv("DXVK_UP_PROBE");
++        if (path && *path)
++          file = std::fopen(path, "a");
++        if (file) {
++          std::fprintf(file,
++            "up_calls_per_sec,indexed_calls_per_sec,up_kib_per_sec,indexed_kib_per_sec,"
++            "lock_ms_per_sec,prepare_ms_per_sec,alloc_ms_per_sec,copy_ms_per_sec,"
++            "emit_ms_per_sec,other_ms_per_sec,total_ms_per_sec,max_call_us,"
++            "size_le_128_pct,size_le_512_pct,size_le_4096_pct,size_gt_4096_pct\n");
++          std::fflush(file);
++        }
++        tick = std::chrono::steady_clock::now();
++      }
++
++      bool on() const { return file != nullptr; }
++
++      void add(bool indexed, uint32_t size,
++               std::chrono::steady_clock::time_point enter,
++               std::chrono::steady_clock::time_point lockStart,
++               std::chrono::steady_clock::time_point lockEnd,
++               std::chrono::steady_clock::time_point prepareEnd,
++               std::chrono::steady_clock::time_point allocEnd,
++               std::chrono::steady_clock::time_point copyEnd,
++               std::chrono::steady_clock::time_point emitEnd) {
++        if (!file)
++          return;
++        const size_t kind = indexed ? 1 : 0;
++        auto elapsed = [](auto a, auto b) {
++          return uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(b - a).count());
++        };
++        const uint64_t total = elapsed(enter, emitEnd);
++        const uint64_t lock = elapsed(lockStart, lockEnd);
++        const uint64_t prepare = elapsed(lockEnd, prepareEnd);
++        const uint64_t alloc = elapsed(prepareEnd, allocEnd);
++        const uint64_t copy = elapsed(allocEnd, copyEnd);
++        const uint64_t emit = elapsed(copyEnd, emitEnd);
++        calls[kind]++;
++        bytes[kind] += size;
++        ns[kind][0] += lock;
++        ns[kind][1] += prepare;
++        ns[kind][2] += alloc;
++        ns[kind][3] += copy;
++        ns[kind][4] += emit;
++        ns[kind][5] += total - std::min(total, lock + prepare + alloc + copy + emit);
++        maxNs = std::max(maxNs, total);
++        sizeBuckets[size <= 128 ? 0 : size <= 512 ? 1 : size <= 4096 ? 2 : 3]++;
++
++        auto now = std::chrono::steady_clock::now();
++        const double seconds = std::chrono::duration<double>(now - tick).count();
++        if (seconds < 1.0)
++          return;
++        const uint64_t totalCalls = calls[0] + calls[1];
++        uint64_t stages[6] = { };
++        for (size_t stage = 0; stage < 6; stage++)
++          stages[stage] = ns[0][stage] + ns[1][stage];
++        uint64_t totalNs = 0;
++        for (uint64_t stage : stages)
++          totalNs += stage;
++        std::fprintf(file, "%.1f,%.1f,%.2f,%.2f",
++          double(calls[0]) / seconds, double(calls[1]) / seconds,
++          double(bytes[0]) / 1024.0 / seconds, double(bytes[1]) / 1024.0 / seconds);
++        for (uint64_t stage : stages)
++          std::fprintf(file, ",%.3f", double(stage) / 1.0e6 / seconds);
++        std::fprintf(file, ",%.3f,%.2f", double(totalNs) / 1.0e6 / seconds,
++          double(maxNs) / 1000.0);
++        for (uint64_t bucket : sizeBuckets)
++          std::fprintf(file, ",%.2f", totalCalls ? 100.0 * double(bucket) / double(totalCalls) : 0.0);
++        std::fprintf(file, "\n");
++        std::fflush(file);
++        std::memset(calls, 0, sizeof(calls));
++        std::memset(bytes, 0, sizeof(bytes));
++        std::memset(ns, 0, sizeof(ns));
++        std::memset(sizeBuckets, 0, sizeof(sizeBuckets));
++        maxNs = 0;
++        tick = now;
++      }
++    };
++    static D3D9UpProbe g_upProbe;
++
++    // In-flight watchdog for DrawPrimitiveUP and DrawIndexedPrimitiveUP
++    // (DXVK_UP_STAGE_LOG=<path>). The aggregate probe above can only record a call after it
++    // returns. This helper reports a call that remains inside one stage for at least a second,
++    // including the sizes that determine the upload work. It only reads atomics from its own
++    // thread and never suspends the game or renderer threads.
++    enum class UpStage : uint32_t {
++      NotStarted, DeviceLock, Validate, PrepareDraw, GenerateInfo, Allocate,
++      CopyVertex, CopyIndices, Emit, Cleanup, OutsideCall,
++    };
++
++    struct D3D9UpStageProbe {
++      FILE* file = nullptr;
++      std::atomic<uint32_t> stage = { uint32_t(UpStage::NotStarted) };
++      std::atomic<uint64_t> enteredUs = { 0 };
++      std::atomic<uint32_t> threadId = { 0 };
++      std::atomic<uint64_t> callId = { 0 };
++      std::atomic<uint64_t> completed = { 0 };
++      std::atomic<uint32_t> indexed = { 0 };
++      std::atomic<uint32_t> primitiveCount = { 0 };
++      std::atomic<uint32_t> vertexCount = { 0 };
++      std::atomic<uint32_t> stride = { 0 };
++      std::atomic<uint32_t> dataSize = { 0 };
++      std::atomic<uint32_t> bufferSize = { 0 };
++      std::atomic<bool> watchdogStarted = { false };
++      uint64_t originUs = nowUs();
++
++      static uint64_t nowUs() {
++        return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
++          std::chrono::steady_clock::now().time_since_epoch()).count());
++      }
++
++      static const char* name(UpStage value) {
++        switch (value) {
++          case UpStage::DeviceLock:    return "device_lock";
++          case UpStage::Validate:      return "validate";
++          case UpStage::PrepareDraw:   return "prepare_draw";
++          case UpStage::GenerateInfo:  return "generate_info";
++          case UpStage::Allocate:      return "allocate";
++          case UpStage::CopyVertex:    return "copy_vertex";
++          case UpStage::CopyIndices:   return "copy_indices";
++          case UpStage::Emit:          return "emit";
++          case UpStage::Cleanup:       return "cleanup";
++          case UpStage::OutsideCall:   return "outside_call";
++          default:                     return "not_started";
++        }
++      }
++
++      D3D9UpStageProbe() {
++        const char* path = std::getenv("DXVK_UP_STAGE_LOG");
++        if (path && *path)
++          file = std::fopen(path, "a");
++        if (file) {
++          std::fprintf(file,
++            "elapsed_ms,phase,phase_ms,thread_id,call_id,indexed,primitive_count,"
++            "vertex_count,stride,data_size,buffer_size,completed_calls\n");
++          std::fflush(file);
++        }
++      }
++
++      static DWORD WINAPI watch(void* parameter) {
++        auto* probe = reinterpret_cast<D3D9UpStageProbe*>(parameter);
++        while (true) {
++          Sleep(1000);
++          const uint64_t call = probe->callId.load(std::memory_order_acquire);
++          const auto current = UpStage(probe->stage.load(std::memory_order_acquire));
++          const uint64_t entered = probe->enteredUs.load(std::memory_order_relaxed);
++          const uint32_t thread = probe->threadId.load(std::memory_order_relaxed);
++          const uint32_t isIndexed = probe->indexed.load(std::memory_order_relaxed);
++          const uint32_t primitives = probe->primitiveCount.load(std::memory_order_relaxed);
++          const uint32_t vertices = probe->vertexCount.load(std::memory_order_relaxed);
++          const uint32_t vertexStride = probe->stride.load(std::memory_order_relaxed);
++          const uint32_t bytes = probe->dataSize.load(std::memory_order_relaxed);
++          const uint32_t allocation = probe->bufferSize.load(std::memory_order_relaxed);
++          const uint64_t completedCalls = probe->completed.load(std::memory_order_relaxed);
++          const uint64_t now = nowUs();
++
++          // Do not combine fields from two calls if the active stage changed while sampling.
++          if (call != probe->callId.load(std::memory_order_acquire)
++           || current != UpStage(probe->stage.load(std::memory_order_acquire))
++           || now < entered)
++            continue;
++          std::fprintf(probe->file, "%llu,%s,%.3f,%lu,%llu,%u,%u,%u,%u,%u,%u,%llu\n",
++            (unsigned long long)((now - probe->originUs) / 1000), name(current),
++            entered ? double(now - entered) / 1000.0 : 0.0, (unsigned long)thread,
++            (unsigned long long)call, isIndexed, primitives, vertices, vertexStride,
++            bytes, allocation, (unsigned long long)completedCalls);
++          std::fflush(probe->file);
++        }
++      }
++
++      bool on() const { return file != nullptr; }
++
++      void mark(UpStage value) {
++        if (!file)
++          return;
++        enteredUs.store(nowUs(), std::memory_order_relaxed);
++        stage.store(uint32_t(value), std::memory_order_release);
++      }
++
++      void begin(bool isIndexed, uint32_t primitives, uint32_t vertexStride) {
++        if (!file)
++          return;
++        indexed.store(isIndexed ? 1u : 0u, std::memory_order_relaxed);
++        primitiveCount.store(primitives, std::memory_order_relaxed);
++        vertexCount.store(0, std::memory_order_relaxed);
++        stride.store(vertexStride, std::memory_order_relaxed);
++        dataSize.store(0, std::memory_order_relaxed);
++        bufferSize.store(0, std::memory_order_relaxed);
++        threadId.store(GetCurrentThreadId(), std::memory_order_relaxed);
++        callId.fetch_add(1, std::memory_order_relaxed);
++        mark(UpStage::DeviceLock);
++        bool expected = false;
++        if (watchdogStarted.compare_exchange_strong(expected, true)) {
++          HANDLE watchdog = CreateThread(nullptr, 0, &watch, this, 0, nullptr);
++          if (watchdog != nullptr)
++            CloseHandle(watchdog);
++        }
++      }
++
++      void sizes(uint32_t vertices, uint32_t bytes, uint32_t allocation) {
++        vertexCount.store(vertices, std::memory_order_relaxed);
++        dataSize.store(bytes, std::memory_order_relaxed);
++        bufferSize.store(allocation, std::memory_order_relaxed);
++      }
++
++      void finish() {
++        if (!file)
++          return;
++        completed.fetch_add(1, std::memory_order_relaxed);
++        mark(UpStage::OutsideCall);
++      }
++    };
++    static D3D9UpStageProbe g_upStage;
++  }
++
+   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::DrawPrimitiveUP(
+           D3DPRIMITIVETYPE PrimitiveType,
+           UINT             PrimitiveCount,
+     const void*            pVertexStreamZeroData,
+           UINT             VertexStreamZeroStride) {
++    g_upStage.begin(false, PrimitiveCount, VertexStreamZeroStride);
++    struct UpStageExit {
++      ~UpStageExit() { g_upStage.finish(); }
++    } upStageExit;
++    const bool probeUp = g_upProbe.on();
++    const auto upEnter = probeUp ? std::chrono::steady_clock::now()
++                                 : std::chrono::steady_clock::time_point();
+     if (g_batchProbe.enabled) {
+       uint64_t tex = reinterpret_cast<uint64_t>(m_state.textures[0]);
+       uint64_t sig = tex
+@@ -3054,7 +3290,12 @@ namespace {
+         m_state.renderStates[D3DRS_DESTBLEND] == D3DBLEND_ZERO);
+     }
+ 
++    const auto upLockStart = probeUp ? std::chrono::steady_clock::now()
++                                     : std::chrono::steady_clock::time_point();
+     D3D9DeviceLock lock = LockDevice();
++    g_upStage.mark(UpStage::Validate);
++    const auto upLockEnd = probeUp ? std::chrono::steady_clock::now()
++                                   : std::chrono::steady_clock::time_point();
+ 
+     if (unlikely(m_state.vertexDecl == nullptr))
+       return D3DERR_INVALIDCALL;
+@@ -3062,16 +3303,28 @@ namespace {
+     if (unlikely(!PrimitiveCount))
+       return S_OK;
+ 
++    g_upStage.mark(UpStage::PrepareDraw);
+     PrepareDraw(PrimitiveType);
++    const auto upPrepareEnd = probeUp ? std::chrono::steady_clock::now()
++                                      : std::chrono::steady_clock::time_point();
+ 
++    g_upStage.mark(UpStage::GenerateInfo);
+     auto drawInfo = GenerateDrawInfo(PrimitiveType, PrimitiveCount, 0);
+ 
+     const uint32_t dataSize = GetUPDataSize(drawInfo.vertexCount, VertexStreamZeroStride);
+     const uint32_t bufferSize = GetUPBufferSize(drawInfo.vertexCount, VertexStreamZeroStride);
++    g_upStage.sizes(drawInfo.vertexCount, dataSize, bufferSize);
+ 
++    g_upStage.mark(UpStage::Allocate);
+     auto upSlice = AllocTempBuffer<true>(bufferSize);
++    const auto upAllocEnd = probeUp ? std::chrono::steady_clock::now()
++                                    : std::chrono::steady_clock::time_point();
++    g_upStage.mark(UpStage::CopyVertex);
+     FillUPVertexBuffer(upSlice.mapPtr, pVertexStreamZeroData, dataSize, bufferSize);
++    const auto upCopyEnd = probeUp ? std::chrono::steady_clock::now()
++                                   : std::chrono::steady_clock::time_point();
+ 
++    g_upStage.mark(UpStage::Emit);
+     EmitCs([this,
+       cBufferSlice  = std::move(upSlice.slice),
+       cPrimType     = PrimitiveType,
+@@ -3089,7 +3342,14 @@ namespace {
+         0, 0);
+       ctx->bindVertexBuffer(0, DxvkBufferSlice(), 0);
+     });
++    const auto upEmitEnd = probeUp ? std::chrono::steady_clock::now()
++                                   : std::chrono::steady_clock::time_point();
++
++    if (probeUp)
++      g_upProbe.add(false, bufferSize, upEnter, upLockStart, upLockEnd, upPrepareEnd,
++                    upAllocEnd, upCopyEnd, upEmitEnd);
+ 
++    g_upStage.mark(UpStage::Cleanup);
+     m_state.vertexBuffers[0].vertexBuffer = nullptr;
+     m_state.vertexBuffers[0].offset       = 0;
+     m_state.vertexBuffers[0].stride       = 0;
+@@ -3107,6 +3367,13 @@ namespace {
+           D3DFORMAT        IndexDataFormat,
+     const void*            pVertexStreamZeroData,
+           UINT             VertexStreamZeroStride) {
++    g_upStage.begin(true, PrimitiveCount, VertexStreamZeroStride);
++    struct IndexedUpStageExit {
++      ~IndexedUpStageExit() { g_upStage.finish(); }
++    } upStageExit;
++    const bool probeUp = g_upProbe.on();
++    const auto upEnter = probeUp ? std::chrono::steady_clock::now()
++                                 : std::chrono::steady_clock::time_point();
+     if (g_batchProbe.enabled) {
+       uint64_t tex = reinterpret_cast<uint64_t>(m_state.textures[0]);
+       uint64_t sig = tex
+@@ -3140,7 +3407,12 @@ namespace {
+         m_state.renderStates[D3DRS_DESTBLEND] == D3DBLEND_ZERO);
+     }
+ 
++    const auto upLockStart = probeUp ? std::chrono::steady_clock::now()
++                                     : std::chrono::steady_clock::time_point();
+     D3D9DeviceLock lock = LockDevice();
++    g_upStage.mark(UpStage::Validate);
++    const auto upLockEnd = probeUp ? std::chrono::steady_clock::now()
++                                   : std::chrono::steady_clock::time_point();
+ 
+     if (unlikely(m_state.vertexDecl == nullptr))
+         return D3DERR_INVALIDCALL;
+@@ -3148,8 +3420,12 @@ namespace {
+     if (unlikely(!PrimitiveCount))
+       return S_OK;
+ 
++    g_upStage.mark(UpStage::PrepareDraw);
+     PrepareDraw(PrimitiveType);
++    const auto upPrepareEnd = probeUp ? std::chrono::steady_clock::now()
++                                      : std::chrono::steady_clock::time_point();
+ 
++    g_upStage.mark(UpStage::GenerateInfo);
+     auto drawInfo = GenerateDrawInfo(PrimitiveType, PrimitiveCount, 0);
+ 
+     const uint32_t vertexDataSize = GetUPDataSize(MinVertexIndex + NumVertices, VertexStreamZeroStride);
+@@ -3159,12 +3435,21 @@ namespace {
+     const uint32_t indicesSize = drawInfo.vertexCount * indexSize;
+ 
+     const uint32_t upSize = vertexBufferSize + indicesSize;
++    g_upStage.sizes(drawInfo.vertexCount, vertexDataSize + indicesSize, upSize);
+ 
++    g_upStage.mark(UpStage::Allocate);
+     auto upSlice = AllocTempBuffer<true>(upSize);
++    const auto upAllocEnd = probeUp ? std::chrono::steady_clock::now()
++                                    : std::chrono::steady_clock::time_point();
+     uint8_t* data = reinterpret_cast<uint8_t*>(upSlice.mapPtr);
++    g_upStage.mark(UpStage::CopyVertex);
+     FillUPVertexBuffer(data, pVertexStreamZeroData, vertexDataSize, vertexBufferSize);
++    g_upStage.mark(UpStage::CopyIndices);
+     std::memcpy(data + vertexBufferSize, pIndexData, indicesSize);
++    const auto upCopyEnd = probeUp ? std::chrono::steady_clock::now()
++                                   : std::chrono::steady_clock::time_point();
+ 
++    g_upStage.mark(UpStage::Emit);
+     EmitCs([this,
+       cVertexSize   = vertexBufferSize,
+       cBufferSlice  = std::move(upSlice.slice),
+@@ -3188,7 +3473,14 @@ namespace {
+       ctx->bindVertexBuffer(0, DxvkBufferSlice(), 0);
+       ctx->bindIndexBuffer(DxvkBufferSlice(), VK_INDEX_TYPE_UINT32);
+     });
++    const auto upEmitEnd = probeUp ? std::chrono::steady_clock::now()
++                                   : std::chrono::steady_clock::time_point();
++
++    if (probeUp)
++      g_upProbe.add(true, upSize, upEnter, upLockStart, upLockEnd, upPrepareEnd,
++                    upAllocEnd, upCopyEnd, upEmitEnd);
+ 
++    g_upStage.mark(UpStage::Cleanup);
+     m_state.vertexBuffers[0].vertexBuffer = nullptr;
+     m_state.vertexBuffers[0].offset       = 0;
+     m_state.vertexBuffers[0].stride       = 0;

@@ -510,6 +510,11 @@ final class Runner: ObservableObject {
     func launch(_ install: Install, perf: PerfSettings, profile: String = "horizonxi.ini",
                 useX87: Bool = true, world: String = "", addonPolicy: AddonPolicy = .unknown) {
         guard !running else { return }
+        guard let gameWine = X87Sidecar.patchedWine() else {
+            appendLine("!! patched game Wine is missing at \(WineRuntime.executable.path). "
+                       + "Open Setup & Diagnostics and run Install wine.")
+            return
+        }
         running = true
         loginFailure = ""
         currentInstall = install
@@ -580,7 +585,8 @@ final class Runner: ObservableObject {
         // there is nothing to wrap here: wine re-execs every i386 process through the sidecar
         // itself, including the client Ashita spawns. See Settings.swift for the measurements.
         if !useX87 {
-            appendLine("i  x87 acceleration is off for this world — its client exits at boot with it on.")
+            appendLine("i  x87 acceleration is off for this world because this client is slower "
+                       + "or incompatible with it.")
         } else if X87Sidecar.coopBinary() == nil {
             appendLine("!! x87sidecar-coop missing from the bundle — the client will run at "
                        + "Rosetta's stock x87 speed (single-digit fps in-world).")
@@ -593,25 +599,13 @@ final class Runner: ObservableObject {
         // wineserver stopped, strays killed — the only surviving difference was how Foundation
         // wires the child. So launch the way that demonstrably works and tail the file for the
         // log pane.
-        let exe: URL
-        let args: [String]
         // Ashita v4 injects with `Ashita-cli.exe <profile>.ini`; Eden's v3 client with
         // `injector.exe <profile>.xml`. Same shape, different names — see Install.AshitaGeneration.
         let injector = install.gameDirWine + "\\" + install.ashitaCLI.lastPathComponent
         let bootFile = install.bootProfileName(profile)
-        if let wine = X87Sidecar.patchedWine() {
-            // Not about x87: the wrapper's own wine exits one second after login. See
-            // X87Sidecar.patchedWine.
-            exe = wine
-            args = [injector, bootFile]
-            appendLine("==> wine: \(wine.path)"
-                       + (useX87 && X87Sidecar.coopBinary() != nil ? " + x87 sidecar" : ""))
-        } else {
-            exe = install.wine
-            args = [injector, bootFile]
-            appendLine("!! falling back to the wrapper's own wine — expect the client to exit "
-                       + "about a second after login (docs/WINE-BUILD.md)")
-        }
+        let args = [injector, bootFile]
+        appendLine("==> wine: \(gameWine.path)"
+                   + (useX87 && X87Sidecar.coopBinary() != nil ? " + x87 sidecar" : ""))
         // Every registry edit above (renderer, SquareEnix path) went through the *wrapper's*
         // wine, which leaves the wrapper's wineserver alive on this prefix for ~3 s after its
         // last client. The game runs on the cooperative wine, a different protocol -- and
@@ -621,7 +615,7 @@ final class Runner: ObservableObject {
         if RendererSetup.stopWineserver(install) {
             appendLine("==> wrapper wineserver stopped; the game starts its own")
         }
-        spawnViaShell(exe,
+        spawnViaShell(gameWine,
               args: args,
               env: env,
               cwd: install.gameDir) { [weak self] code in
@@ -753,16 +747,21 @@ final class Runner: ObservableObject {
         let out = FileManager.default.temporaryDirectory
             .appendingPathComponent("ffxi-on-mac-game-\(getpid()).log")
         FileManager.default.createFile(atPath: out.path, contents: nil)
-        let quoted = ([exe.path] + args).map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-            .joined(separator: " ")
         var e = ProcessInfo.processInfo.environment
         for (k, v) in env { e[k] = v }
         // Record exactly what was spawned. Diffing this against a hand-run that works is how
         // the launch-death and Gaia XI exits were bisected; it costs one small file per launch.
         let spawnLog = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("HorizonXI-on-Mac/last-spawn.txt")
+        // Do not dump the inherited process environment. Launching this app from a development
+        // shell can put API keys and database credentials in it, none of which belong in a
+        // persistent game diagnostic. Values below are limited to the environment this launcher
+        // deliberately adds; ambient keys are recorded by name only so spawn comparisons can
+        // still spot a meaningful difference without copying their contents.
+        let explicit = env.keys.sorted().map { "\($0)=\(env[$0] ?? "")" }.joined(separator: "\n")
+        let ambient = e.keys.filter { env[$0] == nil }.sorted().joined(separator: ",")
         let dump = "exe: \(exe.path)\nargs: \(args)\ncwd: \(cwd.path)\n"
-            + e.keys.sorted().map { "\($0)=\(e[$0] ?? "")" }.joined(separator: "\n") + "\n"
+            + explicit + "\nambient keys: \(ambient)\n"
         try? dump.write(to: spawnLog, atomically: true, encoding: .utf8)
         // Detached, in its own session, so quitting the launcher does not take the game with
         // it. That means no Process object and no terminationHandler -- the child is not ours

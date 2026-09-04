@@ -24,17 +24,17 @@ enum X87Sidecar {
     /// nothing left to hook. Belongs on the *game's* environment, set before it launches.
     static let requiredEnvironment = ["ROSETTA_DISABLE_AOT": "1"]
 
-    /// The patched CrossOver wine from athei/wine-build, installed per machine at this path.
+    /// The patched CrossOver Wine from athei/wine-build, installed by `Bootstrap` in the user's
+    /// Application Support directory.
     ///
     /// It arrived here for x87 cooperative mode, but it matters on its own: **the wrapper's own
     /// wine kills the client one second after login.** Measured 2026-08-21, same prefix, same
     /// profile, same environment, twice each -- `siku.app/Contents/SharedSupport/wine/bin/wine`
     /// reaches "Successfully logged in", prints "Closing..." a second later and exits (it starts
     /// Ashita-cli "in experimental wow64 mode"), while this wine runs on indefinitely. So this is
-    /// the launch wine whenever it is present, sidecar or no sidecar. See docs/WINE-BUILD.md.
+    /// the required launch Wine, sidecar or no sidecar. See docs/WINE-BUILD.md.
     static func patchedWine() -> URL? {
-        let u = URL(fileURLWithPath: "/Volumes/Games/FFXI/wine-coop/wine/bin/wine")
-        return FileManager.default.isExecutableFile(atPath: u.path) ? u : nil
+        WineRuntime.installedExecutable
     }
 
     /// The cooperative sidecar binary alone, for `ROSETTA_X87_PATH`.
@@ -51,7 +51,7 @@ enum X87Sidecar {
 
     /// Cooperative-mode pieces: the unentitled sidecar (bundled, or vendor/ under `swift run`)
     /// plus the handshake-patched CX wine from athei/wine-build. Both must exist; the wine is
-    /// a per-machine install because it is 700 MB unpacked. See docs/X87-WALL.md.
+    /// a per-machine install because it is over 1 GB unpacked. See docs/X87-WALL.md.
     static func cooperative() -> (sidecar: URL, wine: URL)? {
         guard let wine = patchedWine() else { return nil }
         if let u = Bundle.main.url(forResource: "x87sidecar-coop", withExtension: nil) {

@@ -1,0 +1,79 @@
+diff --git a/src/d3d9/d3d9_main.cpp b/src/d3d9/d3d9_main.cpp
+index e182b5fa..6145e824 100644
+--- a/src/d3d9/d3d9_main.cpp
++++ b/src/d3d9/d3d9_main.cpp
+@@ -1,3 +1,5 @@
++#include <cstdlib>
++
+ #include "../dxvk/dxvk_instance.h"
+ 
+ #include "d3d9_interface.h"
+@@ -12,12 +14,68 @@ namespace dxvk {
+   Logger Logger::s_instance("d3d9.log");
+   D3D9GlobalAnnotationList D3D9GlobalAnnotationList::s_instance;
+ 
++  // Wine turns on execute-everywhere for the whole process as soon as it loads a module
++  // built without IMAGE_DLLCHARACTERISTICS_NX_COMPAT. FFXiMain.dll, FFXi.dll and pol.exe are
++  // all such modules. Windows never does this for a DLL: DEP follows the executable, and
++  // horizon-loader.exe is NX-compatible, so the game already runs with DEP on natively.
++  //
++  // Under Rosetta the difference is not academic. Every page that is both writable and
++  // executable is tracked by Rosetta's exception server, and the first touch of each fresh
++  // page costs a Mach round trip on top of the page fault. DXVK clears every new host-visible
++  // buffer, so a scene load that allocates a few hundred megabytes spends ten seconds at
++  // under 1 FPS with the process 88% in the kernel. Enforcing NX again, permanently so a
++  // later module load cannot undo it, restores the normal fault cost: the same allocation
++  // storm measured 2.3 s per frame with execute-everywhere and 12 ms per frame without.
++  //
++  // DXVK_ENFORCE_NX=0 leaves the process as Wine configured it, for A/B measurements.
++  static void enforceNoExecute() {
++    static bool done = false;
++    if (done)
++      return;
++    done = true;
++
++    const char* setting = std::getenv("DXVK_ENFORCE_NX");
++    if (setting && *setting == '0')
++      return;
++
++    using PFN_NtQueryInformationProcess = LONG (__stdcall*)(HANDLE, int, void*, ULONG, ULONG*);
++    using PFN_NtSetInformationProcess   = LONG (__stdcall*)(HANDLE, int, void*, ULONG);
++    HMODULE ntdll = ::GetModuleHandleA("ntdll.dll");
++    auto query = reinterpret_cast<PFN_NtQueryInformationProcess>(
++      reinterpret_cast<void*>(::GetProcAddress(ntdll, "NtQueryInformationProcess")));
++    auto set   = reinterpret_cast<PFN_NtSetInformationProcess>(
++      reinterpret_cast<void*>(::GetProcAddress(ntdll, "NtSetInformationProcess")));
++    if (!query || !set)
++      return;
++
++    constexpr int   ProcessExecuteFlags          = 0x22;
++    constexpr ULONG MEM_EXECUTE_OPTION_DISABLE   = 0x1;
++    constexpr ULONG MEM_EXECUTE_OPTION_PERMANENT = 0x8;
++
++    ULONG before = 0, length = 0;
++    if (query(::GetCurrentProcess(), ProcessExecuteFlags, &before, sizeof(before), &length) != 0)
++      return;
++    if ((before & MEM_EXECUTE_OPTION_DISABLE) && (before & MEM_EXECUTE_OPTION_PERMANENT)) {
++      Logger::info(str::format("D3D9: NX already enforced (ProcessExecuteFlags 0x", std::hex, before, ")"));
++      return;
++    }
++
++    ULONG flags = MEM_EXECUTE_OPTION_DISABLE | MEM_EXECUTE_OPTION_PERMANENT;
++    LONG status = set(::GetCurrentProcess(), ProcessExecuteFlags, &flags, sizeof(flags));
++    ULONG after = before;
++    query(::GetCurrentProcess(), ProcessExecuteFlags, &after, sizeof(after), &length);
++    Logger::info(str::format("D3D9: enforced NX: ProcessExecuteFlags 0x", std::hex, before,
++      " -> 0x", after, " (status 0x", static_cast<ULONG>(status), ")"));
++  }
++
+   HRESULT CreateD3D9(
+           bool           Extended,
+           IDirect3D9Ex** ppDirect3D9Ex) {
+     if (!ppDirect3D9Ex)
+       return D3DERR_INVALIDCALL;
+ 
++    enforceNoExecute();
++
+     *ppDirect3D9Ex = ref(new D3D9InterfaceEx( Extended ));
+     return D3D_OK;
+   }

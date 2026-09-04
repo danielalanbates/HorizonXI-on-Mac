@@ -7,7 +7,7 @@ You do not need Terminal. You do not need to know what Wine is. You press four b
 1. **Drag *FFXI on Mac* into your Applications folder** and open it. Apple signed and notarised
    it, so it opens normally — no scary warning, no right-click trick.
 2. **Press *Install wine…*** on the front screen. About five minutes. It asks for your Mac
-   password once (that's Rosetta, Apple's own translation layer). Four steps go green and you're
+   password once (that's Rosetta, Apple's own translation layer). Five steps go green and you're
    done with it forever.
 3. **Pick your world** from the **CHANGE WORLD** menu.
 4. **Press *Download…*** and choose where to put the game. This downloads 15–30 GB, so it takes a
@@ -35,27 +35,30 @@ already inside it is giving away Square Enix's client, which they may not do.
 | Piece | Size | How you get it |
 | --- | --- | --- |
 | **FFXI on Mac** (the launcher) | 5 MB | the `.dmg` you already opened |
-| **Wine** (runs Windows programs on a Mac) | ~250 MB | press ***Install wine…*** |
+| **Wine** (runs Windows programs on a Mac) | ~450 MB download | press ***Install wine…*** |
 | **The FFXI game** | 15–30 GB | press ***Download…*** |
 
-Wine is free and open source ([Sikarugir](https://github.com/Sikarugir-App/Sikarugir), the
-successor to Wineskin, LGPL 2.1). It is not CrossOver and costs nothing. The launcher fetches it
-fresh from Sikarugir's own GitHub releases and assembles it on your Mac, which is why it isn't
-just bundled in.
+Wine is free and open source. Setup installs two builds because they have different jobs. The
+[Sikarugir](https://github.com/Sikarugir-App/Sikarugir) build maintains the wrapper and Windows
+drive. The game runs under athei's patched, CrossOver-derived `wine-cx-26.3.0-1`; stock CrossOver
+does not contain its `ROSETTA_X87_PATH` handshake. The launcher fetches both from pinned GitHub
+releases, checks their SHA-256 hashes, and stores the game runtime under
+`~/Library/Application Support/HorizonXI-on-Mac/runtimes/`.
 
 > **`sikarugir.com` is not that project.** The real one is the GitHub link above. Sikarugir's own
 > README tells anyone who arrived from that domain to scan their Mac for malware.
 
 ## What *Install wine…* is doing
 
-Four steps, each shown as it finishes:
+Five steps, each shown as it finishes:
 
 1. **Rosetta 2** — Apple's translation layer. FFXI is a 32-bit Intel game from 2002, so it's
    required. Installed automatically via the normal system password prompt.
-2. **Downloading Wine** — about 250 MB from Sikarugir's GitHub releases. Checked against a pinned
-   SHA-256 before anything is built from it.
+2. **Downloading Wine** — about 450 MB from pinned Sikarugir and athei GitHub releases.
 3. **Building the wrapper** — the pieces are assembled at `~/Applications/FFXI on Mac Wine.app`.
-4. **Creating the Windows drive** — a blank `C:` drive, ready for the game.
+4. **Installing game Wine** — verifies the patched runtime's SHA-256 and installs it under your
+   Application Support folder.
+5. **Creating the Windows drive** — a blank `C:` drive, ready for the game.
 
 If a step fails partway, press **Install wine…** again. Finished steps are skipped, so it picks up
 where it stopped rather than starting over.
@@ -194,13 +197,35 @@ That puts **Sikarugir Creator** in your Applications folder.
 Open **Sikarugir Creator**. Under *No engine selected*, click **Change**, pick
 **`WS12WineSikarugir10.0_6`** — the exact build this project is tested on. It downloads ~160 MB;
 the arrow next to it disappears when it's done, then click the name again to select it.
-**Do not pick anything with `CX` in the name** — those are CrossOver-derived and commercial.
+**Do not pick anything with `CX` in the name** — those are stock CrossOver-derived engines, not
+the separately pinned patched build installed in step 5.
 Click **Create**, name it `FFXI`, leave the location alone.
 
 You get `~/Applications/Sikarugir/FFXI.app`, about 1.4 GB — Wine and a blank Windows drive, no
 game yet. Nothing to configure; close Sikarugir Creator.
 
-### 5. Put the game in it
+### 5. Install the patched game Wine
+
+The wrapper Wine maintains the Windows drive, but the game itself needs the pinned athei build.
+Stock CrossOver Wine does not contain the x87sidecar handshake. These are the same download,
+checksum, and destination used by the app:
+
+```sh
+runtime_dir="$HOME/Library/Application Support/HorizonXI-on-Mac/runtimes/wine-cx-26.3.0-1"
+runtime_archive="/tmp/wine-cx-26.3.0-1-macos-x86_64.tar.xz"
+curl -fL -o "$runtime_archive" \
+  https://github.com/athei/wine-build/releases/download/cx-26.3.0-1/wine-cx-26.3.0-1-macos-x86_64.tar.xz
+expected_sha="ec2a9e4d438917a26e381c01367773df79c3b0d6f0504b8183464619cad7e661"
+actual_sha="$(shasum -a 256 "$runtime_archive" | cut -d' ' -f1)"
+if [[ "$actual_sha" == "$expected_sha" ]]; then
+  mkdir -p "$runtime_dir"
+  tar -xJf "$runtime_archive" -C "$runtime_dir"
+else
+  print -u2 "checksum mismatch; the runtime was not installed"
+fi
+```
+
+### 6. Put the game in it
 
 Double-click your `FFXI.app` wrapper → **Install Software** → point it at your server's Windows
 installer and let it run. Or drag an existing game folder off a Windows PC into:
@@ -211,7 +236,7 @@ installer and let it run. Or drag an existing game folder off a Windows PC into:
 
 (Right-click `FFXI.app` → *Show Package Contents* → `SharedSupport` → `prefix` → `drive_c`.)
 
-### 6. Renderer files
+### 7. Renderer files
 
 The launcher's **Renderer** menu does this. By hand: copy `vendor/d3d8to9.dll` as `d3d8.dll` and
 `vendor/dxvk-1.10.3-x32-d3d9-horizonxi.dll` as `d3d9.dll` into both the game folder and its
@@ -222,7 +247,7 @@ wine reg add "HKCU\Software\Wine\DllOverrides" /v "*d3d8" /d native /f
 wine reg add "HKCU\Software\Wine\DllOverrides" /v "*d3d9" /d native /f
 ```
 
-### 7. Register the game's COM servers
+### 8. Register the game's COM servers
 
 ```sh
 wine regsvr32 /s "C:\HorizonXI\SquareEnix\FINAL FANTASY XI\FFXi.dll"
@@ -233,7 +258,7 @@ wine regsvr32 /s "C:\HorizonXI\SquareEnix\FINAL FANTASY XI\FFXi.dll"
 
 [`scripts/install.sh`](../scripts/install.sh) is the exact sequence **Repair** runs.
 
-### 8. Open FFXI on Mac
+### 9. Open FFXI on Mac
 
 It finds the wrapper on its own — it looks in `/Applications`, `~/Applications` and every mounted
 volume. If it doesn't, **Setup & Diagnostics** names exactly what's missing.
