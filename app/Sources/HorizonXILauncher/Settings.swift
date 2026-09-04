@@ -192,6 +192,16 @@ struct PerfSettings: Codable {
         if disableAppNap { env["LSAppNapIsDisabled"] = "1" }
         if largeAddressAware { env["WINE_LARGE_ADDRESS_AWARE"] = "1" }
         for (k, v) in renderer.environment { env[k] = v }
+        // The launcher used to rely on DXVK finding dxvk.conf relative to the process working
+        // directory, but Ashita and the game executable run from different directories. The
+        // missing config made DXVK ignore the intended compiler-thread cap and choose seven
+        // workers on an M2 Max. Compiler activity overlapped only the first part of the slow
+        // window and was not its root cause, but there is no reason to add that contention. An
+        // explicit path is deterministic for every install location, including game data stored
+        // outside the Wine prefix.
+        if renderer.needsDXVK, let config = RendererSetup.dxvkConfig() {
+            env["DXVK_CONFIG_FILE"] = Install.winePath(config, driveC: install.driveC)
+        }
         for line in extraEnv.split(separator: "\n") {
             let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
             if parts.count == 2 {

@@ -1,0 +1,133 @@
+# Local-only LandSandBoat test server for HorizonXI-on-Mac end-to-end runs.
+#
+# Everything binds to 127.0.0.1. Credentials are deliberately plain: this stack exists so the
+# harness can log a throwaway character in and zone, and nothing here is reachable off this Mac.
+#
+#   database    root / root, xidb as xiadmin / password        127.0.0.1:3306
+#   game login  any account; the loader creates it on first connect (ACCOUNT_CREATION = true)
+#
+# Driven by ../lsb-docker.sh, which the launcher's "Local server" world calls through
+# lsb-server.sh's status/setup/start/stop contract.
+
+x-dbcreds: &dbcreds
+  MARIADB_ROOT_PASSWORD: 'root'
+  MARIADB_DATABASE: xidb
+  MARIADB_USER: xiadmin
+  MARIADB_PASSWORD: 'password'
+
+x-common: &common
+  image: lsb-local/server:latest
+  pull_policy: never
+  environment:
+    <<: *dbcreds
+    XI_NETWORK_SQL_HOST: database
+    XI_NETWORK_SQL_PORT: 3306
+    XI_NETWORK_ZMQ_IP: world
+    XI_NETWORK_HTTP_HOST: 0.0.0.0
+    # HorizonXI's client is not a stock retail patch level; the lock is what would reject it.
+    XI_LOGIN_VER_LOCK: 0
+    XI_LOGIN_ACCOUNT_CREATION: "true"
+    XI_LOGIN_CHARACTER_CREATION: "true"
+    # The Rhapsodies of Vana'diel cutscene prompt would sit on screen in every capture.
+    XI_MAIN_ENABLE_ROV: 0
+    XI_MAIN_ENABLE_SOA: 0
+    XI_MAIN_ENABLE_ABYSSEA: 0
+    XI_MAIN_ENABLE_WOTG: 0
+    XI_MAIN_ENABLE_ACP: 0
+    XI_MAIN_ENABLE_AMK: 0
+    XI_MAIN_ENABLE_ASA: 0
+    # Every GM command the scenario addon sends lands in audit_gm, so a run can prove what ran.
+    XI_MAP_AUDIT_GM_CMD: "true"
+  volumes:
+    - lsb-navmeshes:/server/navmeshes
+    - lsb-ximeshes:/server/ximeshes
+    - ./log:/server/log
+    - ./config.yaml:/server/tools/config.yaml
+    - ./commands/perfcrowd.lua:/server/scripts/commands/perfcrowd.lua:ro
+    - ./commands/perftime.lua:/server/scripts/commands/perftime.lua:ro
+
+services:
+  database:
+    image: mariadb:12.3
+    restart: unless-stopped
+    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_general_ci']
+    environment:
+      <<: *dbcreds
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - lsb-database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 10s
+      interval: 5s
+      timeout: 5s
+      retries: 6
+
+  database-update:
+    <<: *common
+    command: ["python", "/server/tools/dbtool.py", "update"]
+    depends_on:
+      database:
+        condition: service_healthy
+
+  connect:
+    <<: *common
+    command: ["/server/xi_connect"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:54001:54001"
+      - "127.0.0.1:54230:54230"
+      - "127.0.0.1:54231:54231"
+    depends_on:
+      database:
+        condition: service_healthy
+      database-update:
+        condition: service_completed_successfully
+
+  search:
+    <<: *common
+    command: ["/server/xi_search"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:54002:54002"
+    depends_on:
+      database:
+        condition: service_healthy
+      database-update:
+        condition: service_completed_successfully
+
+  world:
+    <<: *common
+    command: ["/server/xi_world"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8088:8088"
+    depends_on:
+      database:
+        condition: service_healthy
+      database-update:
+        condition: service_completed_successfully
+
+  map:
+    <<: *common
+    command: ["/server/xi_map"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:54230:54230/udp"
+    depends_on:
+      database:
+        condition: service_healthy
+      database-update:
+        condition: service_completed_successfully
+      world:
+        condition: service_started
+      connect:
+        condition: service_started
+
+volumes:
+  lsb-database:
+  lsb-navmeshes:
+    external: true
+  lsb-ximeshes:
+    external: true

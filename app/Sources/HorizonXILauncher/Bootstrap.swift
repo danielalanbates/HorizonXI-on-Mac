@@ -7,9 +7,9 @@ import Foundation
 /// step of that is something a player can get wrong, and the punishment for getting it wrong is
 /// a game that silently does not start.
 ///
-/// None of it is actually necessary. A Sikarugir wrapper is two tarballs from two public GitHub
-/// releases -- a template .app and a wine engine -- unpacked into each other. This does exactly
-/// that, then applies the rpath fix and boots the prefix.
+/// None of it is actually necessary. Setup downloads a Sikarugir wrapper template and maintenance
+/// Wine, plus the patched Wine that runs the game. It assembles them, applies the rpath fix, and
+/// boots the prefix.
 ///
 /// What it does NOT do is fetch the game. FFXI's data is Square Enix's, and this project does
 /// not touch it: the last step hands the user's own server installer to the prefix and lets it
@@ -18,9 +18,9 @@ enum Bootstrap {
 
     // MARK: - What we fetch
 
-    /// Pinned by version *and* by hash. An engine that changes under us would change the frame
-    /// rate this whole project's numbers are measured against, so upgrades are deliberate.
-    /// Both come from Sikarugir's own release pages; nothing is redistributed by us.
+    /// The engine is pinned by version and hash. A build that changes under us would change the
+    /// behavior this project is measured against, so upgrades are deliberate. Both assets come
+    /// from Sikarugir's own release pages; nothing is redistributed by us.
     enum Asset {
         static let template = (
             url: URL(string: "https://github.com/Sikarugir-App/Wrapper/releases/download/v1.0/Template-1.0.11.tar.xz")!,
@@ -55,13 +55,14 @@ enum Bootstrap {
     // MARK: - Steps
 
     enum Step: Int, CaseIterable {
-        case rosetta, download, assemble, prefix
+        case rosetta, download, assemble, runtime, prefix
 
         var title: String {
             switch self {
             case .rosetta:  return "Rosetta 2"
             case .download: return "Downloading Wine"
             case .assemble: return "Building the wrapper"
+            case .runtime:  return "Installing game Wine"
             case .prefix:   return "Creating the Windows drive"
             }
         }
@@ -69,8 +70,9 @@ enum Bootstrap {
         var detail: String {
             switch self {
             case .rosetta:  return "Apple's translation layer. FFXI is a 32-bit Intel game."
-            case .download: return "Two files, about 250 MB, from Sikarugir's GitHub releases."
+            case .download: return "About 450 MB from pinned GitHub releases."
             case .assemble: return "Unpacking them into ~/Applications, and fixing wine's dylib paths."
+            case .runtime:  return "The patched build required for stable play and x87 acceleration."
             case .prefix:   return "A blank C: drive for the game to install into."
             }
         }
@@ -95,13 +97,27 @@ enum Bootstrap {
 
         let templateTar = tmp.appendingPathComponent("template.tar.xz")
         let engineTar   = tmp.appendingPathComponent("engine.tar.xz")
+        let runtimeTar  = tmp.appendingPathComponent("\(WineRuntime.version).tar.xz")
+        let needsWrapper = !isBuilt
+        let needsRuntime = WineRuntime.installedExecutable == nil
 
-        if !isBuilt {
+        if needsWrapper {
             try await download(Asset.template.url, to: templateTar,
                                expecting: Asset.template.bytes, label: "wrapper template", log: log)
             try await download(Asset.engine.url, to: engineTar,
                                expecting: Asset.engine.bytes, label: "wine", log: log)
+        } else {
+            log("wrapper Wine is already installed at \(wrapperURL.path)")
+        }
+        if needsRuntime {
+            try await download(WineRuntime.downloadURL, to: runtimeTar,
+                               expecting: WineRuntime.downloadBytes,
+                               label: "patched game Wine", log: log)
+        } else {
+            log("patched game Wine is already installed at \(WineRuntime.executable.path)")
+        }
 
+        if needsWrapper {
             log("verifying the download")
             let sum = try sha256(of: engineTar)
             guard sum == Asset.engine.sha256 else {
@@ -112,8 +128,22 @@ enum Bootstrap {
 
             step(.assemble)
             try assemble(template: templateTar, engine: engineTar, log: log)
-        } else {
-            log("wine is already installed at \(wrapperURL.path)")
+            try? FileManager.default.removeItem(at: templateTar)
+            try? FileManager.default.removeItem(at: engineTar)
+        }
+
+        if needsRuntime {
+            step(.runtime)
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try WineRuntime.install(archive: runtimeTar, log: log)
+                }.value
+            } catch {
+                // A full-size but corrupt cached archive would otherwise be reused forever.
+                try? FileManager.default.removeItem(at: runtimeTar)
+                throw error
+            }
+            try? FileManager.default.removeItem(at: runtimeTar)
         }
 
         step(.prefix)

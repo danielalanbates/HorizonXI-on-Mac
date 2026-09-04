@@ -71,7 +71,7 @@ buttons.
 | Piece | Size | How you get it |
 | --- | --- | --- |
 | **FFXI on Mac** (this launcher) | 5 MB | the download button above |
-| **Wine** (runs Windows programs on a Mac) | ~250 MB | press ***Install wine…*** — automatic |
+| **Wine** (runs Windows programs on a Mac) | ~450 MB download | press ***Install wine…*** — automatic |
 | **The FFXI game itself** | 15–30 GB | press ***Download…*** — automatic |
 
 The game files aren't inside the 5 MB download because they're Square Enix's property and nobody
@@ -205,7 +205,8 @@ Building it yourself needs only Apple's Command Line Tools:
 ./scripts/package.sh     # build the .dmg
 ```
 
-Tested on: MacBook Pro M1, 8 GB, macOS 26.5, Wine 10.0 (Sikarugir), Ashita 4.3.1.2.
+Tested on: MacBook Pro M1, 8 GB, macOS 26.5, Sikarugir Wine 10.0 for wrapper
+maintenance, athei wine-cx-26.3.0-1 for play, Ashita 4.3.1.2.
 
 ## Credits
 

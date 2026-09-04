@@ -1,0 +1,334 @@
+--- a/src/d3d9/d3d9_swapchain.cpp
++++ b/src/d3d9/d3d9_swapchain.cpp
+@@ -298,6 +298,98 @@
+       }
+     };
+     static D3D9PresentProbe g_presentProbe;
++
++    // Low-overhead phase watchdog (DXVK_PRESENT_STAGE_LOG=<path>). The timing probe above can
++    // only report after Present returns. If a call never returns, this helper records the phase
++    // that has remained active once per second without suspending or sampling the frame thread.
++    enum class PresentStage : uint32_t {
++      None, Hooks, DeviceLock, Setup, CreatePresenter, RecreateSwapChain,
++      Flush, SynchronizePresent, AcquireImage, RecreateAfterAcquire,
++      BeginRecording, Blit, SubmitPresent, FrameLatency, RotateBuffers, OutsidePresent,
++    };
++
++    struct PresentStageProbe {
++      FILE* file = nullptr;
++      std::atomic<uint32_t> stage = { uint32_t(PresentStage::None) };
++      std::atomic<uint64_t> enteredUs = { 0 };
++      std::atomic<uint32_t> threadId = { 0 };
++      std::atomic<uint64_t> completed = { 0 };
++      std::atomic<bool> watchdogStarted = { false };
++      uint64_t originUs = nowUs();
++
++      static uint64_t nowUs() {
++        return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
++          std::chrono::steady_clock::now().time_since_epoch()).count());
++      }
++
++      static const char* name(PresentStage value) {
++        switch (value) {
++          case PresentStage::Hooks:                return "hooks";
++          case PresentStage::DeviceLock:           return "device_lock";
++          case PresentStage::Setup:                return "setup";
++          case PresentStage::CreatePresenter:      return "create_presenter";
++          case PresentStage::RecreateSwapChain:    return "recreate_swapchain";
++          case PresentStage::Flush:                return "flush";
++          case PresentStage::SynchronizePresent:   return "synchronize_previous_present";
++          case PresentStage::AcquireImage:         return "acquire_image";
++          case PresentStage::RecreateAfterAcquire: return "recreate_after_acquire";
++          case PresentStage::BeginRecording:       return "begin_recording";
++          case PresentStage::Blit:                 return "blit";
++          case PresentStage::SubmitPresent:        return "submit_present";
++          case PresentStage::FrameLatency:         return "frame_latency";
++          case PresentStage::RotateBuffers:        return "rotate_buffers";
++          case PresentStage::OutsidePresent:       return "outside_present";
++          default:                                 return "not_started";
++        }
++      }
++
++      PresentStageProbe() {
++        const char* path = std::getenv("DXVK_PRESENT_STAGE_LOG");
++        if (path && *path)
++          file = std::fopen(path, "a");
++        if (file) {
++          std::fprintf(file, "elapsed_ms,phase,phase_ms,thread_id,completed_presents\n");
++          std::fflush(file);
++        }
++      }
++
++      static DWORD WINAPI watch(void* parameter) {
++        auto* probe = reinterpret_cast<PresentStageProbe*>(parameter);
++        while (true) {
++          Sleep(1000);
++          uint64_t now = nowUs();
++          auto current = PresentStage(probe->stage.load(std::memory_order_acquire));
++          uint64_t entered = probe->enteredUs.load(std::memory_order_relaxed);
++          std::fprintf(probe->file, "%llu,%s,%.3f,%lu,%llu\n",
++            (unsigned long long)((now - probe->originUs) / 1000), name(current),
++            entered ? double(now - entered) / 1000.0 : 0.0,
++            (unsigned long)probe->threadId.load(std::memory_order_relaxed),
++            (unsigned long long)probe->completed.load(std::memory_order_relaxed));
++          std::fflush(probe->file);
++        }
++      }
++
++      void mark(PresentStage value) {
++        if (!file)
++          return;
++        enteredUs.store(nowUs(), std::memory_order_relaxed);
++        threadId.store(GetCurrentThreadId(), std::memory_order_relaxed);
++        stage.store(uint32_t(value), std::memory_order_release);
++        bool expected = false;
++        if (watchdogStarted.compare_exchange_strong(expected, true)) {
++          HANDLE watchdog = CreateThread(nullptr, 0, &watch, this, 0, nullptr);
++          if (watchdog != nullptr)
++            CloseHandle(watchdog);
++        }
++      }
++
++      void finish() {
++        completed.fetch_add(1, std::memory_order_relaxed);
++        mark(PresentStage::OutsidePresent);
++      }
++    };
++
++    static PresentStageProbe g_presentStage;
+   }
+ 
+   // Wait probe (DXVK_WAIT_LOG=<path>).
+@@ -939,6 +1031,11 @@
+           HWND     hDestWindowOverride,
+     const RGNDATA* pDirtyRegion,
+           DWORD    dwFlags) {
++    g_presentStage.mark(PresentStage::Hooks);
++    struct PresentStageExit {
++      ~PresentStageExit() { g_presentStage.finish(); }
++    } presentStageExit;
++
+     // The divisor lives in an object the client allocates during start-up, so this is retried
+     // on early frames rather than done once at device creation.
+     static bool timerDone = false;
+@@ -975,7 +1072,9 @@
+       ~ProbeExit() { g_presentProbe.exit(t); }
+     } probeExit { probeEnter };
+ 
++    g_presentStage.mark(PresentStage::DeviceLock);
+     D3D9DeviceLock lock = m_parent->LockDevice();
++    g_presentStage.mark(PresentStage::Setup);
+ 
+     uint32_t presentInterval = m_presentParams.PresentationInterval;
+ 
+@@ -1016,11 +1115,15 @@
+     m_lastDialog = m_dialog;
+ 
+     try {
+-      if (recreate)
++      if (recreate) {
++        g_presentStage.mark(PresentStage::CreatePresenter);
+         CreatePresenter();
++      }
+ 
+-      if (std::exchange(m_dirty, false))
++      if (std::exchange(m_dirty, false)) {
++        g_presentStage.mark(PresentStage::RecreateSwapChain);
+         RecreateSwapChain(vsync);
++      }
+ 
+       // We aren't going to device loss simply because
+       // 99% of D3D9 games don't handle this properly and
+@@ -1550,6 +1653,7 @@
+ 
+ 
+   void D3D9SwapChainEx::PresentImage(UINT SyncInterval) {
++    g_presentStage.mark(PresentStage::Flush);
+     m_parent->Flush();
+ 
+     // Retrieve the image and image view to present
+@@ -1560,6 +1664,7 @@
+     ++m_frameId;
+ 
+     for (uint32_t i = 0; i < SyncInterval || i < 1; i++) {
++      g_presentStage.mark(PresentStage::SynchronizePresent);
+       SynchronizePresent();
+ 
+       // Presentation semaphores and WSI swap chain image
+@@ -1568,15 +1673,19 @@
+ 
+       uint32_t imageIndex = 0;
+ 
++      g_presentStage.mark(PresentStage::AcquireImage);
+       VkResult status = m_presenter->acquireNextImage(sync, imageIndex);
+ 
+       while (status != VK_SUCCESS && status != VK_SUBOPTIMAL_KHR) {
++        g_presentStage.mark(PresentStage::RecreateAfterAcquire);
+         RecreateSwapChain(m_vsync);
+         
+         info = m_presenter->info();
++        g_presentStage.mark(PresentStage::AcquireImage);
+         status = m_presenter->acquireNextImage(sync, imageIndex);
+       }
+ 
++      g_presentStage.mark(PresentStage::BeginRecording);
+       m_context->beginRecording(
+         m_device->createCommandList());
+ 
+@@ -1588,6 +1697,7 @@
+         {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
+         { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
+ 
++      g_presentStage.mark(PresentStage::Blit);
+       m_blitter->presentImage(m_context.ptr(),
+         m_imageViews.at(imageIndex), dstRect,
+         swapImageView, srcRect);
+@@ -1598,13 +1708,16 @@
+       if (i + 1 >= SyncInterval)
+         m_context->signal(m_frameLatencySignal, m_frameId);
+ 
++      g_presentStage.mark(PresentStage::SubmitPresent);
+       SubmitPresent(sync, i);
+     }
+ 
++    g_presentStage.mark(PresentStage::FrameLatency);
+     SyncFrameLatency();
+ 
+     // Rotate swap chain buffers so that the back
+     // buffer at index 0 becomes the front buffer.
++    g_presentStage.mark(PresentStage::RotateBuffers);
+     for (uint32_t i = 1; i < m_backBuffers.size(); i++)
+       m_backBuffers[i]->Swap(m_backBuffers[i - 1].ptr());
+ 
+--- a/src/dxvk/dxvk_queue.cpp
++++ b/src/dxvk/dxvk_queue.cpp
+@@ -2,6 +2,82 @@
+ #include "dxvk_queue.h"
+ 
+ namespace dxvk {
++
++  // Submission-thread phase watchdog (DXVK_SUBMIT_STAGE_LOG=<path>). This reports the active
++  // Vulkan hand-off once per second, including calls that never return. It only reads atomics
++  // from its own helper thread and does not suspend DXVK or game threads.
++  namespace {
++    enum class SubmitStage : uint32_t {
++      NotStarted, Waiting, CommandSubmit, Present, PublishStatus, DeviceIdle,
++    };
++
++    struct SubmitStageProbe {
++      FILE* file = nullptr;
++      std::atomic<uint32_t> stage = { uint32_t(SubmitStage::NotStarted) };
++      std::atomic<uint64_t> enteredUs = { 0 };
++      std::atomic<uint64_t> commands = { 0 };
++      std::atomic<uint64_t> presents = { 0 };
++      std::atomic<bool> watchdogStarted = { false };
++      uint64_t originUs = nowUs();
++
++      static uint64_t nowUs() {
++        return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
++          std::chrono::steady_clock::now().time_since_epoch()).count());
++      }
++
++      static const char* name(SubmitStage value) {
++        switch (value) {
++          case SubmitStage::Waiting:       return "waiting";
++          case SubmitStage::CommandSubmit: return "command_submit";
++          case SubmitStage::Present:       return "present";
++          case SubmitStage::PublishStatus: return "publish_status";
++          case SubmitStage::DeviceIdle:    return "device_idle";
++          default:                         return "not_started";
++        }
++      }
++
++      SubmitStageProbe() {
++        const char* path = std::getenv("DXVK_SUBMIT_STAGE_LOG");
++        if (path && *path)
++          file = std::fopen(path, "a");
++        if (file) {
++          std::fprintf(file, "elapsed_ms,phase,phase_ms,commands,presents\n");
++          std::fflush(file);
++        }
++      }
++
++      static DWORD WINAPI watch(void* parameter) {
++        auto* probe = reinterpret_cast<SubmitStageProbe*>(parameter);
++        while (true) {
++          Sleep(1000);
++          uint64_t now = nowUs();
++          auto current = SubmitStage(probe->stage.load(std::memory_order_acquire));
++          uint64_t entered = probe->enteredUs.load(std::memory_order_relaxed);
++          std::fprintf(probe->file, "%llu,%s,%.3f,%llu,%llu\n",
++            (unsigned long long)((now - probe->originUs) / 1000), name(current),
++            entered ? double(now - entered) / 1000.0 : 0.0,
++            (unsigned long long)probe->commands.load(std::memory_order_relaxed),
++            (unsigned long long)probe->presents.load(std::memory_order_relaxed));
++          std::fflush(probe->file);
++        }
++      }
++
++      void mark(SubmitStage value) {
++        if (!file)
++          return;
++        enteredUs.store(nowUs(), std::memory_order_relaxed);
++        stage.store(uint32_t(value), std::memory_order_release);
++        bool expected = false;
++        if (watchdogStarted.compare_exchange_strong(expected, true)) {
++          HANDLE watchdog = CreateThread(nullptr, 0, &watch, this, 0, nullptr);
++          if (watchdog != nullptr)
++            CloseHandle(watchdog);
++        }
++      }
++    };
++
++    static SubmitStageProbe g_submitStage;
++  }
+   
+   DxvkSubmissionQueue::DxvkSubmissionQueue(DxvkDevice* device)
+   : m_device(device),
+@@ -87,6 +163,7 @@
+     std::unique_lock<dxvk::mutex> lock(m_mutex);
+ 
+     while (!m_stopped.load()) {
++      g_submitStage.mark(SubmitStage::Waiting);
+       m_appendCond.wait(lock, [this] {
+         return m_stopped.load() || !m_submitQueue.empty();
+       });
+@@ -104,10 +181,14 @@
+         std::lock_guard<dxvk::mutex> lock(m_mutexQueue);
+ 
+         if (entry.submit.cmdList != nullptr) {
++          g_submitStage.mark(SubmitStage::CommandSubmit);
++          g_submitStage.commands.fetch_add(1, std::memory_order_relaxed);
+           status = entry.submit.cmdList->submit(
+             entry.submit.waitSync,
+             entry.submit.wakeSync);
+         } else if (entry.present.presenter != nullptr) {
++          g_submitStage.mark(SubmitStage::Present);
++          g_submitStage.presents.fetch_add(1, std::memory_order_relaxed);
+           status = entry.present.presenter->presentImage();
+         }
+       } else {
+@@ -116,6 +197,7 @@
+         status = VK_ERROR_DEVICE_LOST;
+       }
+ 
++      g_submitStage.mark(SubmitStage::PublishStatus);
+       if (entry.status)
+         entry.status->result = status;
+       
+@@ -128,6 +210,7 @@
+       } else if (status == VK_ERROR_DEVICE_LOST || entry.submit.cmdList != nullptr) {
+         Logger::err(str::format("DxvkSubmissionQueue: Command submission failed: ", status));
+         m_lastError = status;
++        g_submitStage.mark(SubmitStage::DeviceIdle);
+         m_device->waitForIdle();
+       }
+ 
+@@ -223,4 +306,4 @@
+     }
+   }
+   
+-}
+\ No newline at end of file
++}
+

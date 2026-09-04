@@ -21,7 +21,7 @@ Two pieces, both already on this machine:
 | piece | where | what it does |
 | --- | --- | --- |
 | `x87sidecar-coop` | bundled in `FFXI-on-Mac.app/Contents/Resources` | the JIT; serves whoever handshakes with it |
-| patched CX wine | `/Volumes/Games/FFXI/wine-coop` | re-execs i386 processes through the sidecar and performs the handshake |
+| patched CX wine | `~/Library/Application Support/HorizonXI-on-Mac/runtimes/wine-cx-26.3.0-1` | re-execs i386 processes through the sidecar and performs the handshake |
 
 The wine side is [athei/wine `3804c30b`](https://github.com/athei/wine/commit/3804c30b), *"ntdll:
 HACK: Recognize ROSETTA_X87_PATH and attach x87sidecar cooperatively"*:
@@ -84,6 +84,11 @@ only creates the failure mode where the cost lands without the benefit.
 * `[rosettax87] cooperative service registered: x87sidecar.<pid>` — the sidecar came up.
 * `[rosettax87] cooperative attach: task=… thread=… reply=…` — a process was accepted.
 * `X87_LOG_THROUGHPUT=1` — the sidecar prints requests/s; a live game shows steady traffic.
+* During an armed performance capture, `X87_SAMPLE=.../x87-sample-%p.prof` records the guest x86
+  PCs without suspending the game. `%p` is the sampled target PID, so the injector and client
+  keep separate profiles. The capture discovers the busiest guest-running thread across the full
+  guest address space, then sticky sampling follows it through DLLs, Rosetta runtime code,
+  syscalls, and stalls. Ten-second windows make loading stalls comparable with settled play.
 * CPU: an unaccelerated client pins ~100% of one core and stays there.
 
 For frame rate, use the launcher's own switch so the measurement matches what Play does:
@@ -92,9 +97,9 @@ For frame rate, use the launcher's own switch so the measurement matches what Pl
 
 which writes `fps.csv` next to the client. Read only the rows with >800 draws — those are in-world.
 
-**Known measurement gap:** on the `ROSETTA_X87_PATH` pathway, `DXVK_FPS_LOG` did not produce a file
-in the one run it was tried, though the same variable works on the plain pathway. Not diagnosed;
-if a measurement run comes back with no CSV, this is why, and the CPU check above still works.
+An armed capture on 2026-09-03 verified the complete shipped path. It recorded two cooperative
+handshakes, 17 nonzero throughput samples, 99.6% guest-PC sampling coverage, and the DXVK frame
+log from the real game process. Missing frame logs on this pathway are no longer a known issue.
 
 ## Rules
 
@@ -114,11 +119,14 @@ launcher logs which world it skipped and why.
 
 ## Upstream
 
-* [athei/x87sidecar](https://github.com/athei/x87sidecar) — the JIT. Head as of 2026-08-21 is
-  `238a2147` (2026-08-12), which is exactly what this project vendors: **there is no newer upstream
-  fix waiting to be picked up**, and no open issue describing this.
+* [athei/x87sidecar](https://github.com/athei/x87sidecar) — the JIT. `vendor/x87sidecar-coop`
+  is commit `4e9c738` plus `patches/x87sidecar-profile-pid-path.patch`; see `patches/README.md`.
+  The local patch only improves opt-in diagnostics and does not change x87 translation. Upstream `4e9c738` brought three changes that mattered for
+  HorizonXI: FMA contraction off by default (fused arithmetic corrupted PC=53 results), a cached
+  register-state reset when Rosetta restarts a block, and survival of asynchronous signals inside
+  emitted code. With it, the pathological `FFXiMain.dll+0x3d638` geometry stall disappeared.
 * [athei/wine-build](https://github.com/athei/wine-build) — the prebuilt CX wine.
-  `cx-26.3.0-1` (2026-08-19) is current and is what `/Volumes/Games/FFXI/wine-coop` holds.
+  `cx-26.3.0-1` (2026-08-19) is pinned and installed by the app under Application Support.
 * [athei/wine `cx-26-patched`](https://github.com/athei/wine/tree/cx-26-patched) — the wine patches,
   including `3804c30b` above.
 

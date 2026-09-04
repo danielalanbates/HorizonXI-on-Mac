@@ -32,6 +32,8 @@ cp "$BIN" "$APP/Contents/MacOS/FFXI-on-Mac"
 cp "$REPO/scripts/install.sh"        "$APP/Contents/Resources/install.sh"
 cp "$REPO/scripts/fix-wine-rpath.sh" "$APP/Contents/Resources/fix-wine-rpath.sh"
 cp "$REPO/scripts/lsb-server.sh"     "$APP/Contents/Resources/lsb-server.sh"
+cp "$REPO/scripts/lsb-docker.sh"     "$APP/Contents/Resources/lsb-docker.sh"
+mkdir -p "$APP/Contents/Resources/lsb-docker" && cp "$REPO/scripts/lsb-docker/docker-compose.yml" "$REPO/scripts/lsb-docker/config.yaml" "$REPO/patches/lsb-local-test-server.patch" "$APP/Contents/Resources/lsb-docker/"
 cp "$REPO/scripts/update-client.sh"  "$APP/Contents/Resources/update-client.sh"
 cp "$REPO/scripts/catseye-launcher.sh" "$APP/Contents/Resources/catseye-launcher.sh"
 cp "$REPO/scripts/retail-client.sh"    "$APP/Contents/Resources/retail-client.sh"
@@ -42,6 +44,7 @@ chmod +x "$APP/Contents/Resources/"*.sh
 for dll in d3d8to9.dll dxvk-1.10.3-x32-d3d9-horizonxi.dll; do
   [[ -f "$REPO/vendor/$dll" ]] && cp "$REPO/vendor/$dll" "$APP/Contents/Resources/$dll"
 done
+[[ -f "$REPO/vendor/dxvk.conf" ]] && cp "$REPO/vendor/dxvk.conf" "$APP/Contents/Resources/dxvk.conf"
 
 # x87sidecar: the fix for FFXI's x87 floating-point math running ~100x slow under Rosetta (see
 # docs/X87-WALL.md). Signed individually below with its own entitlements -- the app's deep-sign

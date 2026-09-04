@@ -22,3 +22,10 @@ scripts/harness/shots/
 
 # archived .app builds are binaries, not source
 archive/app-builds/
+
+# compiled harness helpers (menu-run.py builds game-window on demand)
+scripts/harness/.build/
+
+# local Docker test server logs
+scripts/lsb-docker/log/
+__pycache__/

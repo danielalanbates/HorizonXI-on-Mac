@@ -1,0 +1,4 @@
+- mysql_bin: /usr/bin/
+- auto_backup: 0
+- auto_update_client: false
+- db_ver: ea00

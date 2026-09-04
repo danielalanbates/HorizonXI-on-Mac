@@ -5,6 +5,14 @@ Written 2026-08-11. This document replaces the performance model in `FINDINGS.md
 route to 30 fps. **That model was wrong**, and the measurements below say why. Read this before
 acting on anything in the older documents.
 
+**2026-09-03 update:** the settled-frame analysis below is still valid, but it did not explain the
+multi-minute crawl whenever a scene loaded. That was a separate DXVK 1.10.3 bug on MoltenVK.
+FFXI first-touched the initial mapped `DrawPrimitiveUP` arena in 80-byte and 112-byte pieces, one
+VM page at a time. `dxvk-1.10.3-up-buffer-prefault.patch` clears the 1 MiB arena up front and keeps
+one cleared replacement ready. Stable 50 fps on the same cold rules screen moved from 123.1 to
+32.4 seconds, and the only mid-frame rollover allocation disappeared. See the 2026-09-03 section
+of `X87-WALL.md` for the controlled runs.
+
 Everything here is measured on an M1 MacBook Pro (8 GB), macOS 26.5.2, at the character-select
 scene unless stated otherwise. The instrumentation is in `patches/dxvk-1.10.3-horizonxi.patch`
 (and `patches/d3d8to9_probe.hpp` for the layer above); the harness is `scripts/harness/bench.py`.
@@ -140,6 +148,66 @@ graphics path, so no part of the translation runs outside Rosetta.
 
 ---
 
+## The loading stall, 2026-09-03
+
+Everything above is about the settled frame. The remaining complaint is different: whenever a
+scene or its models load, the client sits at well under 1 FPS for ten to sixteen seconds and
+then recovers to the mid-fifties. Measured on the bounded menu run (`scripts/harness/menu-run.py`)
+with production DXVK and x87sidecar `4e9c738`:
+
+| window | seconds | min FPS | faults/s | kernel share | footprint |
+|---|---|---|---|---|---|
+| boot to rules screen | 10 | 0.04 | 33,700 | 0.88 | +39 MB |
+| rules to main menu | 16 | 0.21 | 30,000 | 0.87 | +15 MB |
+| recovered baseline | | 55 | 3,900 | 0.15 | flat |
+
+What the stall is not, each ruled out with a measurement rather than an argument:
+
+* **Not x87.** The complete block-execution profile of the game process shows 3.45 billion ARM
+  instructions of translated x87 work across the whole 130-second run, against 4 to 5 billion
+  instructions per second during the stall. The hottest block is 4.6% of x87 emit, the IR path
+  handles 84% of ops, gate refusals are 0.01 to 0.03 per thousand ops, and only `f2xm1` is
+  ever forwarded to stock Rosetta. FMA contraction changed nothing and is unsafe anyway.
+* **Not disk.** Reads and page-ins are near zero inside the stall windows.
+* **Not the GPU.** System GPU utilization stays under 20%.
+* **Not DXVK pipeline compilation.** Three of nine slow samples overlap compiler activity.
+
+What it is: the process spends about 88% of its CPU in the kernel, taking roughly 33,000 page
+faults and 170,000 Mach traps per second, with 70,000 context switches per second, while user
+instructions per second fall. Copy-on-write faults are zero, so these are first-touch faults on
+fresh anonymous memory. The guest-PC sampler's stacks put the leaf in `ucrtbase.dll!memset`
+under `Ashita.dll+0x1402a7` (24% of slow samples), `FFXiMain.dll+0x43f7f` (16%), and
+`d3dx9_43.dll!D3DXCreateSprite` (8%), with `FFXiMain.dll` on 79% of slow stacks and
+`d3d9.dll` on 72%. The Wine side of every fault is a Mach trap and a wakeup, which is where the
+switch and trap counts come from.
+
+So the stall was memory commit, but not because of how much was committed. The first
+experiment, keeping DXVK's emptied memory chunks mapped across the transition, changed nothing.
+The offline reproducer (`scripts/tools/d3d9-scene-bench.c`, driven by
+`scripts/harness/fault-bench.py`) then showed the actual variable: the same allocation storm
+costs 12 ms per frame in a process with DEP on and 2,260 ms per frame once a single module built
+without `IMAGE_DLLCHARACTERISTICS_NX_COMPAT` has been loaded. FFXiMain.dll, FFXi.dll and
+pol.exe are all such modules. Wine reacts to them by enabling execute on every page in the
+process, Windows does not, and under Rosetta each first touch of a writable-and-executable page
+adds a Mach round trip through the exception server to the ordinary page fault. That is the
+5 Mach messages per fault and the 88% kernel share.
+
+`patches/dxvk-1.10.3-enforce-nx.patch` sets `ProcessExecuteFlags` back to disable-permanent in
+`Direct3DCreate9`, before any buffer exists. Two consecutive character-list runs on 2026-09-03:
+
+| | before | after |
+|---|---|---|
+| seconds below 10 FPS | 24 | 1 |
+| boot to rules screen | 41.7 s | 17.1 s |
+| rules to main menu | 28 s | 10 s |
+| main menu to character list | not reached in 36 s | 10 s |
+| kernel share of CPU in the slow seconds | 0.88 | 0.19 |
+| character-list settled FPS | n/a | 44 to 47 |
+
+The one remaining slow second is window creation. Rendering is unchanged, and x87 acceleration
+stays active with both cooperative handshakes. The proper home for this fix is Wine, keyed on
+running under Rosetta, and it should be raised there.
+
 ## What is left that can move the number
 
 Ranked by measured or expected value:
@@ -157,3 +225,39 @@ Ranked by measured or expected value:
 
 What will *not* move it: batching draws, instancing, MoltenVK tuning, render-pass merging,
 different Vulkan settings. Those were the previous plan and they are all inside the 20%.
+
+## In-world, 2026-09-03: where the settled frame goes
+
+Measured on the local test server (`docs/LOCAL-TEST-SERVER.md`) with the `city` scenario in
+`scripts/harness/addons/perfscene`: godmode, `/fps 0`, draw distance maxed, then Bastok
+Markets and Bastok Mines, each held twenty seconds. Three runs, all unattended.
+
+| scene | FPS | draws / frame | passes / frame | GPU idle / frame |
+|---|---|---|---|---|
+| Bastok Markets | 30 to 33 | 1,800 to 2,500 | 50 | most of it |
+| Bastok Mines | 51 to 64 | 2,300 to 3,000 | 4 | 12.8 of 15.7 ms |
+
+The GPU is waiting on the CPU, and two threads are co-limiting: the game thread (draw
+submission through Ashita, d3d8to9 and DXVK's D3D9 front end) and DXVK's command-stream thread
+(Vulkan encode through MoltenVK to Metal). Each runs at 0.7 to 0.8 of a core in the Mines.
+End-to-end cost is about 6.7 µs per draw; Markets is slower because it renders 50 passes per
+frame against 4, and per-pass cost dominates.
+
+Two experiments, neither a win:
+
+- **Removing HorizonXI's addon set** (only `fps`, `drawdistance`, `perfscene`) took the Mines
+  from 51 to 64 FPS, but the draw count also dropped by a fifth, so the per-draw cost was
+  unchanged. `Addons.dll` is 22% of the game thread's guest samples in the full configuration;
+  which addon is hot is answerable from those offsets and worth a separate pass.
+- **DXVK built with llvm-mingw Clang 23** instead of Homebrew's i686 gcc. The gcc build uses
+  SjLj exceptions and winpthreads TLS, which put `_Unwind_SjLj_Register`, `pthread_setspecific`
+  and spinlocks at half of DXVK's guest samples. Clang's DWARF build removes them (the cross
+  file is `scripts/harness/dxvk-cross-llvm-mingw.txt`, one include fix in
+  `patches/dxvk-1.10.3-clang-include.patch`), but draws per second were identical in the game.
+  That overhead was visible in samples on a thread that was not the limiting one. The gcc build
+  stays vendored.
+
+Next levers, in order: pin the scenario camera so draw counts stop varying between runs; the
+MoltenVK encode side (`MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS` is set on the Vulkan pathway
+but not on Metal); and the `field` scenario with spawned mobs and weather for a heavier,
+reproducible load.

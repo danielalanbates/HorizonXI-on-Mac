@@ -3,9 +3,8 @@ import Foundation
 /// What the Dock shows while a world is running.
 ///
 /// The game is a wine process, and the Dock takes a process's tile from the bundle its executable
-/// lives inside. With x87 acceleration off (the default since 2026-08-21) that is the Sikarugir
-/// wrapper's own wine at `siku.app/Contents/SharedSupport/wine/bin/wine`, so the tile said
-/// "Sikarugir" under a generic wrapper icon no matter which world was running.
+/// lives inside. The patched Wine runtime used for the game lives under Application Support,
+/// outside an app bundle, so without an override the tile appears as plain "wine".
 ///
 /// So before each launch, stamp the wrapper: this project's gold crystal in place of the
 /// wrapper's icon, and the world's name as the bundle name. The original icon is kept beside it
@@ -14,9 +13,8 @@ import Foundation
 /// Two things this deliberately does not do:
 /// * It does not touch the code signature. The wrapper is ad-hoc signed with `Info.plist=not
 ///   bound`, so renaming it is safe; replacing a *Mach-O* would not be.
-/// * It does not work for a launch through the x87 cooperative wine, which lives outside any
-///   bundle (`/Volumes/Games/FFXI/wine-coop/...`) and therefore has no tile to stamp. Running a
-///   bare executable is exactly why that pathway shows up as plain "wine".
+/// * Stamping the wrapper alone does not affect the patched runtime, which lives outside any app
+///   bundle. `cxRoot` supplies the icon to that Wine process separately.
 enum DockIcon {
     /// The route that actually works (2026-08-26): CrossOver's winemac.drv reads the Dock tile
     /// from the exe's first RT_GROUP_ICON resource, and `horizon-loader.exe` has none -- so it

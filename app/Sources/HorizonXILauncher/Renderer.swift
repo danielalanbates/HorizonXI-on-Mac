@@ -111,6 +111,23 @@ enum RendererSetup {
     /// measured 5.1 -> 7.9 fps at the same screen, with no visual change.
     static let maxVersionGL: UInt32 = 0x0004_0001
 
+    /// The config paired with the vendored DXVK build. DXVK otherwise searches relative to the
+    /// Windows process, which is ambiguous here: Ashita starts in the client root, then launches
+    /// the game executable from `SquareEnix/FINAL FANTASY XI`. Keep the config in the app and
+    /// pass its exact Wine path through `DXVK_CONFIG_FILE` instead.
+    static func dxvkConfig() -> URL? {
+        if let bundled = Bundle.main.url(forResource: "dxvk", withExtension: "conf") {
+            return bundled
+        }
+        let source = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // HorizonXILauncher
+            .deletingLastPathComponent() // Sources
+            .deletingLastPathComponent() // app
+            .deletingLastPathComponent() // repository root
+            .appendingPathComponent("vendor/dxvk.conf")
+        return FileManager.default.fileExists(atPath: source.path) ? source : nil
+    }
+
     static func apply(_ renderer: Renderer, to install: Install, log: (String) -> Void) {
         stopWineserver(install)
 
