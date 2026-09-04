@@ -1,0 +1,25 @@
+--- a/src/d3d9/d3d9_device.cpp
++++ b/src/d3d9/d3d9_device.cpp
+@@ -3997,6 +3997,22 @@ namespace dxvk {
+ 
+         currentSlice.slice  = DxvkBufferSlice(m_dxvkDevice->createBuffer(info, memoryFlags));
+         currentSlice.mapPtr = currentSlice.slice.mapPtr(0);
++
++        if constexpr (UpBuffer) {
++          // DxvkBuffer leaves its first single-slice allocation untouched and clears later
++          // allocations before use. On MoltenVK, first-touching that initial mapped Metal
++          // buffer a cache line at a time can block for seconds at each new VM page. FFXI does
++          // exactly that with its small DrawPrimitiveUP uploads. Touch the whole 1 MiB arena
++          // once so the first slice behaves like every replacement slice.
++          std::memset(currentSlice.mapPtr, 0, DefaultSize);
++
++          // Reserve one cleared replacement now as well. This buffer rolls over after 8,192
++          // of FFXI's 112-byte uploads, and allocating its replacement on demand otherwise
++          // pauses the render thread for over a second. Returning the slice to the buffer's
++          // free list makes the existing rename path pick it up without changing ownership.
++          auto standbySlice = currentSlice.slice.buffer()->allocSlice();
++          currentSlice.slice.buffer()->freeSlice(standbySlice);
++        }
+       } else if (unlikely(currentSlice.slice.length() < size)) {
+         auto physSlice = currentSlice.slice.buffer()->allocSlice();
+ 

@@ -1,0 +1,172 @@
+diff --git a/rosetta_core/src/ConfigEnv.cpp b/rosetta_core/src/ConfigEnv.cpp
+index d8244b7..8b7d856 100644
+--- a/rosetta_core/src/ConfigEnv.cpp
++++ b/rosetta_core/src/ConfigEnv.cpp
+@@ -415,6 +415,9 @@ void print_env_help(std::FILE* out) {
+         "                                image it cannot find.  If\n"
+         "                                nothing runs in the range no profile is\n"
+         "                                written and the reason is logged.\n"
++        "  X87_SAMPLE_STICKY=1           keep the selected thread while it runs outside\n"
++        "                                the guest range; search again only if its thread\n"
++        "                                state can no longer be read\n"
+         "  X87_NO_UNWIND=1               record leaf pcs only, skip the guest stack\n"
+         "                                walk (roughly halves the per-sample cost)\n"
+         "  X87_DISABLE_ALL_FUSIONS=1     disable every peephole fusion\n"
+diff --git a/rosetta_loader/src/sidecar.cpp b/rosetta_loader/src/sidecar.cpp
+index 0e4472c..22cad97 100644
+--- a/rosetta_loader/src/sidecar.cpp
++++ b/rosetta_loader/src/sidecar.cpp
+@@ -1039,15 +1039,17 @@ uint64_t machThreadId(mach_port_t thread) {
+ // One sample: read the thread's ARM pc, resolve it to a guest pc, unwind, and
+ // hand the result to the aggregator.  Nothing is accumulated here and nothing is
+ // looked up — this thread's only job is to be on time.  `record=false` makes it
+-// a discovery probe, which scores a thread without entering the profile.
+-void sampleThread(SamplerCtx* ctx, const guest_pc::Reader& reader, guest_pc::Cache& cache,
++// a discovery probe, which scores a thread without entering the profile. The
++// return value says whether thread_get_state succeeded, so sticky mode can tell
++// a dead subject from a live one running outside the discovery range.
++bool sampleThread(SamplerCtx* ctx, const guest_pc::Reader& reader, guest_pc::Cache& cache,
+                   mach_port_t thread, uint64_t tid, bool record, bool& inRange) {
+     inRange = false;
+     arm_thread_state64_t state{};
+     mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+     if (thread_get_state(thread, ARM_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state),
+                          &count) != KERN_SUCCESS) {
+-        return;
++        return false;
+     }
+     if (record) {
+         g_counters.samples.fetch_add(1, std::memory_order_relaxed);
+@@ -1163,6 +1165,7 @@ void sampleThread(SamplerCtx* ctx, const guest_pc::Reader& reader, guest_pc::Cac
+         g_counters.total_ns.fetch_add(static_cast<uint64_t>((nowUs() - t0) * 1000.0),
+                                       std::memory_order_relaxed);
+     }
++    return true;
+ }
+ 
+ // Everything the profile is made of, owned by one thread: the histograms, the
+@@ -1177,6 +1180,7 @@ struct AggCtx {
+     double report_s;
+     bool unwind;
+     bool range_pinned;
++    bool sticky;
+     // Per-window delta profiles: how many have been written, and where the one
+     // being filled started, in run seconds and in latched seconds.  A window's
+     // rate has to divide by the latched time inside THAT window, not the run's.
+@@ -1324,6 +1328,7 @@ void emitProfile(FILE* fh, const AggCtx* ctx, const SamplerStats& st, double ela
+         rangeFrom = "main image (detected)";
+     }
+     fprintf(fh, "guest_range_from %s\n", rangeFrom);
++    fprintf(fh, "sticky %s\n", ctx->sticky ? "yes" : "no");
+     // A failed latch writes no profile at all, so a profile always has a
+     // subject.  `latched_thread` is the CURRENT one, not the only one: a run
+     // that re-latched has every thread it followed in [threads], each holding
+@@ -1871,6 +1876,11 @@ void* samplerMain(void* raw) {
+                 "onto the thread that runs the main image\n",
+                 ctx->cfg.path.c_str(), sampleHz, sweepHz);
+     }
++    if (ctx->cfg.sticky) {
++        fprintf(stdout,
++                "[rosettax87] X87_SAMPLE: sticky thread sampling enabled; the selected thread "
++                "is kept until its state is unavailable\n");
++    }
+     fflush(stdout);
+ 
+     double started = nowUs();
+@@ -1882,9 +1892,26 @@ void* samplerMain(void* raw) {
+             // Steady state: one thread, one thread_get_state, no task_threads,
+             // no port churn and no thread_info.
+             bool inRange = false;
+-            sampleThread(ctx, reader, cache, latched, latchedTid, true, inRange);
++            const bool stateAvailable =
++                sampleThread(ctx, reader, cache, latched, latchedTid, true, inRange);
+             const double now = nowUs();
+-            if (inRange) {
++            bool shouldUnlatch = false;
++            if (ctx->cfg.sticky && !stateAvailable) {
++                fprintf(stdout,
++                        "[rosettax87] X87_SAMPLE: unlatched from thread 0x%llx because its "
++                        "state is unavailable; searching again\n",
++                        static_cast<unsigned long long>(latchedTid));
++                fflush(stdout);
++                g_latch.add((now - started) / 1e6,
++                            "unlatched 0x%llx because thread state is unavailable",
++                            static_cast<unsigned long long>(latchedTid));
++                shouldUnlatch = true;
++            } else if (ctx->cfg.sticky) {
++                // Once discovery has found the busiest guest-running thread,
++                // keep following it. The game loop spends most of its time in
++                // DLLs, Rosetta runtime code, syscalls, and waits rather than
++                // inside the launcher's executable image.
++            } else if (inRange) {
+                 lastInRange = now;
+             } else if (now - lastInRange > kUnlatchAfterS * 1e6) {
+                 const double quiet = (now - lastInRange) / 1e6;
+@@ -1896,6 +1923,9 @@ void* samplerMain(void* raw) {
+                 g_latch.add((now - started) / 1e6,
+                             "unlatched 0x%llx after %.1f s outside the image",
+                             static_cast<unsigned long long>(latchedTid), quiet);
++                shouldUnlatch = true;
++            }
++            if (shouldUnlatch) {
+                 {
+                     const std::scoped_lock lock(g_latch.mu);
+                     g_latch.latched = false;
+@@ -2836,6 +2866,9 @@ void samplerConfigFromEnv(SamplerConfig& cfg) {
+     if (const char* w = getenv("X87_SAMPLE_WINDOWS"); w != nullptr && w[0] != '\0') {
+         cfg.windows = strcmp(w, "0") != 0;
+     }
++    if (env_truthy("X87_SAMPLE_STICKY")) {
++        cfg.sticky = true;
++    }
+     if (env_truthy("X87_NO_UNWIND")) {
+         cfg.unwind = false;
+     }
+@@ -2897,6 +2930,10 @@ void startSampler(mach_port_t parentTaskPort, uint64_t runtimeBase, const Sample
+     // Sweeping every thread faster than the sample rate is never what was
+     // meant: the sweep is the expensive mode and the rate is the cheap one.
+     cfg.sweep_interval_us = std::max(cfg.sweep_interval_us, cfg.interval_us);
++    if (cfg.guest_range_pinned) {
++        g_counters.guest_lo.store(cfg.guest_lo, std::memory_order_relaxed);
++        g_counters.guest_hi.store(cfg.guest_hi, std::memory_order_relaxed);
++    }
+     // Resolve the target before touching the output path.  Wine starts one
+     // sidecar per i386 process, and all of them inherit the same environment.
+     // Expanding first keeps the injector from truncating the game's profile.
+@@ -2951,6 +2988,7 @@ void startSampler(mach_port_t parentTaskPort, uint64_t runtimeBase, const Sample
+                            .report_s = cfg.report_s,
+                            .unwind = cfg.unwind,
+                            .range_pinned = cfg.guest_range_pinned,
++                           .sticky = cfg.sticky,
+                            .windows = cfg.windows};
+     pthread_t aggThr;
+     if (pthread_create(&aggThr, &attr, aggregatorMain, agg) != 0) {
+diff --git a/rosetta_loader/src/sidecar.hpp b/rosetta_loader/src/sidecar.hpp
+index 2c04eca..2b26665 100644
+--- a/rosetta_loader/src/sidecar.hpp
++++ b/rosetta_loader/src/sidecar.hpp
+@@ -81,6 +81,12 @@ struct SamplerConfig {
+     uint64_t guest_lo = 0;
+     uint64_t guest_hi = 0x100000000ULL;
+     bool guest_range_pinned = false;
++    // X87_SAMPLE_STICKY. Discovery still chooses the thread seen running guest
++    // code most often, but once chosen the sampler follows it through library
++    // code, Rosetta runtime code, syscalls, and stalls. It re-enters discovery
++    // only when that thread can no longer be read. This is useful for profiling
++    // a long-lived game loop whose executable delegates most work to DLLs.
++    bool sticky = false;
+     // Profile rewrite interval, and with it the window size below, which is what
+     // sets this rather than durability: every catchable exit path flushes (see
+     // flushSamplerIfEnabled), so it bounds only what an uncatchable kill takes
+@@ -105,8 +111,9 @@ struct SamplerConfig {
+ };
+ 
+ // Overlay X87_SAMPLE / X87_SAMPLE_HZ / X87_SAMPLE_SWEEP_HZ / X87_SAMPLE_REPORT /
+-// X87_GUEST_RANGE / X87_NO_UNWIND onto `cfg`.  Env is how the app bundle enables
+-// this: gamelauncher passes fixed arguments, but applies its [env] table.
++// X87_GUEST_RANGE / X87_SAMPLE_STICKY / X87_NO_UNWIND onto `cfg`. Env is how the
++// app bundle enables this: gamelauncher passes fixed arguments, but applies its
++// [env] table.
+ void samplerConfigFromEnv(SamplerConfig& cfg);
+ 
+ void startSampler(mach_port_t parentTaskPort, uint64_t runtimeBase, const SamplerConfig& in);

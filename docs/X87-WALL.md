@@ -248,6 +248,9 @@ A silent 2.5x regression is exactly what happened here.
 
 ## 2026-08-21 (measured): x87 acceleration is now a 19x LOSS. Turned off by default.
 
+**Retracted 2026-09-03.** The sidecar was blamed for a separate DXVK mapped-upload-buffer
+first-touch stall. The correction and controlled measurements are at the end of this document.
+
 Both modes measured back to back on macOS 26.5.2, same 382-draw screen, same settings, 60
 one-second samples each from `DXVK_FPS_LOG`:
 
@@ -307,3 +310,34 @@ Still unmeasured in-world: this is the rules-of-conduct screen, the same scene a
 which makes it comparable but not a gameplay number. An in-world figure needs a character logged
 in; the 2026-08-11 baseline for that scene was 11.3 fps pre-x87 and 28.5 with the sidecar working,
 so in-world on this build should be read fresh rather than inferred from either.
+
+## 2026-09-03 correction: the cold stall was DXVK's upload arena
+
+The 2026-08-21 test did prove that a manually forced `ROSETTA_DISABLE_AOT` is destructive when no
+sidecar attaches. It did not prove that the working cooperative path was the cause of the long
+cold-scene crawl. A new capture recorded the active phase of every in-flight `DrawPrimitiveUP`
+call and exposed a deterministic allocation pattern:
+
+- FFXI repeatedly uploads 112 bytes, which DXVK aligns to 128 bytes.
+- Thirty-two uploads consume one 4 KiB VM page.
+- The first 1 MiB `DxvkBuffer` allocation is intentionally left uncleared. MoltenVK maps that
+  memory from Metal, and first-touching it a cache line at a time blocks the render thread page by
+  page.
+- DXVK clears replacement allocations. That is why every scene eventually became fast after a
+  long crawl and then stayed fast.
+
+The control used normal Rosetta AOT, no x87 sidecar, and no pipeline cache. It needed 103.7 seconds
+to hold 30 fps and 123.1 seconds to hold 50 fps, with 36 one-second samples below 10 fps. A
+pipeline-cache build successfully wrote and reloaded a 185,773-byte cache but remained between
+0.4 and 1.3 fps, so shader caching was not the fix.
+
+`dxvk-1.10.3-up-buffer-prefault.patch` now clears the initial 1 MiB upload arena once and reserves
+one already-cleared replacement slice for its first rollover. With x87 acceleration enabled, the
+same rules screen reached stable 30 and 50 fps at 32.4 seconds, held a 55.99 fps median, and had
+five startup samples below 10 fps. The capture saw both cooperative handshakes and 17 nonzero
+throughput samples. Its guest-PC sampler covered 90.1 of 90.5 seconds. The old mid-frame rollover
+pause at upload 8,193 was absent.
+
+HorizonXI therefore uses cooperative x87 acceleration again. `Server.x87` remains off only for
+worlds with a measured incompatibility, currently Gaia XI. Do not re-disable x87 to treat a cold
+scene. Check the upload-buffer probes first.

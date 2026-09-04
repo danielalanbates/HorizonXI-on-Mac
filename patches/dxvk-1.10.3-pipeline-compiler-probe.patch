@@ -1,0 +1,44 @@
+--- a/src/dxvk/dxvk_device.cpp
++++ b/src/dxvk/dxvk_device.cpp
+@@ -51,7 +51,8 @@
+       t0 = tick = std::chrono::steady_clock::now();
+       std::fprintf(file,
+         "epoch,elapsed,fps,draws,passes,barriers,submits,cschunks,gpuidle_us,"
+-        "syncs,sync_ms,imgsyncs,imgsync_ms\n");
++        "syncs,sync_ms,imgsyncs,imgsync_ms,compiler_busy,graphics_pipelines,"
++        "compute_pipelines\n");
+       std::fflush(file);
+     }
+ 
+@@ -73,13 +74,16 @@
+ 
+       // GpuSyncTicks accumulates microseconds; report it as milliseconds per frame, which is
+       // directly comparable with the frame time.
+-      std::fprintf(file, "%lld,%.1f,%.2f,%.1f,%.1f,%.1f,%.2f,%.1f,%.0f,%.2f,%.3f,%.2f,%.3f\n",
++      std::fprintf(file, "%lld,%.1f,%.2f,%.1f,%.1f,%.1f,%.2f,%.1f,%.0f,%.2f,%.3f,%.2f,%.3f,%llu,%llu,%llu\n",
+         (long long) std::time(nullptr),
+         std::chrono::duration<double>(now - t0).count(),
+         double(frames) / dt,
+         perFrame[0], perFrame[1], perFrame[2], perFrame[3], perFrame[4], perFrame[5],
+         perFrame[6], perFrame[7] / 1000.0,
+-        perFrame[8], perFrame[9] / 1000.0);
++        perFrame[8], perFrame[9] / 1000.0,
++        (unsigned long long)ctrs.getCtr(DxvkStatCounter::PipeCompilerBusy),
++        (unsigned long long)ctrs.getCtr(DxvkStatCounter::PipeCountGraphics),
++        (unsigned long long)ctrs.getCtr(DxvkStatCounter::PipeCountCompute));
+       std::fflush(file);
+       frames = 0;
+       tick = now;
+@@ -210,7 +214,9 @@
+     presentInfo.presenter = presenter;
+     m_submissionQueue.present(presentInfo, status);
+     
+-    std::lock_guard<sync::Spinlock> statLock(m_statLock);
+-    m_statCounters.addCtr(DxvkStatCounter::QueuePresentCount, 1);
+-    g_fpsLog.frame(m_statCounters);
++    {
++      std::lock_guard<sync::Spinlock> statLock(m_statLock);
++      m_statCounters.addCtr(DxvkStatCounter::QueuePresentCount, 1);
++    }
++    g_fpsLog.frame(this->getStatCounters());
+   }

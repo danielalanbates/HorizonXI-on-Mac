@@ -42,6 +42,7 @@ chmod +x "$APP/Contents/Resources/"*.sh
 for dll in d3d8to9.dll dxvk-1.10.3-x32-d3d9-horizonxi.dll; do
   [[ -f "$REPO/vendor/$dll" ]] && cp "$REPO/vendor/$dll" "$APP/Contents/Resources/$dll"
 done
+[[ -f "$REPO/vendor/dxvk.conf" ]] && cp "$REPO/vendor/dxvk.conf" "$APP/Contents/Resources/dxvk.conf"
 
 # x87sidecar: the fix for FFXI's x87 floating-point math running ~100x slow under Rosetta (see
 # docs/X87-WALL.md). Signed individually below with its own entitlements -- the app's deep-sign
