@@ -16,7 +16,7 @@
 set -euo pipefail
 HERE="${0:A:h}"; REPO="${HERE:h}"
 DRIVE_C="${1:?drive_c path}"; WORLD="${2:?world dir, e.g. HorizonXI}"; LOADER="${3:-horizon-loader.exe}"
-WINE="${WINE:-/Volumes/Games/FFXI/wine-coop/wine/bin/wine}"
+WINE="${WINE:-$HOME/Library/Application Support/HorizonXI-on-Mac/runtimes/wine-cx-26.3.0-1/wine/bin/wine}"
 
 BOOT="$DRIVE_C/$WORLD/bootloader"
 OUT="$DRIVE_C/$WORLD/bootloader-ffxi"
