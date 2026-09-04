@@ -225,3 +225,39 @@ Ranked by measured or expected value:
 
 What will *not* move it: batching draws, instancing, MoltenVK tuning, render-pass merging,
 different Vulkan settings. Those were the previous plan and they are all inside the 20%.
+
+## In-world, 2026-09-03: where the settled frame goes
+
+Measured on the local test server (`docs/LOCAL-TEST-SERVER.md`) with the `city` scenario in
+`scripts/harness/addons/perfscene`: godmode, `/fps 0`, draw distance maxed, then Bastok
+Markets and Bastok Mines, each held twenty seconds. Three runs, all unattended.
+
+| scene | FPS | draws / frame | passes / frame | GPU idle / frame |
+|---|---|---|---|---|
+| Bastok Markets | 30 to 33 | 1,800 to 2,500 | 50 | most of it |
+| Bastok Mines | 51 to 64 | 2,300 to 3,000 | 4 | 12.8 of 15.7 ms |
+
+The GPU is waiting on the CPU, and two threads are co-limiting: the game thread (draw
+submission through Ashita, d3d8to9 and DXVK's D3D9 front end) and DXVK's command-stream thread
+(Vulkan encode through MoltenVK to Metal). Each runs at 0.7 to 0.8 of a core in the Mines.
+End-to-end cost is about 6.7 µs per draw; Markets is slower because it renders 50 passes per
+frame against 4, and per-pass cost dominates.
+
+Two experiments, neither a win:
+
+- **Removing HorizonXI's addon set** (only `fps`, `drawdistance`, `perfscene`) took the Mines
+  from 51 to 64 FPS, but the draw count also dropped by a fifth, so the per-draw cost was
+  unchanged. `Addons.dll` is 22% of the game thread's guest samples in the full configuration;
+  which addon is hot is answerable from those offsets and worth a separate pass.
+- **DXVK built with llvm-mingw Clang 23** instead of Homebrew's i686 gcc. The gcc build uses
+  SjLj exceptions and winpthreads TLS, which put `_Unwind_SjLj_Register`, `pthread_setspecific`
+  and spinlocks at half of DXVK's guest samples. Clang's DWARF build removes them (the cross
+  file is `scripts/harness/dxvk-cross-llvm-mingw.txt`, one include fix in
+  `patches/dxvk-1.10.3-clang-include.patch`), but draws per second were identical in the game.
+  That overhead was visible in samples on a thread that was not the limiting one. The gcc build
+  stays vendored.
+
+Next levers, in order: pin the scenario camera so draw counts stop varying between runs; the
+MoltenVK encode side (`MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS` is set on the Vulkan pathway
+but not on Metal); and the `field` scenario with spawned mobs and weather for a heavier,
+reproducible load.

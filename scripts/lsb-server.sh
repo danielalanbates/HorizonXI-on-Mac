@@ -23,6 +23,16 @@ setopt NULL_GLOB 2>/dev/null || true
 # at top level, so cmd_watchdog_spawn can re-invoke this same script from within cmd_start.
 SELF="${0:A}"
 
+# A Docker-hosted test server (scripts/lsb-docker.sh) takes over the whole contract when its
+# image has been built or LSB_BACKEND=docker is set. The launcher keeps calling this script by
+# name, so the choice lives here rather than in Swift. Everything below is the Homebrew build.
+if [[ "${LSB_BACKEND:-}" == "docker" ]] \
+   || { [[ -z "${LSB_BACKEND:-}" ]] && [[ -x "${SELF:h}/lsb-docker.sh" ]] \
+        && command -v docker >/dev/null 2>&1 \
+        && docker image inspect lsb-local/server:latest >/dev/null 2>&1; }; then
+  exec /bin/zsh "${SELF:h}/lsb-docker.sh" "$@"
+fi
+
 LSB_ROOT="${LSB_ROOT:-$HOME/Games/lsb}"
 SRC="$LSB_ROOT/server"
 RUN="$LSB_ROOT/run"

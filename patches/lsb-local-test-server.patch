@@ -1,0 +1,45 @@
+diff --git a/docker/ubuntu.Dockerfile b/docker/ubuntu.Dockerfile
+index 67fbe69e..1e0dd4ad 100644
+--- a/docker/ubuntu.Dockerfile
++++ b/docker/ubuntu.Dockerfile
+@@ -161,6 +161,7 @@ ARG CMAKE_BUILD_TYPE=Release
+ ARG TRACY_ENABLE=OFF
+ ARG PCH_ENABLE=ON
+ ARG WARNINGS_AS_ERRORS=TRUE
++ARG BUILD_JOBS
+ 
+ # A toolchain or base image bump must change this id, or the new compiler reuses old objects.
+ # BASE_TAG is a pre-FROM global, so it needs re-declaring to be in scope here.
+@@ -180,6 +181,10 @@ RUN --mount=type=cache,target=/xiadmin/build,uid=$UID,gid=$GID,id=build-ubuntu-$
+ set -eo pipefail
+ cp -p /xiadmin/build/version.cpp /server/src/common/ 2> /dev/null || true
+ cp -p /xiadmin/build/xi_* /server/ 2> /dev/null || true
++# The enum codegen writes scripts/enum/*.codegen.lua into the source tree, which is a fresh
++# COPY every build, while its stamp lives in the cached build dir. Drop the stamp so the
++# generated Lua is always present in the image.
++rm -f /xiadmin/build/generated/.enum_codegen.stamp
+ 
+ if [[ $COMPILER == clang* || $ENABLE_CLANG_TIDY == ON ]]; then
+     export CC=/usr/bin/clang-$LLVM_VERSION
+@@ -193,7 +198,7 @@ cmake -G Ninja -S /server -B /xiadmin/build --fresh \
+     -DPCH_ENABLE=$PCH_ENABLE \
+     -DWARNINGS_AS_ERRORS=$WARNINGS_AS_ERRORS
+ 
+-cmake --build /xiadmin/build -j$(nproc) | tee build.log
++cmake --build /xiadmin/build -j${BUILD_JOBS:-$(nproc)} | tee build.log
+ 
+ ccache -s
+ 
+diff --git a/src/login/auth_session.h b/src/login/auth_session.h
+index 38caf915..65f4df90 100644
+--- a/src/login/auth_session.h
++++ b/src/login/auth_session.h
+@@ -67,7 +67,7 @@ enum class login_result : uint8_t
+     LOGIN_ERROR_TRUST_TOKEN_INVALID = 0x13,
+ };
+ 
+-constexpr std::array<uint8, 3> SupportedXiloaderVersion = { 2, 1, 0 };
++constexpr std::array<uint8, 3> SupportedXiloaderVersion = { 2, 0, 0 };
+ 
+ // NOTE: This collection of flags is 64-bits wide!
+ enum AUTH_COMPONENTS

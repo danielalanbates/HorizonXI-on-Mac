@@ -162,3 +162,19 @@ too — unlike the rest of this repository. Do not relabel it.
 obvious one-line version silently does nothing, and the two limits that matter: it only helps a
 server running a single `xi_map` process, and one message can still be lost to a race with the
 client's own connection teardown.
+
+---
+
+# Local test-server patch
+
+`lsb-local-test-server.patch` applies to the LandSandBoat checkout that `scripts/lsb-docker.sh`
+builds into `lsb-local/server:latest`. Two hunks, both for a server that only this Mac can
+reach:
+
+- `src/login/auth_session.h`: accept xiloader 2.0, which is what HorizonXI's bootloader
+  reports. Upstream pins 2.1 and rejects by major.minor.
+- `docker/ubuntu.Dockerfile`: a `BUILD_JOBS` build argument so the compile can be capped below
+  the Docker VM's memory. Twelve jobs on an 8 GB VM got `cc1plus` OOM-killed.
+
+Setup applies it with `git apply` and skips it when already present. See
+`docs/LOCAL-TEST-SERVER.md`.

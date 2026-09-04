@@ -59,7 +59,12 @@ GUARDED_VARIABLES = ("X87_PROFILE", "X87_SAMPLE", "X87_ENABLE_FMA_CONTRACT",
                      "FFXI_ON_MAC_DISABLE_X87", "X87_STOCK_HASH_LIST", "X87_LOG_HASH_LIST",
                      "X87_DISABLE_X87_IR", "X87_DISABLE_ALL_FUSIONS", "X87_DISABLE_CACHE",
                      "X87_ENABLE_BRIDGE", "X87_BRIDGE_V2", "X87_NO_IR_CACHE", "X87_NO_TCO_CACHE")
-OVERRIDE_PREFIXES = ("X87_", "DXVK_", "FFXI_ON_MAC_", "D3D9_", "MVK_", "WINE_DISABLE_NX_COMPAT")
+OVERRIDE_PREFIXES = ("X87_", "DXVK_", "FFXI_ON_MAC_", "D3D9_", "MVK_", "WINE_DISABLE_NX_COMPAT",
+                     "PERFSCENE_")
+ADDON_SOURCE = HERE / "addons" / "perfscene"
+# The in-world stage is only ever allowed against the local test world. A real world's
+# character list must never receive the third Return.
+LOCAL_WORLDS = ("Local LSB (Docker)", "Local server")
 BLOCK_COUNTER_TAG = b"CNT0"
 
 # Scene signatures from the DXVK frame log. The rules screen draws a few hundred primitives,
@@ -67,6 +72,8 @@ BLOCK_COUNTER_TAG = b"CNT0"
 RULES_SCENE = ("rules", lambda row: row["fps"] >= 30 and 250 <= row["draws"] <= 500)
 MENU_SCENE = ("main menu", lambda row: row["fps"] >= 30 and 500 <= row["draws"] <= 1100)
 CHARACTERS_SCENE = ("character list", lambda row: row["fps"] >= 30 and row["draws"] >= 1200)
+# The world itself is recognised by the perfscene addon's marker, not by draw counts.
+WORLD_TIMEOUT = 90
 
 
 def log(message: str) -> None:
@@ -256,7 +263,85 @@ class MenuRun:
             self.window_tool = ensure_window_tool()
             if self.window_tool is None:
                 return False
+        if self.args.scenario:
+            if self.args.world not in LOCAL_WORLDS:
+                log(f"refusing an in-world scenario against {self.args.world!r}; "
+                    f"only {LOCAL_WORLDS} are allowed")
+                return False
+            if not self.install_addon():
+                return False
         return True
+
+    def install_addon(self) -> bool:
+        """Copy the perfscene addon into the game and make the local world's boot script load
+        it. The boot script is a copy of default.txt plus one line, named after the profile so
+        the HorizonXI profile is never touched."""
+        target = self.game_dir / "addons" / "perfscene"
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            shutil.copy(ADDON_SOURCE / "perfscene.lua", target / "perfscene.lua")
+            scripts = self.game_dir / "scripts"
+            default = (scripts / "default.txt").read_text(errors="replace")
+            boot = scripts / "perfscene.txt"
+            if self.args.minimal_addons:
+                # Ashita core plugins and binds only; the three addons the scenario needs.
+                kept = [line for line in default.splitlines()
+                        if not line.startswith("/addon load")]
+                boot.write_text("\n".join(kept).rstrip("\n")
+                                + "\n/addon load fps\n/addon load drawdistance\n"
+                                + "/addon load perfscene\n")
+            elif "/addon load perfscene" not in default:
+                boot.write_text(default.rstrip("\n") + "\n/addon load perfscene\n")
+            else:
+                boot.write_text(default)
+            profile = self.game_dir / "config" / "boot" / self.args.profile
+            text = profile.read_text(errors="replace")
+            lines = text.splitlines(keepends=True)
+            for index, line in enumerate(lines):
+                if line.strip().startswith("script") and "=" in line and not line.startswith(";"):
+                    eol = "\r\n" if line.endswith("\r\n") else "\n"
+                    lines[index] = "script      = perfscene.txt" + eol
+                    break
+            profile.write_text("".join(lines))
+        except OSError as error:
+            log(f"could not install the perfscene addon: {error}")
+            return False
+        self.event("perfscene addon installed", boot_script="scripts/perfscene.txt")
+        return True
+
+    def markers_path(self) -> Path:
+        assert self.session_dir is not None
+        return self.session_dir / "perfscene-markers.jsonl"
+
+    def wait_for_marker(self, label: str, timeout: float) -> bool:
+        """Wait for the addon to append a marker with this label to the capture directory."""
+        assert self.recorder is not None
+        deadline = min(time.monotonic() + timeout, self.started + self.args.limit)
+        seen = 0
+        while time.monotonic() < deadline:
+            read_available(self.recorder, self.recorder_lines)
+            if not process_exists(self.game_pid):
+                self.event(f"{label}: game exited")
+                return False
+            try:
+                rows = self.markers_path().read_text(errors="replace").splitlines()
+            except OSError:
+                rows = []
+            for row in rows[seen:]:
+                try:
+                    marker = json.loads(row)
+                except json.JSONDecodeError:
+                    continue
+                log(f"marker: {marker.get('label')}" + (
+                    f" zone={marker['zone']}" if "zone" in marker else ""))
+                if marker.get("label") == label:
+                    self.record["phases"][label.replace(" ", "_") + "_s"] = round(
+                        time.monotonic() - self.started, 1)
+                    return True
+            seen = len(rows)
+            time.sleep(1)
+        self.event(f"{label}: timed out")
+        return False
 
     # -- recorder ----------------------------------------------------------------------
 
@@ -265,6 +350,10 @@ class MenuRun:
                 "--duration", str(self.args.capture_seconds),
                 "--wait-timeout", str(self.args.wait_timeout),
                 "--level", self.args.level, "--no-archive"]
+        if self.args.sample_at:
+            argv += ["--sample-at", self.args.sample_at,
+                     "--sample-seconds", str(self.args.sample_seconds),
+                     "--sample-interval-ms", str(self.args.sample_interval_ms)]
         self.recorder = subprocess.Popen(argv, cwd=HERE.parent.parent, stdout=subprocess.PIPE,
                                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                          text=True, bufsize=1, start_new_session=True)
@@ -296,6 +385,9 @@ class MenuRun:
     def apply_variables(self) -> None:
         variables = {name: value.replace("{session}", self.wine_session_path())
                      for name, value in self.args.env}
+        if self.args.scenario and self.session_dir is not None:
+            variables["PERFSCENE_SCENARIO"] = self.args.scenario
+            variables["PERFSCENE_MARKERS"] = self.wine_session_path() + "\\perfscene-markers.jsonl"
         if self.args.x87_profile and self.session_dir is not None:
             variables["X87_PROFILE"] = str(self.session_dir / "x87-block-%p.prof")
         for name, value in variables.items():
@@ -523,6 +615,20 @@ class MenuRun:
                         return 10
                     time.sleep(3)
                     self.screenshot("characters")
+                    if self.args.scenario:
+                        # Local test world only (checked in preflight). The third Return
+                        # picks the highlighted character; the lobby's confirmation is the
+                        # fourth. The addon marks "in world" once the party zone is real.
+                        for _ in range(2):
+                            if not self.send_one_return():
+                                return 11
+                            time.sleep(2)
+                        if not self.wait_for_marker("in world", WORLD_TIMEOUT):
+                            return 12
+                        self.screenshot("world")
+                        if not self.wait_for_marker("done", self.args.limit):
+                            return 13
+                        self.screenshot("scenario-done")
             hold_until = min(time.monotonic() + self.args.hold, self.started + self.args.limit)
             self.event("holding", seconds=round(hold_until - time.monotonic(), 1))
             while time.monotonic() < hold_until and process_exists(self.game_pid):
@@ -569,6 +675,19 @@ def main() -> int:
     parser.add_argument("--characters", action="store_true",
                         help="after the main menu, send one more Return to open the character "
                              "list and measure that transition too; never logs in")
+    parser.add_argument("--scenario", default="",
+                        help="local test world only: log the test character in and run this "
+                             "perfscene scenario (city, field); implies --characters")
+    parser.add_argument("--sample-at", default="",
+                        help="native /usr/bin/sample start offsets in seconds after the game "
+                             "process appears, comma-separated; passed to the recorder")
+    parser.add_argument("--sample-seconds", type=int, default=5)
+    parser.add_argument("--sample-interval-ms", type=int, default=10)
+    parser.add_argument("--minimal-addons", action="store_true",
+                        help="scenario runs load only fps, drawdistance and perfscene instead "
+                             "of the world's full addon list, for an addon-cost A/B")
+    parser.add_argument("--profile", default="lsb-docker.ini",
+                        help="boot profile the scenario stage edits to load the addon")
     parser.add_argument("--x87-profile", action="store_true",
                         help="collect an x87sidecar block-execution profile for this launch")
     parser.add_argument("--profile-analyzer", default=os.environ.get("X87_PROFILE_ANALYZE"),
@@ -580,7 +699,9 @@ def main() -> int:
                              "{session} expands to the capture directory as a Wine path")
     args = parser.parse_args()
     args.game_dir = args.game_dir.expanduser().resolve()
-    args.max_returns = 0 if args.no_return else (2 if args.characters else 1)
+    if args.scenario:
+        args.characters = True
+    args.max_returns = 0 if args.no_return else (4 if args.scenario else 2 if args.characters else 1)
     if not args.game_dir.is_dir():
         parser.error(f"game directory does not exist: {args.game_dir}")
     if not RECORDER.is_file():
