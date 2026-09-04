@@ -28,11 +28,23 @@ x-common: &common
     XI_LOGIN_VER_LOCK: 0
     XI_LOGIN_ACCOUNT_CREATION: "true"
     XI_LOGIN_CHARACTER_CREATION: "true"
+    # The Rhapsodies of Vana'diel cutscene prompt would sit on screen in every capture.
+    XI_MAIN_ENABLE_ROV: 0
+    XI_MAIN_ENABLE_SOA: 0
+    XI_MAIN_ENABLE_ABYSSEA: 0
+    XI_MAIN_ENABLE_WOTG: 0
+    XI_MAIN_ENABLE_ACP: 0
+    XI_MAIN_ENABLE_AMK: 0
+    XI_MAIN_ENABLE_ASA: 0
+    # Every GM command the scenario addon sends lands in audit_gm, so a run can prove what ran.
+    XI_MAP_AUDIT_GM_CMD: "true"
   volumes:
     - lsb-navmeshes:/server/navmeshes
     - lsb-ximeshes:/server/ximeshes
     - ./log:/server/log
     - ./config.yaml:/server/tools/config.yaml
+    - ./commands/perfcrowd.lua:/server/scripts/commands/perfcrowd.lua:ro
+    - ./commands/perftime.lua:/server/scripts/commands/perftime.lua:ro
 
 services:
   database:

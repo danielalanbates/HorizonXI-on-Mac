@@ -32,10 +32,14 @@ func findWindow(pid: Int32) -> GameWindow? {
     for window in windows {
         guard (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid else { continue }
         let name = (window[kCGWindowName as String] as? String) ?? ""
-        guard name.uppercased().contains("FINAL FANTASY XI") else { continue }
+        // The lobby titles the window "FINAL FANTASY XI"; in the world Ashita may retitle it,
+        // so accept any sizeable window the game process owns and prefer the largest.
+        let layer = (window[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0
+        guard name.uppercased().contains("FINAL FANTASY XI") || layer == 0 else { continue }
         guard let dictionary = window[kCGWindowBounds as String] as? NSDictionary,
               let bounds = CGRect(dictionaryRepresentation: dictionary),
               let number = window[kCGWindowNumber as String] as? NSNumber else { continue }
+        guard bounds.width >= 400, bounds.height >= 300 else { continue }
         let candidate = GameWindow(id: CGWindowID(number.uint32Value), bounds: bounds, name: name)
         if let current = best, current.bounds.width * current.bounds.height
             >= bounds.width * bounds.height {

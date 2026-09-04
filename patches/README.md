@@ -67,13 +67,15 @@ slice so the first rollover does not allocate in the middle of a frame. A 200,00
 test sustained 180,397 `DrawPrimitiveUP` calls per second, and the real rules screen reached a
 stable 50 fps in 32.4 seconds instead of 123.1 seconds in the unpatched control.
 
-**Two upstream bugs, both worth submitting** (see `docs/UPSTREAM.md`):
+**Two upstream-relevant DXVK bugs, documented but not recommended for filing** — see
+`docs/UPSTREAM.md` §3 for the assessment: the first is already fixed in DXVK 2.x, the second
+only matters for a non-target driver (MoltenVK), and both are against the EOL 1.10.3 branch:
 
 - `d3d9_fixed_function.cpp` — `info.pushConstSize` was assigned `m_pushConstOffset`. For
   fixed-function pixel shaders that offset is 0, so no fragment push-constant range was
   declared. Desktop drivers bind push constants anyway; MoltenVK honours the declaration, so
   every fog constant arrived zeroed and the whole world rendered in the fog colour.
-- `dxvk_adapter.cpp` — D3D9 required `geometryShader`, `robustBufferAccess` and
+- `d3d9_device.cpp` — D3D9 required `geometryShader`, `robustBufferAccess` and
   `shaderCullDistance` unconditionally. Metal has none of them and D3D9 needs none of them.
   Making them conditional is what let DXVK run on MoltenVK 1.4.1 instead of only on 1.2.10,
   which was the one version that falsely claimed to support them.

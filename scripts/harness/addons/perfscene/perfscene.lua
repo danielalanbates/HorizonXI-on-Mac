@@ -31,34 +31,46 @@ local chat = require('chat');
 -- LandSandBoat GM commands sent as chat; '/' commands go to Ashita. Zone ids: North Gustaberg
 -- 106, Bastok Markets 235, Batallia Downs 105, Rolanberry Fields 110. Weather ids follow
 -- xi.weather (6 rain, 7 squall, 12 snow, 13 blizzards, 15 thunderstorms).
+-- Each step is { delay_seconds, command, label }. Commands starting with '!' are LandSandBoat
+-- GM commands sent as chat; '/' commands go to Ashita. 'pin H' sets the player's heading in
+-- radians through Ashita so the camera looks the same way every run. Zone ids: North Gustaberg
+-- 106, Bastok Markets 235, Bastok Mines 234. Weather ids follow xi.weather (6 rain, 12 snow,
+-- 15 thunderstorms). Positions are zone-line arrival points from LandSandBoat's zone.yaml, so
+-- the vantage is fixed rather than wherever !zone happened to drop the character.
 local scenarios = {
-    -- The settled-city baseline: stand in the busiest Bastok zone at uncapped FPS.
+    -- The settled-city baseline: two fixed vantages in Bastok at uncapped FPS.
     city = {
-        { 0,  '!godmode',                 'godmode' },
-        { 2,  '/fps 0',                   'fps uncapped' },
-        { 2,  '/drawdistance setworld 20','draw distance max' },
-        { 2,  '/drawdistance setmob 20',  'entity draw max' },
-        { 3,  '!zone 235',                'zone bastok markets' },
-        { 25, 'settle',                   'city settled' },
-        { 20, '!zone 234',                'zone bastok mines' },
-        { 25, 'settle',                   'mines settled' },
-        { 20, 'done',                     'done' },
+        { 0,  '!godmode',                        'godmode' },
+        { 1,  '!perftime 12',                    'clock pinned to noon' },
+        { 2,  '/fps 0',                          'fps uncapped' },
+        { 2,  '/drawdistance setworld 20',       'draw distance max' },
+        { 2,  '/drawdistance setmob 20',         'entity draw max' },
+        { 3,  '!pos -104.018 9.359 81.411 235',  'zone bastok markets' },
+        { 6,  'pin 1.5708',                      'heading pinned' },
+        { 20, 'settle',                          'city settled' },
+        { 20, '!pos -201.904 1.928 -194.828 234','zone bastok mines' },
+        { 6,  'pin 4.7124',                      'heading pinned' },
+        { 20, 'settle',                          'mines settled' },
+        { 20, 'done',                            'done' },
     },
-    -- Outdoors with weather and a crowd of spawned mobs around the player.
+    -- Outdoors at a fixed vantage, then weather, then a crowd of mobs around the player.
     field = {
-        { 0,  '!godmode',                 'godmode' },
-        { 2,  '/fps 0',                   'fps uncapped' },
-        { 2,  '/drawdistance setworld 20','draw distance max' },
-        { 2,  '/drawdistance setmob 20',  'entity draw max' },
-        { 3,  '!zone 106',                'zone north gustaberg' },
-        { 25, 'settle',                   'field settled' },
-        { 3,  '!setweather 15',           'thunderstorms' },
-        { 15, 'settle',                   'weather settled' },
-        { 3,  'spawn 40',                 'spawn 40 mobs' },
-        { 25, 'settle',                   'crowd settled' },
-        { 3,  '!zone 235',                'zone bastok markets' },
-        { 25, 'settle',                   'city after crowd' },
-        { 15, 'done',                     'done' },
+        { 0,  '!godmode',                        'godmode' },
+        { 1,  '!perftime 12',                    'clock pinned to noon' },
+        { 2,  '/fps 0',                          'fps uncapped' },
+        { 2,  '/drawdistance setworld 20',       'draw distance max' },
+        { 2,  '/drawdistance setmob 20',         'entity draw max' },
+        { 3,  '!pos 0.840 -5.027 76.838 106',    'zone north gustaberg' },
+        { 6,  'pin 1.5708',                      'heading pinned' },
+        { 20, 'settle',                          'field settled' },
+        { 3,  '!setweather 15',                  'thunderstorms' },
+        { 15, 'settle',                          'weather settled' },
+        { 3,  'spawn 40',                        'spawn 40 mobs' },
+        { 30, 'settle',                          'crowd settled' },
+        { 3,  '!pos -104.018 9.359 81.411 235',  'zone bastok markets' },
+        { 6,  'pin 1.5708',                      'heading pinned' },
+        { 20, 'settle',                          'city after crowd' },
+        { 10, 'done',                            'done' },
     },
 };
 
@@ -94,12 +106,11 @@ end
 -- Spawn N copies of the nearest spawnable mob ids of this zone at the player's position.
 -- LandSandBoat assigns mob ids per zone as 0x1000000 | zone << 12 | slot; !mobhere moves a
 -- spawn to the player. Slots that hold no mob are rejected by the server and skipped.
+-- The crowd is one server-side command, !perfcrowd, mounted into the local test server by
+-- scripts/lsb-docker/docker-compose.yml. Forty separate !mobhere lines tripped the client's
+-- outgoing chat rate limit, and an !exec one-liner exceeds the chat length limit.
 local function spawn_crowd(n)
-    local zone = AshitaCore:GetMemoryManager():GetParty():GetMemberZone(0);
-    local base = 0x1000000 + zone * 0x1000;
-    for slot = 0, n - 1 do
-        send(string.format('!mobhere %d 1', base + slot));
-    end
+    send(string.format('!perfcrowd %d', n));
 end
 
 local function step()
@@ -122,6 +133,15 @@ local function step()
     elseif (cmd:sub(1, 6) == 'spawn ') then
         spawn_crowd(tonumber(cmd:sub(7)) or 20);
         mark(label);
+    elseif (cmd:sub(1, 4) == 'pin ') then
+        -- Face a fixed direction so the camera frames the same geometry every run.
+        local heading = tonumber(cmd:sub(5)) or 0;
+        local entity = AshitaCore:GetMemoryManager():GetEntity();
+        local index = AshitaCore:GetMemoryManager():GetParty():GetMemberTargetIndex(0);
+        if (index ~= nil and index > 0) then
+            entity:SetLocalPositionYaw(index, heading);
+        end
+        mark(label, string.format(', "heading": %.4f', heading));
     else
         send(cmd);
         mark(label, string.format(', "command": "%s"', (cmd:gsub('"', "'"))));
