@@ -48,8 +48,13 @@ enum Preflight {
             }
         }
 
-        add("wine", "Wine binary", fm.isExecutableFile(atPath: install.wine.path),
+        add("wine", "Wrapper Wine tools", fm.isExecutableFile(atPath: install.wine.path),
             install.wine.path, "missing \(install.wine.path)")
+
+        add("gamewine", "Patched game Wine", WineRuntime.installedExecutable != nil,
+            WineRuntime.executable.path,
+            "missing \(WineRuntime.executable.path) — open Setup & Diagnostics, then run Install wine. "
+            + "The wrapper's Wine is not a compatible substitute and causes severe slowdowns or an exit after login.")
 
         add("client", "Game folder", fm.fileExists(atPath: install.gameDir.path),
             install.gameDir.path, "no client at \(install.gameDir.path)")

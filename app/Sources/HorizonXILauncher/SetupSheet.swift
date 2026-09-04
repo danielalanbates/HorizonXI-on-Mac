@@ -22,9 +22,9 @@ struct SetupSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Set up FFXI on Mac").font(.title2.bold()).foregroundStyle(Vana.text)
-                Text("This installs everything except the game itself: Apple's Rosetta 2, and "
-                     + "Wine with a blank Windows drive for FFXI to live in. About 250 MB and "
-                     + "five minutes. You can leave it running.")
+                Text("This installs everything except the game itself: Apple's Rosetta 2, the "
+                     + "Wine wrapper, and the patched Wine used to run FFXI. About 450 MB to "
+                     + "download and five minutes. You can leave it running.")
                     .font(.callout).foregroundStyle(Vana.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }

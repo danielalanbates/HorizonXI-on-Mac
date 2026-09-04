@@ -285,7 +285,7 @@ struct Server: Codable, Identifiable, Hashable {
                // Their client dies about a second after login on the DXVK pathway and boots on
                // wined3d/OpenGL. Slower, but a slow world beats a world that exits. See
                // docs/SERVERS-WORKLOG.md, 2026-08-19.
-               renderer: .openGL, msync: false),
+               renderer: .openGL, x87: false, msync: false),
         Server(name: "ValhallaXI", host: "logon.valhalla.group", bootProfile: "valhallaxi.ini",
                verified: false,
                note: "Login host from Valhalla's own connect page (2026-08). Untested by this project.",
@@ -366,7 +366,7 @@ final class ServerStore: ObservableObject {
     }
 
     /// Keep the user's edited hosts, but pick up servers added to `builtins` in later releases.
-    private static func merge(saved: [Server]) -> [Server] {
+    static func merge(saved: [Server]) -> [Server] {
         // A servers.json written before the LSB-only cut still lists the retired worlds. Drop
         // those by name -- but only ones this project shipped and has since retired, never a
         // server the user added themselves.
@@ -391,6 +391,12 @@ final class ServerStore: ObservableObject {
                 // How a world's client is fetched is this project's research, refreshed each
                 // release (URLs go stale); it is not something the user edits.
                 out[i].installURL = b.installURL; out[i].installKind = b.installKind; out[i].installNote = b.installNote
+                // These are measured client-compatibility rules, not user settings. Keeping an
+                // old value silently disabled x87 for HorizonXI after the working cooperative
+                // path shipped, while the UI offered no way to turn it back on. Refresh both
+                // flags from the current built-in entry on every load.
+                out[i].x87 = b.x87
+                out[i].msync = b.msync
             }
         }
         return out
