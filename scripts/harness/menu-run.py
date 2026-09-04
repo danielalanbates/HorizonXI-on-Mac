@@ -55,10 +55,11 @@ GAME_SUFFIXES = ("horizon-loader.exe", "Ashita-cli.exe", "pol.exe", "FFXiMain.dl
 
 # launchd variables that must be clear before a run so an old experiment cannot leak in.
 GUARDED_VARIABLES = ("X87_PROFILE", "X87_SAMPLE", "X87_ENABLE_FMA_CONTRACT",
+                     "DXVK_ENFORCE_NX", "WINE_DISABLE_NX_COMPAT",
                      "FFXI_ON_MAC_DISABLE_X87", "X87_STOCK_HASH_LIST", "X87_LOG_HASH_LIST",
                      "X87_DISABLE_X87_IR", "X87_DISABLE_ALL_FUSIONS", "X87_DISABLE_CACHE",
                      "X87_ENABLE_BRIDGE", "X87_BRIDGE_V2", "X87_NO_IR_CACHE", "X87_NO_TCO_CACHE")
-OVERRIDE_PREFIXES = ("X87_", "DXVK_", "FFXI_ON_MAC_", "D3D9_", "MVK_")
+OVERRIDE_PREFIXES = ("X87_", "DXVK_", "FFXI_ON_MAC_", "D3D9_", "MVK_", "WINE_DISABLE_NX_COMPAT")
 BLOCK_COUNTER_TAG = b"CNT0"
 
 # Scene signatures from the DXVK frame log. The rules screen draws a few hundred primitives,
