@@ -337,3 +337,16 @@ The Mac-side harness addon gained, both guarded behind the pipe being armed:
   memory reconnaissance and live patching possible — `ashita.memory.*` is fully
   reachable. Pattern quirk: `ashita.memory.find` wants **unspaced** hex ("46494E414C");
   spaced patterns silently return 0.
+
+## CORRECTION and resolution — same day, 2026-09-12 (later)
+
+The section above is **wrong about the gate**. "You cannot use that command at this time" was
+caused by a modal *Start Seekers of Adoulin?* prompt that was open on screen; it blocks every menu
+(`/blacklist` and `/search` were refused too). With the prompt dismissed, the native Friend List
+opens normally and shows "No friends registered." The flags/menu-0x0d theory is retracted.
+
+The native friend list has since been made to work, verified with two real characters on the
+local LSB world: **https://github.com/danielalanbates/ffxi-native-friendlist**. The `nativefriends`
+addon redirects FFXiMain's per-slot friend fetch (`0x1d87720` → PlayOnline `0x1d91350`) to entries
+built from `friendsd` (a small service beside the LSB database), and redraws the open menu live.
+Full internals in that repo's `docs/CLIENT_INTERNALS.md`.
