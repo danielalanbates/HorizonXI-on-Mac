@@ -33,8 +33,19 @@ enum X87Sidecar {
     /// Ashita-cli "in experimental wow64 mode"), while this wine runs on indefinitely. So this is
     /// the launch wine whenever it is present, sidecar or no sidecar. See docs/WINE-BUILD.md.
     static func patchedWine() -> URL? {
-        let u = URL(fileURLWithPath: "/Volumes/Games/FFXI/wine-coop/wine/bin/wine")
-        return FileManager.default.isExecutableFile(atPath: u.path) ? u : nil
+        let candidates = [
+            "/Volumes/Games/FFXI/wine-coop/wine/bin/wine",
+            FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/BatesAI/ffxi-runtime/wine-coop/wine/bin/wine").path,
+            "/Volumes/x10/Video Games/Mac/FFXI/wine-coop/wine/bin/wine",
+            "/Volumes/x10/Daniel Backup/Mac Offload/ffxi-runtime/wine-coop/wine/bin/wine"
+        ]
+        for p in candidates {
+            if FileManager.default.isExecutableFile(atPath: p) {
+                return URL(fileURLWithPath: p)
+            }
+        }
+        return nil
     }
 
     /// The cooperative sidecar binary alone, for `ROSETTA_X87_PATH`.
