@@ -553,6 +553,10 @@ final class Runner: ObservableObject {
         // narrator. Never fatal -- a failure here leaves the game exactly as silent as before.
         Narration.prepare(install, enabled: perf.narrateCutscenes, policy: addonPolicy,
                           profile: profile) { [weak self] in self?.appendLine($0) }
+        // Quest guide, same policy gate as narration: LSB / unrestricted only; scrubbed on
+        // allowlist worlds. Never fatal.
+        Guide.prepare(install, enabled: perf.enableVanaguide, policy: addonPolicy,
+                      profile: profile) { [weak self] in self?.appendLine($0) }
         appendLine("==> launching \(install.bootProfileName(profile)) (Ashita \(install.ashitaGeneration.rawValue))")
         // Make the Dock tile say which world is running, under this project's own icon.
         DockIcon.apply(to: install, world: world.isEmpty ? "Vana'diel" : world) { [weak self] in self?.appendLine($0) }

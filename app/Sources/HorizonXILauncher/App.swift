@@ -358,6 +358,22 @@ struct ContentView: View {
              + "reads NPC and cutscene dialogue aloud in a neural voice."
     }
 
+    /// Why the Vanaguide toggle is on, off, or greyed out. Same allowlist rule as narration:
+    /// Vanaguide is on nobody's published list, so HorizonXI / CatsEyeXI / FFEra never get it.
+    private var vanaguideHelp: String {
+        if !Guide.isAvailable {
+            return "Place the Vanaguide repo at Code/Vanaguide (addon root Code/Vanaguide/Vanaguide) "
+                 + "or copy that folder to Downloads/Vanaguide. github.com/danielalanbates/vanaguide"
+        }
+        if !Guide.allowed(by: addonPolicy) {
+            return "\(store.selected?.name ?? "This server") allows only the addons on its "
+                 + "published list, and Vanaguide is not on it. Running it there risks your "
+                 + "account, so the launcher will not install it. Use Local server (LandSandBoat)."
+        }
+        return "Copies Vanaguide into this world's addons folder and adds /addon load vanaguide "
+             + "outside the managed AddonSuite block. Intended for local LandSandBoat only."
+    }
+
     /// A rotating strip of what the launcher knows about the selected world.
     ///
     /// Every line here is something the launcher actually holds -- the server's era, its own
@@ -1190,6 +1206,9 @@ struct ContentView: View {
                     Toggle("Read cutscenes aloud (VanaVoice)", isOn: $perf.narrateCutscenes)
                         .disabled(!Narration.isAvailable || !Narration.allowed(by: addonPolicy))
                         .help(narrationHelp)
+                    Toggle("Quest guide (Vanaguide, local LSB only)", isOn: $perf.enableVanaguide)
+                        .disabled(!Guide.isAvailable || !Guide.allowed(by: addonPolicy))
+                        .help(vanaguideHelp)
                     Toggle("Large address aware", isOn: $perf.largeAddressAware)
                     Toggle("Fast lens flares (skip occlusion wait) — glitches", isOn: $perf.flareReadbackNoWait)
                         .help("Roughly doubles the frame rate: FFXI stops the whole frame four "
@@ -1264,6 +1283,7 @@ struct ContentView: View {
                 .onChange(of: perf.followSoundOutput) { _ in perf.save() }
                 .onChange(of: perf.largeAddressAware) { _ in perf.save() }
                 .onChange(of: perf.narrateCutscenes) { _ in perf.save() }
+                .onChange(of: perf.enableVanaguide) { _ in perf.save() }
                 .onChange(of: perf.metalHUD) { _ in perf.save() }
             } label: {
                 Text("SETUP & DIAGNOSTICS").font(.caption).tracking(2.5)

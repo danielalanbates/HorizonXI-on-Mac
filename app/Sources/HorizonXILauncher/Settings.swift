@@ -59,6 +59,10 @@ struct PerfSettings: Codable {
     /// Off by default: it installs an addon into the game folder and starts a second app, and
     /// neither should happen to somebody who never asked for a narrator.
     var narrateCutscenes = false
+    /// Install Vanaguide (quest / mission guide) into this world's addons folder (see Guide.swift).
+    /// Off by default. The launcher will only honour this on unrestricted / unknown-policy worlds
+    /// (local LandSandBoat); allowlist servers scrub it even if the toggle was left on.
+    var enableVanaguide = false
     /// Large address aware heap hint for the 32-bit client.
     var largeAddressAware = true
     /// Extra environment, one KEY=VALUE per line, for experiments.
@@ -93,6 +97,7 @@ struct PerfSettings: Codable {
         flareReadbackNoWait = b(.flareReadbackNoWait, false)
         largeAddressAware = b(.largeAddressAware, true)
         narrateCutscenes = b(.narrateCutscenes, false)
+        enableVanaguide = b(.enableVanaguide, false)
         extraEnv = ((try? c.decodeIfPresent(String.self, forKey: .extraEnv)) ?? nil) ?? ""
         renderer = ((try? c.decodeIfPresent(Renderer.self, forKey: .renderer)) ?? nil) ?? .metal
     }

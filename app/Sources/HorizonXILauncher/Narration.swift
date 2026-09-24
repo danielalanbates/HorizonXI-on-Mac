@@ -59,6 +59,9 @@ enum Narration {
     }
 
     static var addonSource: URL? {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let gdrive = home.appendingPathComponent("Library/CloudStorage/GoogleDrive-danielalanbates@gmail.com/My Drive/Code/GitHub/vanavoice/addon/vanavoice")
+        if FileManager.default.fileExists(atPath: gdrive.path) { return gdrive }
         let u = URL(fileURLWithPath: appPath).appendingPathComponent("Contents/Resources/vanavoice")
         return FileManager.default.fileExists(atPath: u.path) ? u : nil
     }

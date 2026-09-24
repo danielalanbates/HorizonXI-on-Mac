@@ -22,3 +22,13 @@ scripts/harness/shots/
 
 # archived .app builds are binaries, not source
 archive/app-builds/
+
+# personal / local-server secrets (never commit even if copied into the tree)
+accounts.json
+**/.dbpass
+.dbpass
+*.dbpass
+**/accounts.json
+*.bak
+*.macos26.bak
+
