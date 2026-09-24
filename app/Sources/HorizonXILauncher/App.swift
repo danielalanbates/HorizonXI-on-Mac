@@ -1568,23 +1568,6 @@ struct ContentView: View {
             return
         }
 
-        // When launched directly from Finder/LaunchServices, macOS applies strict TCC sandbox
-        // boundaries to apps accessing external volumes, blocking config write and dlopen of ntdll.so.
-        // Delegate to Terminal context via Play HorizonXI.command (docs/LAUNCH-DEATH.md) so the game
-        // runs with full permissions.
-        if !CommandLine.arguments.contains("--play"), i.gameDir.path.hasPrefix("/Volumes/") {
-            let cmd = "/Applications/Play HorizonXI.command"
-            if FileManager.default.fileExists(atPath: cmd) {
-                runner.appendLine("==> Game data is on an external drive.")
-                runner.appendLine("==> Launching via Terminal context to bypass macOS LaunchServices sandbox restrictions...")
-                let script = "tell application \"Terminal\" to do script \"'\(cmd)' --world '\(server.name)'\""
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-                p.arguments = ["-e", script]
-                try? p.run()
-                return
-            }
-        }
 
         // The local world has to be running before the client can reach it. Start it here rather
         // than making the user press two buttons in the right order — but never build from Play,
