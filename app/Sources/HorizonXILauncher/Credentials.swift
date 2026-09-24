@@ -342,8 +342,12 @@ enum Credentials {
             return String(l)
         }
         text = TextFile.join(lines, terminator: eol)
-        guard replaced, (try? text.write(to: url, atomically: true, encoding: .utf8)) != nil
-        else { return false }
+        guard replaced else { return false }
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            guard (try? text.write(to: url, atomically: false, encoding: .utf8)) != nil else { return false }
+        }
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         return true
     }

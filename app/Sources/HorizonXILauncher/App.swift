@@ -1643,6 +1643,9 @@ struct ContentView: View {
                                   profile: server.bootProfile, server: server.host) {
                 notice = "Could not write config/boot/\(server.bootProfile) — launching with its existing account."
                 runner.appendLine("!! " + notice)
+                if i.gameDir.path.hasPrefix("/Volumes/") {
+                    runner.appendLine("i  Note: If external volume access is restricted by macOS, grant Full Disk Access to FFXI on Mac in System Settings › Privacy & Security › Full Disk Access.")
+                }
             }
         }
         // A world may need a different renderer than the global preference (Gaia XI: DXVK kills
