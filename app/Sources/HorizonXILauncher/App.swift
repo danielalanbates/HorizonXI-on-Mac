@@ -104,6 +104,7 @@ struct ContentView: View {
     @State private var graphics = GraphicsSettings.load(world: nil)
     @State private var showAddons = false
     @State private var addonItems: [AddonSuite.Item] = []
+    @State private var hiddenAddonCount = 0
     @State private var installingExtra = ""
     @State private var addonWarning = ""
     @State private var notice = ""
@@ -513,7 +514,7 @@ struct ContentView: View {
     private var addonPolicyNote: some View {
         let policy = addonPolicy
         let serverName = store.selected?.name ?? "this server"
-        let hidden = addonItems.filter { !policy.allows($0.name) }.count
+        let hidden = hiddenAddonCount
         switch policy {
         case .unknown:
             Text(Self.unknownPolicyNote(serverName))
@@ -584,7 +585,14 @@ struct ContentView: View {
                                     await MainActor.run {
                                         installingExtra = ""
                                         if ok {
-                                            addonItems = AddonSuite.scan(i)
+                                            let all = AddonSuite.scan(i)
+                                            if addonPolicy.isRestricting {
+                                                addonItems = all.filter { addonPolicy.allows($0.name) }
+                                                hiddenAddonCount = all.count - addonItems.count
+                                            } else {
+                                                addonItems = all
+                                                hiddenAddonCount = 0
+                                            }
                                             if let idx = addonItems.firstIndex(where: {
                                                 !$0.isPlugin && $0.name.lowercased() == e.name }) {
                                                 addonItems[idx].enabled = true
@@ -630,12 +638,10 @@ struct ContentView: View {
                         addonRow($item)
                     }
                 }
-                // Shown, not hidden. An allowlist is the server's list of what it has approved,
-                // which is not the same as a list of everything that exists: an addon the player
-                // wrote themselves is on nobody's list and used to vanish from this screen with
-                // no way to manage it. The rules still get stated plainly, and nothing here is
-                // enabled by "Enable all" -- the choice is the player's to make knowingly.
-                if addonItems.contains(where: { !addonPolicy.allows($0.name) }) {
+                // Shown only on unrestricted/unfiltered worlds where no published allowlist exists.
+                // When an allowlist is in effect (e.g. HorizonXI), unapproved addons are strictly
+                // excluded from the list to prevent accidental loading or confusion.
+                if !addonPolicy.isRestricting && addonItems.contains(where: { !addonPolicy.allows($0.name) }) {
                     Section("Not on \(store.selected?.name ?? "this server")'s approved list") {
                         Text(unlistedNote)
                             .font(.caption2).foregroundStyle(Vana.ember)
@@ -679,18 +685,11 @@ struct ContentView: View {
                         showAddons = false
                         return
                     }
-                    // What is enabled here is what gets written, including anything from the
-                    // unlisted section. Force-disabling those behind the player's back is what
-                    // removed the cursor fix on 2026-08-22, and now that they are visible and
-                    // individually toggled, switching them off would be overriding a choice
-                    // rather than preventing an accident. It is said out loud instead.
-                    let unapproved = addonItems.filter { $0.enabled && !addonPolicy.allows($0.name) }
-                    if let i = active, !AddonSuite.write(addonItems, to: i) {
+                    let itemsToWrite = addonPolicy.isRestricting
+                        ? addonItems.filter { addonPolicy.allows($0.name) }
+                        : addonItems
+                    if let i = active, !AddonSuite.write(itemsToWrite, to: i) {
                         notice = "Could not write scripts/default.txt — its launcher markers are missing."
-                    } else if !unapproved.isEmpty, addonPolicy.isRestricting {
-                        notice = "Addon list saved, including \(unapproved.count) "
-                               + "\(store.selected?.name ?? "this server") does not approve: "
-                               + unapproved.map(\.name).joined(separator: ", ") + "."
                     } else {
                         notice = "Addon list saved. It takes effect the next time you press Play."
                     }
@@ -1742,7 +1741,14 @@ struct ContentView: View {
                    + "above and point the launcher at your wrapper app."
             return
         }
-        addonItems = AddonSuite.scan(i)
+        let all = AddonSuite.scan(i)
+        if addonPolicy.isRestricting {
+            addonItems = all.filter { addonPolicy.allows($0.name) }
+            hiddenAddonCount = all.count - addonItems.count
+        } else {
+            addonItems = all
+            hiddenAddonCount = 0
+        }
         let bad = AddonSuite.mismatchedPlugins(i)
         addonWarning = bad.isEmpty ? "" :
             "Ashita refused these plugins on the last run because they are built for a different "
